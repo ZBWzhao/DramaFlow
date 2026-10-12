@@ -1,0 +1,31 @@
+__pycache__/
+*.pyc
+*.sqlite
+*.sqlite-journal
+.pytest_cache/
+.coverage
+htmlcov/
+.env
+.agent/mcp.json
+.agent/sessions/
+.codebuddy/
+agent-browser/
+toonflow-app-source/
+_install_staging/
+
+# 前端（Vue + Vite）：依赖与构建产物都不入库
+web-vue/node_modules/
+web-vue/dist/
+web-vue/*.log
+web-vue/**/*.log
+
+# 运行产物
+acceptance_report.json
+tmp/
+output/
+*.log
+*.canvas.tmp
+
+# 本地会话、画布和生成素材不入库，只保留工作区说明
+workspace/*
+!workspace/README.md

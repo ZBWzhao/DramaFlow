@@ -1,0 +1,26 @@
+{
+  "task": "读 sample.py，统计它的行数、字符数和 top3 高频词",
+  "model": "deepseek-chat",
+  "hand": {
+    "usage": {
+      "input_tokens": 1950,
+      "output_tokens": 208,
+      "total_tokens": 2157
+    },
+    "steps": 5,
+    "elapsed": 2.0873549999978422
+  },
+  "langgraph": {
+    "usage": {
+      "input_tokens": 1840,
+      "output_tokens": 283,
+      "total_tokens": 2123
+    },
+    "steps": 6,
+    "elapsed": 4.874385350000011
+  },
+  "core_lines": 1449,
+  "lg_lines": 179,
+  "lg_deps_mb": 9.2,
+  "lg_dep_count": 11
+}

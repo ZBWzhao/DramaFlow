@@ -1,0 +1,41 @@
+{
+  "name": "dramaTeam",
+  "displayName": "短剧生产团队",
+  "description": "导演统筹：编剧写剧本、美术定资产、分镜师拆镜头、提示词师写提示词、审校最后把关，产出一张可导出的短剧生产图。",
+  "version": "1.0.0",
+  "author": "toonflow-py-lab",
+  "entry": "director",
+  "members": {
+    "director": {
+      "description": "定约束与验收标准，把任务派给各环节，最后核对产出是否达标并汇总。",
+      "instructions": "members/director.md",
+      "delegates": ["screenwriter", "asset_designer", "storyboarder", "prompt_writer", "reviewer"],
+      "tools": ["get_canvas", "read_file", "list_dir", "export_prompt"]
+    },
+    "screenwriter": {
+      "description": "写剧本正文：场次、人物、动作、台词，落到画布的 text 节点。",
+      "instructions": "members/screenwriter.md",
+      "tools": ["get_canvas", "add_nodes", "update_node", "connect_nodes", "set_text", "read_file"]
+    },
+    "asset_designer": {
+      "description": "给角色/场景/道具建设定节点，写死稳定特征（consistency_tags），供后续提示词引用。",
+      "instructions": "members/asset_designer.md",
+      "tools": ["get_canvas", "add_nodes", "update_node", "connect_nodes", "set_text", "read_file"]
+    },
+    "storyboarder": {
+      "description": "把剧本拆成结构化镜头（6 字段 + 时长），用 set_storyboard 写入以免时长失控。",
+      "instructions": "members/storyboarder.md",
+      "tools": ["get_canvas", "add_nodes", "update_node", "connect_nodes", "set_storyboard", "read_file"]
+    },
+    "prompt_writer": {
+      "description": "为每个片段写提示词，用 {{ref N}} 引用资产编号，不自己写参考声明。",
+      "instructions": "members/prompt_writer.md",
+      "tools": ["get_canvas", "add_nodes", "update_node", "connect_nodes", "set_text", "export_prompt", "read_file"]
+    },
+    "reviewer": {
+      "description": "读画布做体检：时长预算、编号可展开、片段覆盖、资产一致性；只报问题不改图。",
+      "instructions": "members/reviewer.md",
+      "tools": ["get_canvas", "read_file", "export_prompt"]
+    }
+  }
+}

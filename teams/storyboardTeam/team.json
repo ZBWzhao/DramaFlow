@@ -1,0 +1,26 @@
+{
+  "name": "storyboardTeam",
+  "displayName": "分镜创作团队",
+  "description": "导演统筹，编剧起草，审稿核查，产出一份可执行的文字分镜方案。",
+  "version": "1.0.0",
+  "author": "toonflow-py-lab",
+  "entry": "director",
+  "members": {
+    "director": {
+      "description": "明确创作边界与验收标准，拆分任务，最后汇总成统一方案。",
+      "instructions": "members/director.md",
+      "delegates": ["writer", "reviewer"],
+      "tools": ["list_dir", "read_file"]
+    },
+    "writer": {
+      "description": "根据导演给定的约束写出文字分镜（镜头号、画面、台词、时长）。",
+      "instructions": "members/writer.md",
+      "tools": ["list_dir", "read_file", "word_count"]
+    },
+    "reviewer": {
+      "description": "核查剧情覆盖、镜头可执行性与前后连续性，提出可操作的修改项。",
+      "instructions": "members/reviewer.md",
+      "tools": ["list_dir", "read_file"]
+    }
+  }
+}

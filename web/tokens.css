@@ -1,0 +1,113 @@
+/*
+ * 设计 token —— 体系照抄 Toonflow（apps/web/src/assets/main.scss + App.vue 运行期注入），
+ * 配色沿用本项目的暗色创作台基调。
+ *
+ * 照抄的三个关键决策：
+ *   1. 单一 --ui-radius 派生 small/large —— 改一个值整站圆角联动（Toonflow 允许用户 0–16px 调）
+ *   2. 主色阶用 color-mix 生成，不写死 9 个色值（每级混 10% 底色）
+ *   3. 控件尺寸成体系（28 / 32 / 40），而不是每个按钮随手写一个 px
+ */
+
+:root {
+  /* ---------- 圆角（Toonflow: 8px 基准 → 4 / 12） ---------- */
+  --ui-radius: 8px;
+  --ui-radius-small: 4px;
+  --ui-radius-large: 12px;
+  --radius-pill: 999px;
+
+  /* ---------- 底色 / 卡片 / 描边 ---------- */
+  --bg: #0b1020;
+  --bg-overlay: #121a2f;
+  --bg-elevated: #0f1730;
+  --card: rgba(255, 255, 255, 0.045);
+  --card-strong: rgba(255, 255, 255, 0.075);
+  --line: rgba(255, 255, 255, 0.09);
+  --line-strong: rgba(255, 255, 255, 0.16);
+
+  /* ---------- 文字 ---------- */
+  --text: #e8ecf8;
+  --text-2: #a8b3cf;
+  --text-3: #7b88ab;
+
+  /* ---------- 主色与色阶（Toonflow 默认 #409eff，色阶由 color-mix 生成） ---------- */
+  --primary: #409eff;
+  --primary-light-1: color-mix(in srgb, var(--primary) 90%, var(--bg));
+  --primary-light-3: color-mix(in srgb, var(--primary) 70%, var(--bg));
+  --primary-light-5: color-mix(in srgb, var(--primary) 50%, var(--bg));
+  --primary-light-7: color-mix(in srgb, var(--primary) 30%, var(--bg));
+  --primary-light-9: color-mix(in srgb, var(--primary) 14%, var(--bg));
+  --success: #18a17c;
+  --warning: #e89524;
+  --danger: #e34b83;
+  --violet: #7b61ff;
+
+  /* ---------- 间距刻度（Toonflow 用字面值，这里统一成 4 的倍数） ---------- */
+  --sp-1: 4px;
+  --sp-2: 8px;
+  --sp-3: 12px;
+  --sp-4: 16px;
+  --sp-5: 20px;
+  --sp-6: 24px;
+  --sp-8: 32px;
+
+  /* ---------- 字号 ---------- */
+  --fs-xs: 11px;
+  --fs-sm: 12px;
+  --fs-base: 13px;
+  --fs-md: 14px;
+  --fs-lg: 16px;
+  --fs-xl: 20px;
+  --fs-title: clamp(26px, 3.4vw, 34px);
+  --font-ui: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", system-ui, sans-serif;
+  --font-mono: ui-monospace, "Cascadia Code", Consolas, monospace;
+
+  /* ---------- 控件尺寸（对齐 Toonflow：28 / 32 / 40） ---------- */
+  --ctl-sm: 28px;
+  --ctl-md: 32px;
+  --ctl-lg: 40px;
+
+  /* ---------- 阴影（三级，照 Toonflow 用轻阴影 + 边框而非重阴影） ---------- */
+  --shadow-1: 0 2px 8px rgba(0, 0, 0, 0.22);
+  --shadow-2: 0 6px 20px rgba(0, 0, 0, 0.28);
+  --shadow-3: 0 18px 48px rgba(0, 0, 0, 0.45);
+
+  /* ---------- 动效（Toonflow：端口 120ms / 通用 180ms / 聚焦 300ms） ---------- */
+  --dur-fast: 120ms;
+  --dur-base: 180ms;
+  --dur-slow: 300ms;
+  --ease-out: cubic-bezier(0.2, 0.8, 0.2, 1);
+
+  /* ---------- 画布 ---------- */
+  --grid-dot: rgba(255, 255, 255, 0.07);
+  --edge: #7b88ab;
+  --node-w: 220px;
+}
+
+* { box-sizing: border-box; }
+
+html, body { height: 100%; }
+
+body {
+  margin: 0;
+  background:
+    radial-gradient(1100px 620px at 10% -12%, #1b2a52 0%, transparent 55%),
+    radial-gradient(900px 520px at 100% 0%, #2a1c4a 0%, transparent 52%),
+    var(--bg);
+  color: var(--text);
+  font: var(--fs-base) / 1.6 var(--font-ui);
+  -webkit-font-smoothing: antialiased;
+}
+
+/* 滚动条：6px、圆角、描边色（照 Toonflow main.scss:53-65） */
+::-webkit-scrollbar { width: 6px; height: 6px; }
+::-webkit-scrollbar-thumb { background: var(--line-strong); border-radius: 4px; }
+::-webkit-scrollbar-thumb:hover { background: var(--text-3); }
+::-webkit-scrollbar-track { background: transparent; }
+
+/* 焦点环：键盘可达性（Toonflow: outline 2px primary / offset 3px） */
+:focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; }
+
+/* 减少动效偏好：全部动画关掉（Toonflow 大量使用，这里做一个统一兜底） */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation-duration: 0.01ms !important; transition-duration: 0.01ms !important; }
+}

@@ -1,0 +1,154 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>toonflow-py-lab · 短剧工作台</title>
+  <link rel="stylesheet" href="/tokens.css" />
+  <link rel="stylesheet" href="/style.css" />
+</head>
+<body>
+  <div class="app">
+    <!-- ============ 全屏画布（默认视图） ============ -->
+    <section id="view-canvas" class="view">
+      <div id="canvas-stage" class="canvas-stage">
+        <div id="canvas-world" class="canvas-world">
+          <svg id="canvas-edges"></svg>
+          <div id="canvas-nodes"></div>
+        </div>
+      </div>
+
+      <!-- 左下控件组（40×40 图标按钮，对齐 Toonflow canvasControls） -->
+      <div class="canvas-controls">
+        <button id="canvas-run" class="ctl ctl-accent" title="一键生成：按拓扑序跑所有生成节点">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M13 2 4.5 13H11l-1 9 8.5-11H12z"/></svg>
+        </button>
+        <button id="canvas-export" class="ctl" title="导出全片提示词">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v12m0 0 4-4m-4 4-4-4M4 19h16"/></svg>
+        </button>
+        <button id="canvas-arrange" class="ctl" title="按依赖整理成流程图">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="5" rx="1.5"/><rect x="14" y="3" width="7" height="5" rx="1.5"/><rect x="8" y="16" width="8" height="5" rx="1.5"/><path d="M6.5 8v4h11V8M12 12v4"/></svg>
+        </button>
+        <button id="canvas-fit" class="ctl" title="适应窗口">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M4 9V5a1 1 0 0 1 1-1h4M20 15v4a1 1 0 0 1-1 1h-4M15 4h4a1 1 0 0 1 1 1v4M9 20H5a1 1 0 0 1-1-1v-4"/><circle cx="12" cy="12" r="2.5"/></svg>
+        </button>
+        <button id="canvas-reload" class="ctl" title="刷新画布">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M20 11a8 8 0 1 0-2.3 5.7M20 5v6h-6"/></svg>
+        </button>
+        <span id="canvas-meta" class="ctl-meta">—</span>
+      </div>
+
+      <div id="canvas-toast" class="canvas-toast hidden"></div>
+      <div id="canvas-problems" class="canvas-problems hidden"></div>
+
+      <aside id="canvas-detail" class="canvas-detail">
+        <p class="dim">点击节点查看详情</p>
+      </aside>
+    </section>
+
+    <!-- ============ 对话视图（居中单列，对齐 Toonflow 首页） ============ -->
+    <section id="view-chat" class="view hidden">
+      <div id="stream" class="stream">
+        <div class="empty">
+          <h2>做一集短剧</h2>
+          <p>“把『外卖员深夜送单，发现店员是失散多年的姐姐』做成 60 秒短剧生产图”</p>
+          <p class="dim">或：“派一个子 Agent 统计 workspace 下 *.py 的规模”</p>
+        </div>
+      </div>
+
+      <footer class="composer">
+        <div class="composer-card">
+          <textarea id="input" rows="2" placeholder="给 Agent 下个任务…（Enter 发送，Shift+Enter 换行）"></textarea>
+          <div class="composer-bar">
+            <select id="mode" class="select compact">
+              <option value="agent">普通 Agent</option>
+              <option value="team">团队 · storyboardTeam</option>
+              <option value="dramaTeam">团队 · dramaTeam</option>
+            </select>
+            <span id="status" class="status-idle">空闲</span>
+            <span class="spacer"></span>
+            <button id="stop-btn" class="btn ghost" disabled>停止</button>
+            <button id="send-btn" class="btn primary">发送</button>
+          </div>
+        </div>
+      </footer>
+    </section>
+
+    <!-- ============ 浮动：左上（品牌 + 画布切换 + 信息） ============ -->
+    <div class="dock dock-left">
+      <div class="brand">
+        <span class="brand-mark">TF</span>
+        <span class="brand-name">短剧工作台</span>
+      </div>
+      <span class="dock-sep"></span>
+      <select id="canvas-picker" class="select compact" title="切换画布"></select>
+      <span class="dock-sep"></span>
+      <button id="info-toggle" class="ctl" title="会话信息 / 工具 / 技能">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 16v-5M12 8h.01"/></svg>
+      </button>
+    </div>
+
+    <!-- ============ 浮动：顶部居中（视图切换，胶囊 segmented） ============ -->
+    <div class="dock dock-center">
+      <div class="segmented">
+        <button class="tab active" data-view="canvas">画布</button>
+        <button class="tab" data-view="chat">对话</button>
+      </div>
+    </div>
+
+    <!-- ============ 浮动：右上（工作区 + 会话） ============ -->
+    <div class="dock dock-right">
+      <span class="chip"><b id="workspace">—</b></span>
+      <span class="chip"><b id="session-id">—</b></span>
+    </div>
+
+    <!-- ============ 信息抽屉（点左上 ⓘ 打开） ============ -->
+    <aside id="info-drawer" class="drawer hidden">
+      <header class="drawer-head">
+        <b>会话信息</b>
+        <span class="spacer"></span>
+        <button id="info-close" class="ctl" title="关闭">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M6 6l12 12M18 6 6 18"/></svg>
+        </button>
+      </header>
+      <section class="panel">
+        <h3>会话统计</h3>
+        <div class="row"><span>轮次</span><b id="runs">0</b></div>
+        <div class="row"><span>压缩次数</span><b id="compactions">0</b></div>
+        <div class="row"><span>上下文字符</span><b id="chars">0</b></div>
+        <div class="row"><span>主线累计 tokens</span><b id="usage-main">0</b></div>
+        <div id="usage-subs" class="subs"></div>
+      </section>
+      <section class="panel">
+        <h3>可用技能 <span class="dim" id="skill-chars">0 / 0</span></h3>
+        <ul id="skill-list" class="list"></ul>
+      </section>
+      <section class="panel">
+        <h3>子 Agent</h3>
+        <ul id="subagent-list" class="list"></ul>
+      </section>
+      <section class="panel">
+        <h3>已装载工具</h3>
+        <ul id="tool-list" class="list"></ul>
+      </section>
+    </aside>
+
+    <!-- ============ 导出弹层 ============ -->
+    <div id="export-modal" class="modal hidden">
+      <div class="modal-box">
+        <header class="modal-head">
+          <b>全片提示词</b>
+          <span id="export-path" class="dim"></span>
+          <span class="spacer"></span>
+          <button id="export-copy" class="btn ghost">复制</button>
+          <button id="export-close" class="btn ghost">关闭</button>
+        </header>
+        <pre id="export-body">导出中…</pre>
+      </div>
+    </div>
+  </div>
+
+  <script src="/canvas.js"></script>
+  <script src="/app.js"></script>
+</body>
+</html>

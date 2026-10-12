@@ -1,0 +1,27 @@
+{
+  "servers": {
+    "dramaflow": {
+      "enabled": true,
+      "transport": "stdio",
+      "command": "python",
+      "args": ["-m", "mcp_server.server"],
+      "cwd": "C:/Users/Lenovo/Desktop/toonflow-py-lab",
+      "allow_tools": ["list_canvases", "inspect_canvas"],
+      "deny_tools": [],
+      "timeout_seconds": 30,
+      "max_result_chars": 16000
+    },
+    "remote-example": {
+      "enabled": false,
+      "transport": "streamable-http",
+      "url": "http://127.0.0.1:8765/mcp",
+      "headers_from": {
+        "Authorization": "REMOTE_MCP_AUTHORIZATION"
+      },
+      "allow_tools": [],
+      "deny_tools": ["dangerous_tool"],
+      "timeout_seconds": 30,
+      "max_result_chars": 16000
+    }
+  }
+}

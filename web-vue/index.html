@@ -1,0 +1,30 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>toonflow-py-lab · 短剧工作台</title>
+  </head>
+  <body>
+    <div id="app"></div>
+    <!-- 启动期错误捕获：白屏时把原因显示出来，别让人对着空页面猜 -->
+    <script>
+      function showBootError(title, detail) {
+        const box = document.createElement("pre");
+        box.id = "boot-error";
+        box.style.cssText =
+          "position:fixed;inset:0;z-index:9999;margin:0;padding:24px;overflow:auto;" +
+          "background:#fff5f5;color:#c53030;font:12px/1.6 ui-monospace,Consolas,monospace;white-space:pre-wrap;";
+        box.textContent = `[启动失败] ${title}\n\n${detail}`;
+        document.body.appendChild(box);
+      }
+      window.addEventListener("error", (e) =>
+        showBootError(e.message || "未知错误", (e.error && e.error.stack) || "")
+      );
+      window.addEventListener("unhandledrejection", (e) =>
+        showBootError("未处理的 Promise 拒绝", (e.reason && (e.reason.stack || e.reason.message)) || String(e.reason))
+      );
+    </script>
+    <script type="module" src="/src/main.js"></script>
+  </body>
+</html>
