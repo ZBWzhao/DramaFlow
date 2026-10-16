@@ -248,13 +248,14 @@ watch(lastActivity, () => scrollToBottom());
 <template>
   <div class="chat-view">
     <div class="session-strip">
+      <span class="session-caption">对话记录</span>
       <el-select
         :model-value="state.sessionId"
         :loading="state.sessionLoading"
         :disabled="state.running"
         placeholder="新会话（发送后自动保存）"
         size="small"
-        aria-label="当前 Agent 会话"
+        aria-label="当前对话会话"
         @update:model-value="onSessionChange"
       >
         <el-option

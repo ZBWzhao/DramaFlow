@@ -118,6 +118,13 @@ body {
 .dock-center { top: 15px; left: 50%; transform: translateX(-50%); padding: 3px; }
 .dock-right { top: 15px; right: 15px; }
 .dock-sep { width: 1px; height: 16px; background: var(--line); }
+.dock-label {
+  color: var(--text-3);
+  font-size: 11px;
+  white-space: nowrap;
+}
+.project-select { width: 190px; }
+.project-select .el-select__wrapper { box-shadow: none; }
 
 .workspace-state {
   display: inline-flex; align-items: center; gap: 7px;
@@ -458,6 +465,12 @@ body {
   padding: 9px 12px 8px;
   border-bottom: 1px solid var(--line);
   background: rgba(255,255,255,.86);
+}
+.session-caption {
+  flex: 0 0 auto;
+  color: var(--text-3);
+  font-size: 11px;
+  white-space: nowrap;
 }
 .session-strip .el-select { flex: 1; min-width: 0; }
 .session-strip .el-select__wrapper { border-radius: var(--ui-radius); box-shadow: none; background: var(--card); }

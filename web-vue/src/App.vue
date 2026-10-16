@@ -32,18 +32,20 @@ const agentVisible = ref(true);
   <div class="app">
     <CanvasPanel />
 
-    <!-- 左上：品牌 + 画布切换 + 信息 -->
+    <!-- 左上：项目入口。会话只在 Agent 面板中管理，避免同一会话出现两处入口。 -->
     <div class="dock dock-left">
       <div class="brand">
         <span class="brand-mark">TF</span>
         <span class="brand-name">短剧工作台</span>
       </div>
       <span class="dock-sep" />
+      <span class="dock-label">项目</span>
       <el-select
         :model-value="state.canvasName"
         size="small"
-        style="width: 150px"
-        title="切换画布"
+        class="project-select"
+        title="切换项目工作区"
+        aria-label="当前项目工作区"
         :disabled="state.running || state.canvasBusy"
         @update:model-value="onPickCanvas"
       >
@@ -67,10 +69,9 @@ const agentVisible = ref(true);
       </span>
     </div>
 
-    <!-- 右上：工作区 + 会话 -->
+    <!-- 右上：只保留工作区状态；当前会话在 Agent 面板顶部统一管理。 -->
     <div class="dock dock-right">
       <span class="chip" :title="state.workspace">{{ state.workspace || "—" }}</span>
-      <span class="chip" :title="state.sessionId || ''">{{ state.sessionId || "未开始" }}</span>
     </div>
 
     <InfoDrawer v-if="state.drawerOpen" />
