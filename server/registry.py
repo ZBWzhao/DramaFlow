@@ -394,7 +394,11 @@ class SessionRegistry:
                 session = self.sessions[sid].agent.session if sid in self.sessions else stored_session
                 meta = self._meta(session)
                 bound_canvas = meta.get("canvas")
-                if canvas and bound_canvas not in (None, "", canvas):
+                # 项目会话必须严格隔离。未绑定画布的旧测试会话不能出现在
+                # 任意项目的下拉框中，否则 read_file / acceptance 等测试记录
+                # 会和真实短剧会话混在一起。调用方不传 canvas 时仍可查看全部
+                # 会话，便于维护和迁移旧数据。
+                if canvas is not None and bound_canvas != canvas:
                     continue
                 first_user = next(
                     (m.get("content", "") for m in self._active_message_entries(session) if m.get("role") == "user" and m.get("content") != "[之前的对话摘要]"),
