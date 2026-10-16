@@ -42,16 +42,54 @@ from core.loader import list_tools  # noqa: E402
 from core.canvas import NODE_SPEC, Canvas, CanvasError  # noqa: E402
 from core.canvas_repository import CanvasConflictError  # noqa: E402
 from core.media import default_registry  # noqa: E402
+from core.composition import (  # noqa: E402
+    CompositionError,
+    CompositionService,
+    ffmpeg_capabilities,
+    sha256_file,
+    write_srt,
+)
+from core.media_asset_repository import MediaAssetRecord  # noqa: E402
+from core.tts import TTSRegistry  # noqa: E402
 from core.media_job_store import MediaJob, MediaJobUncertain, MediaJobWorker, create_media_job_store  # noqa: E402
 from core.invocation_store import InvocationState, canonical_hash, canonical_json, new_approval  # noqa: E402
 from core.runtime_store import event_id_after, validate_event_id  # noqa: E402
 from core.skills import read_skill_file, skills_prompt_section  # noqa: E402
 from core.team import TEAMS_ROOT, TeamRunner, load_team  # noqa: E402
+from core.production import ProductionRunner  # noqa: E402
+from core.production_repository import ProductionRunConflict  # noqa: E402
 from server.registry import SessionRegistry  # noqa: E402
 
 registry = SessionRegistry(llm=LLM(Settings.load()), workspace=str(WORKSPACE))
 media_jobs = create_media_job_store()
 media_worker: MediaJobWorker | None = None
+composition_service = CompositionService(WORKSPACE)
+tts_registry = TTSRegistry(WORKSPACE)
+
+
+async def _register_media_asset(
+    *, canvas: str, node_id: str, media_type: str, path: str, content_type: str,
+    provider: str = "", generation_id: str = "", operation_id: str = "",
+) -> None:
+    target = (WORKSPACE / str(path).replace("\\", "/").lstrip("/")).resolve()
+    try:
+        target.relative_to(WORKSPACE.resolve())
+    except ValueError as exc:
+        raise ValueError(f"媒体资产路径越界：{path}") from exc
+    await registry.media_assets.register(
+        MediaAssetRecord.create(
+            canvas=canvas,
+            node_id=node_id,
+            media_type=media_type,
+            storage_key=path,
+            content_type=content_type,
+            file_size=target.stat().st_size if target.is_file() else 0,
+            sha256=sha256_file(target) if target.is_file() else "",
+            provider=provider,
+            generation_id=generation_id,
+            remote_operation_id=operation_id,
+        )
+    )
 
 
 @asynccontextmanager
@@ -152,6 +190,16 @@ class RunCanvasRequest(BaseModel):
     generate_audio: bool = False
     approval_id: str = ""
     revision: int | None = None
+    production_run_id: str | None = None
+
+
+class ComposeCanvasRequest(BaseModel):
+    canvas: str = "main"
+    only: list[str] = []
+    approved: bool = False
+    approval_id: str = ""
+    revision: int | None = None
+    production_run_id: str | None = None
 
 
 class MoveNodeRequest(BaseModel):
@@ -161,9 +209,17 @@ class MoveNodeRequest(BaseModel):
     revision: int | None = None
 
 
+class UpdateCanvasNodeRequest(BaseModel):
+    canvas: str = "main"
+    label: str | None = None
+    status: Literal["draft", "ready", "generating", "done", "error"] | None = None
+    data: dict[str, Any] | None = None
+    revision: int | None = None
+
+
 class CreateCanvasNodeRequest(BaseModel):
     canvas: str = "main"
-    type: Literal["text", "storyboard", "asset", "prompt", "image_gen", "video_gen"]
+    type: Literal["text", "storyboard", "asset", "prompt", "image_gen", "video_gen", "audio", "tts_gen", "timeline"]
     label: str
     x: float
     y: float
@@ -191,6 +247,7 @@ class TeamRequest(BaseModel):
     team: str = "storyboardTeam"
     session_id: str | None = None
     canvas: str = "main"
+    production_run_id: str | None = None
 
 
 def _line(payload: dict[str, Any]) -> bytes:
@@ -200,6 +257,47 @@ def _line(payload: dict[str, Any]) -> bytes:
 def _require_revision(canvas: Canvas, expected: int | None) -> None:
     if expected is not None and canvas.revision != expected:
         raise CanvasConflictError(canvas.name, expected, canvas.revision)
+
+
+async def _update_production_stage(
+    production_run_id: str | None,
+    canvas_name: str,
+    stage: str,
+    stage_status: str,
+    run_status: str,
+    *,
+    problems: list[str] | None = None,
+    artifact_ids: list[str] | None = None,
+) -> dict[str, Any] | None:
+    """CAS-update a production checkpoint from approval and Worker paths."""
+    if not production_run_id:
+        return None
+    for _ in range(4):
+        run = await registry.production_runs.get(production_run_id)
+        if run is None:
+            raise ValueError("生产任务不存在")
+        if run.get("canvas_name") != canvas_name:
+            raise ValueError("生产任务与当前画布不匹配")
+        current = dict((run.get("stages") or {}).get(stage) or {})
+        current.update(
+            {
+                "stage": stage,
+                "status": stage_status,
+                "problems": list(problems or []),
+                "artifact_ids": list(artifact_ids or current.get("artifact_ids") or []),
+                "updated_at": time.time(),
+            }
+        )
+        if stage_status in {"succeeded", "failed"}:
+            current["finished_at"] = time.time()
+        run["stages"] = {**(run.get("stages") or {}), stage: current}
+        run["current_stage"] = stage
+        run["status"] = run_status
+        try:
+            return await registry.production_runs.save(run, int(run.get("revision") or 0))
+        except ProductionRunConflict:
+            continue
+    raise RuntimeError("生产任务状态并发更新冲突，请刷新后重试")
 
 
 # ---------------------------------------------------------------------------
@@ -261,10 +359,13 @@ async def _execute_agent_run(live: Any, req: ChatRequest, run_id: str) -> None:
     assert owner is not None
     watcher = asyncio.create_task(_watch_shared_cancel(live, run_id, owner))
     live.agent.external_followup_loader = lambda: registry.run_states.drain_followups(run_id)
-    status, error = "done", None
+    status, error = "running", None
     try:
         await live.bus.publish("session", session_id=live.id, runs=live.runs, run_id=run_id)
         await live.agent.run(req.prompt)
+        status = live.agent.last_status
+        if status == "error":
+            error = live.agent.last_finish_reason or "agent_error"
         await live.bus.flush()
     except (AgentAborted, asyncio.CancelledError):
         watcher.cancel()
@@ -281,6 +382,7 @@ async def _execute_agent_run(live: Any, req: ChatRequest, run_id: str) -> None:
         live.agent.accepting_followups = False
         live.agent.external_followup_loader = None
         try:
+            await registry.session_repository.flush()
             await live.bus.flush()
             await live.bus.publish("done", session_id=live.id, stats=registry.stats(live.id), status=status)
         finally:
@@ -298,10 +400,33 @@ async def _execute_team_run(live: Any, req: TeamRequest, run_id: str) -> None:
     assert owner is not None
     watcher = asyncio.create_task(_watch_shared_cancel(live, run_id, owner))
     status, error, result = "done", None, None
+    user_entry_id: str | None = None
     try:
         await live.bus.publish("session", session_id=live.id, team=req.team, run_id=run_id)
-        runner = TeamRunner.create(req.team, registry.llm, registry.tools, live.manager, live.bus)
-        result = await runner.run(req.task)
+        # 团队成员有各自的子会话，但用户输入和团队最终交付仍应进入父会话。
+        # 否则刷新页面后整轮对话会消失，重发/分支也没有可操作的消息节点。
+        user_entry_id = live.agent.session.append({"role": "user", "content": req.task})
+        live.bus.emit("user_message_committed", entry_id=user_entry_id)
+        team_runner = TeamRunner.create(req.team, registry.llm, registry.tools, live.manager, live.bus)
+        if req.team == "dramaTeam":
+            runner = ProductionRunner(
+                team_runner,
+                registry.production_runs,
+                session_id=live.id,
+                canvas_name=req.canvas,
+                production_run_id=req.production_run_id,
+            )
+            result = await runner.run(req.task)
+        else:
+            result = await team_runner.run(req.task)
+        status = result.status
+        if result.final.strip():
+            assistant_entry_id = live.agent.session.append({"role": "assistant", "content": result.final})
+            live.bus.emit(
+                "assistant_message_committed",
+                entry_id=assistant_entry_id,
+                parent_id=user_entry_id,
+            )
         await live.bus.flush()
     except asyncio.CancelledError:
         watcher.cancel()
@@ -322,9 +447,11 @@ async def _execute_team_run(live: Any, req: TeamRequest, run_id: str) -> None:
                     "result": result.final,
                     "usage": result.usage.as_dict(),
                     "usage_all": result.usage_all.as_dict(),
+                    "production_run_id": result.production_run_id,
                 }
             )
         try:
+            await registry.session_repository.flush()
             await live.bus.flush()
             await live.bus.publish("team_done", session_id=live.id, **payload)
         finally:
@@ -529,6 +656,27 @@ async def teams() -> dict[str, Any]:
         except Exception as exc:  # noqa: BLE001
             out.append({"name": path.parent.name, "error": str(exc)})
     return {"teams": out}
+
+
+@app.get("/api/production/runs/{production_run_id}")
+async def production_run_detail(production_run_id: str) -> dict[str, Any]:
+    try:
+        item = await registry.production_runs.get(production_run_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    if item is None:
+        raise HTTPException(status_code=404, detail="生产任务不存在")
+    return item
+
+
+@app.get("/api/sessions/{session_id}/production-run")
+async def latest_production_run(session_id: str) -> dict[str, Any]:
+    try:
+        registry.session_path(session_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    item = await registry.production_runs.latest_for_session(session_id)
+    return {"production_run": item}
 
 
 @app.post("/api/agent/cancel")
@@ -784,6 +932,7 @@ def _generation_execution_plan(req: RunCanvasRequest, canvas: Canvas) -> tuple[l
         "resolution": req.resolution,
         "ratio": req.ratio,
         "generate_audio": req.generate_audio,
+        "production_run_id": req.production_run_id,
         "jobs": planned,
     }
     return jobs, payload
@@ -866,6 +1015,7 @@ async def run_canvas(req: RunCanvasRequest) -> dict[str, Any]:
         "resolution": req.resolution,
         "ratio": req.ratio,
         "generate_audio": req.generate_audio,
+        "production_run_id": req.production_run_id,
         "jobs": frozen_jobs,
     }
     # generation_id 在入队前写入节点；旧 Worker 返回时必须再次校验它。
@@ -886,6 +1036,14 @@ async def run_canvas(req: RunCanvasRequest) -> dict[str, Any]:
             payload_json=canonical_json(queued_payload),
         )
     )
+    await _update_production_stage(
+        req.production_run_id,
+        canvas.name,
+        "generating",
+        "running",
+        "generating",
+        artifact_ids=[item["node_id"] for item in frozen_jobs if item["ready"]],
+    )
     return {
         "ok": True,
         "accepted": True,
@@ -896,9 +1054,334 @@ async def run_canvas(req: RunCanvasRequest) -> dict[str, Any]:
     }
 
 
+def _composition_execution_plan(req: ComposeCanvasRequest, canvas: Canvas) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+    jobs = canvas.timeline_jobs()
+    if req.only:
+        selected = set(req.only)
+        jobs = [job for job in jobs if job["node_id"] in selected]
+    frozen: list[dict[str, Any]] = []
+    for job in jobs:
+        clips: list[dict[str, Any]] = []
+        for clip in job["clips"]:
+            item = dict(clip)
+            if item.get("path"):
+                item["asset"] = composition_service.inspect(item["path"], "video")
+            clips.append(item)
+        audio = dict(job["audio"]) if job.get("audio") else None
+        if audio and audio.get("path"):
+            audio["asset"] = composition_service.inspect(audio["path"], "audio")
+        frozen.append(
+            {
+                "node_id": job["node_id"],
+                "label": job["label"],
+                "ready": bool(job["ready"]),
+                "clips": clips,
+                "audio": audio,
+                "tts": dict(job["tts"]) if job.get("tts") else None,
+                "subtitle_text": job.get("subtitle_text") or "",
+                "subtitle_hash": canonical_hash(job.get("subtitle_text") or ""),
+                "output": job["output"],
+            }
+        )
+    payload = {
+        "job_kind": "composition",
+        "canvas": canvas.name,
+        "canvas_revision": canvas.revision,
+        "production_run_id": req.production_run_id,
+        "jobs": frozen,
+    }
+    return jobs, payload
+
+
+@app.post("/api/canvas/composition-approvals")
+async def create_composition_approval(req: ComposeCanvasRequest) -> dict[str, Any]:
+    capability = ffmpeg_capabilities()
+    if not capability["available"]:
+        raise HTTPException(status_code=503, detail=capability["reason"])
+    canvas = await registry.canvas_repository.load(req.canvas)
+    _require_revision(canvas, req.revision)
+    try:
+        jobs, payload = _composition_execution_plan(req, canvas)
+    except CompositionError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    if not jobs:
+        raise HTTPException(status_code=400, detail="没有时间线节点可供合成")
+    if not any(job["ready"] for job in jobs):
+        raise HTTPException(status_code=400, detail="时间线还没有全部就绪：请连接已经生成或上传的视频")
+    approval = new_approval(f"canvas.compose:{canvas.name}", payload)
+    await registry.approvals.create(approval)
+    return {
+        "ok": True,
+        "approval_id": approval.approval_id,
+        "args_hash": approval.args_hash,
+        "expires_at": approval.expires_at,
+        "canvas": canvas.name,
+        "total": len(jobs),
+        "ready": sum(1 for job in jobs if job["ready"]),
+        "plans": payload["jobs"],
+    }
+
+
+@app.post("/api/canvas/compose")
+async def compose_canvas(req: ComposeCanvasRequest) -> dict[str, Any]:
+    if not req.approved or not req.approval_id:
+        raise HTTPException(status_code=428, detail="需要人工审批：请确认片段顺序、裁剪范围和输出规格后再合成")
+    canvas = await registry.canvas_repository.load(req.canvas)
+    _require_revision(canvas, req.revision)
+    try:
+        jobs, execution_payload = _composition_execution_plan(req, canvas)
+    except CompositionError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    try:
+        await registry.approvals.consume(
+            req.approval_id,
+            f"canvas.compose:{canvas.name}",
+            canonical_hash(execution_payload),
+        )
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except (RuntimeError, ValueError) as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+    job_key = canonical_hash({"approval_id": req.approval_id, "execution": execution_payload})
+    job_id = f"media_{job_key[:32]}"
+    frozen_jobs = []
+    for item in execution_payload["jobs"]:
+        frozen_jobs.append(
+            {
+                **item,
+                "generation_id": f"{job_id}:{item['node_id']}",
+                "args_hash": canonical_hash(item),
+            }
+        )
+    queued_payload = {
+        "job_kind": "composition",
+        "canvas": canvas.name,
+        "approval_id": req.approval_id,
+        "production_run_id": req.production_run_id,
+        "jobs": frozen_jobs,
+    }
+    if await media_jobs.get(job_id) is None:
+        canvas = await registry.canvas_repository.load(req.canvas)
+        _require_revision(canvas, int(execution_payload["canvas_revision"]))
+        for item in frozen_jobs:
+            if item["ready"]:
+                canvas.update_node(item["node_id"], data={"active_generation_id": item["generation_id"]})
+                if item.get("tts"):
+                    canvas.update_node(item["tts"]["node_id"], data={"active_generation_id": item["generation_id"]})
+        await registry.canvas_repository.save(canvas)
+    queued, created = await media_jobs.enqueue(
+        MediaJob(
+            job_id=job_id,
+            idempotency_key=job_key,
+            approval_id=req.approval_id,
+            canvas=canvas.name,
+            payload_json=canonical_json(queued_payload),
+        )
+    )
+    await _update_production_stage(
+        req.production_run_id,
+        canvas.name,
+        "composing",
+        "running",
+        "composing",
+        artifact_ids=[item["node_id"] for item in frozen_jobs if item["ready"]],
+    )
+    return {
+        "ok": True,
+        "accepted": True,
+        "created": created,
+        "total": len(jobs),
+        "ready": sum(1 for job in jobs if job["ready"]),
+        **queued.public(),
+    }
+
+
+async def _save_composition_state(
+    canvas_name: str,
+    node_id: str,
+    generation_id: str,
+    *,
+    status: str,
+    output: dict[str, Any] | None = None,
+    output_port: str = "video",
+    output_type: str = "VIDEO",
+) -> bool:
+    """CAS retry for Worker writes; never overwrites a newer generation."""
+    for _ in range(4):
+        canvas = await registry.canvas_repository.load(canvas_name)
+        node = canvas.require(node_id)
+        if node.data.get("active_generation_id") != generation_id:
+            return False
+        if output is not None:
+            node.outputs[output_port] = {"data_type": output_type, "value": output}
+        canvas.update_node(node_id, status=status)
+        try:
+            await registry.canvas_repository.save(canvas)
+            return True
+        except CanvasConflictError:
+            continue
+    raise CanvasConflictError(canvas_name, canvas.revision, (await registry.canvas_repository.load(canvas_name)).revision)
+
+
+async def _execute_composition_job(task: MediaJob, payload: dict[str, Any]) -> dict[str, Any]:
+    results: list[dict[str, Any]] = []
+    done = 0
+    for item in payload.get("jobs", []):
+        if not item.get("ready"):
+            results.append({"node_id": item["node_id"], "label": item["label"], "ok": False, "error": "输入视频尚未就绪"})
+            continue
+        generation_id = str(item["generation_id"])
+        if not await _save_composition_state(task.canvas, item["node_id"], generation_id, status="generating"):
+            results.append({
+                "node_id": item["node_id"], "label": item["label"], "ok": False,
+                "error": "时间线已有更新一代任务，旧合成已停止", "stale_discarded": True,
+            })
+            continue
+        render_plan = {
+            "clips": [
+                {
+                    "path": clip["path"],
+                    "trim_start": clip.get("trim_start", 0),
+                    "trim_end": clip.get("trim_end"),
+                }
+                for clip in item["clips"]
+            ],
+            "audio": {"path": item["audio"]["path"]} if item.get("audio") else None,
+            "output": item["output"],
+        }
+        if item.get("tts") and not render_plan["audio"]:
+            try:
+                narration = await asyncio.to_thread(
+                    tts_registry.synthesize,
+                    item["tts"],
+                    f"{task.job_id}-{item['tts']['node_id']}",
+                )
+                audio_output = {
+                    "path": narration.path,
+                    "mime": narration.mime,
+                    "provider": narration.provider,
+                    "mock": narration.mock,
+                    "generation_id": generation_id,
+                }
+                await _save_composition_state(
+                    task.canvas,
+                    item["tts"]["node_id"],
+                    generation_id,
+                    status="done",
+                    output=audio_output,
+                    output_port="audio",
+                    output_type="AUDIO",
+                )
+                await _register_media_asset(
+                    canvas=task.canvas,
+                    node_id=item["tts"]["node_id"],
+                    media_type="audio",
+                    path=narration.path,
+                    content_type=narration.mime,
+                    provider=narration.provider,
+                    generation_id=generation_id,
+                )
+                render_plan["audio"] = {"path": narration.path}
+            except Exception as exc:  # noqa: BLE001
+                await _save_composition_state(
+                    task.canvas, item["node_id"], generation_id, status="error"
+                )
+                results.append({
+                    "node_id": item["node_id"], "label": item["label"], "ok": False,
+                    "error": f"旁白生成失败：{type(exc).__name__}: {exc}",
+                })
+                continue
+        duration = sum(float((clip.get("asset") or {}).get("duration") or 0) for clip in item["clips"])
+        if item.get("subtitle_text"):
+            subtitle_relative = f"assets/rendered/{task.job_id}/{item['node_id']}.srt"
+            subtitle_path = WORKSPACE / subtitle_relative
+            await asyncio.to_thread(write_srt, subtitle_path, item["subtitle_text"], duration)
+            render_plan["subtitle"] = {"path": subtitle_relative}
+        try:
+            rendered = await asyncio.to_thread(
+                composition_service.render,
+                render_plan,
+                f"{task.job_id}-{item['node_id']}",
+            )
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:  # noqa: BLE001
+            await _save_composition_state(task.canvas, item["node_id"], generation_id, status="error")
+            results.append({
+                "node_id": item["node_id"], "label": item["label"], "ok": False,
+                "error": f"{type(exc).__name__}: {exc}",
+            })
+            continue
+        output = {
+            "path": rendered.path,
+            "mime": rendered.mime,
+            "provider": "ffmpeg",
+            "duration": rendered.duration,
+            "width": rendered.width,
+            "height": rendered.height,
+            "fps": rendered.fps,
+            "file_size": rendered.file_size,
+            "sha256": rendered.sha256,
+            "generation_id": generation_id,
+        }
+        if not await _save_composition_state(
+            task.canvas, item["node_id"], generation_id, status="done", output=output
+        ):
+            results.append({
+                "node_id": item["node_id"], "label": item["label"], "ok": False,
+                "error": "合成完成，但时间线已更新，旧结果未覆盖新版本", "path": rendered.path,
+                "stale_discarded": True,
+            })
+            continue
+        await _register_media_asset(
+            canvas=task.canvas,
+            node_id=item["node_id"],
+            media_type="video",
+            path=rendered.path,
+            content_type=rendered.mime,
+            provider="ffmpeg",
+            generation_id=generation_id,
+        )
+        done += 1
+        results.append({"node_id": item["node_id"], "label": item["label"], "ok": True, **output})
+    total = len(payload.get("jobs", []))
+    production_run_id = str(payload.get("production_run_id") or "") or None
+    passed = total > 0 and done == total
+    await _update_production_stage(
+        production_run_id,
+        task.canvas,
+        "composing",
+        "succeeded" if passed else "failed",
+        "final_review" if passed else "limited",
+        problems=[] if passed else [item.get("error", "成片合成未完成") for item in results if not item.get("ok")],
+        artifact_ids=[item["node_id"] for item in results if item.get("ok")],
+    )
+    if passed:
+        await _update_production_stage(
+            production_run_id,
+            task.canvas,
+            "final_review",
+            "succeeded",
+            "completed",
+            artifact_ids=[item["node_id"] for item in results if item.get("ok")],
+        )
+        await _update_production_stage(
+            production_run_id,
+            task.canvas,
+            "completed",
+            "succeeded",
+            "completed",
+            artifact_ids=[item["node_id"] for item in results if item.get("ok")],
+        )
+    return {"ok": passed, "canvas": task.canvas, "kind": "composition", "total": total, "done": done, "results": results}
+
+
 async def _execute_media_job(task: MediaJob) -> dict[str, Any]:
     """Worker 使用审批时冻结的提示词和参数执行，不重新读取可能已变化的输入。"""
     payload = json.loads(task.payload_json)
+    if payload.get("job_kind") == "composition":
+        return await _execute_composition_job(task, payload)
     canvas_name = str(payload["canvas"])
     canvas = await registry.canvas_repository.load(canvas_name)
     results: list[dict[str, Any]] = []
@@ -1059,6 +1542,16 @@ async def _execute_media_job(task: MediaJob) -> dict[str, Any]:
         }
         canvas.update_node(job["node_id"], status="done")
         await registry.canvas_repository.save(canvas)
+        await _register_media_asset(
+            canvas=canvas.name,
+            node_id=job["node_id"],
+            media_type=port,
+            path=media.path,
+            content_type=media.mime,
+            provider=media.provider,
+            generation_id=job["generation_id"],
+            operation_id=operation_seen.get("id") or resume_operation_id or "",
+        )
         done += 1
         succeeded = {
             "node_id": job["node_id"], "label": job["label"], "ok": True,
@@ -1068,12 +1561,33 @@ async def _execute_media_job(task: MediaJob) -> dict[str, Any]:
         await registry.invocations.complete(invocation.invocation_id, succeeded)
         results.append({**succeeded, "invocation_id": invocation.invocation_id})
 
+    total = len(payload["jobs"])
+    production_run_id = str(payload.get("production_run_id") or "") or None
+    passed = total > 0 and done == total
+    await _update_production_stage(
+        production_run_id,
+        canvas.name,
+        "generating",
+        "succeeded" if passed else "failed",
+        "waiting_composition" if passed else "limited",
+        problems=[] if passed else [item.get("error", "媒体生成未完成") for item in results if not item.get("ok")],
+        artifact_ids=[item["node_id"] for item in results if item.get("ok")],
+    )
+    if passed:
+        await _update_production_stage(
+            production_run_id,
+            canvas.name,
+            "waiting_composition",
+            "waiting_composition",
+            "waiting_composition",
+            artifact_ids=[item["node_id"] for item in results if item.get("ok")],
+        )
     return {
-        "ok": True,
+        "ok": passed,
         "canvas": canvas.name,
         "provider": payload["provider"],
         "model": payload["requested_model"],
-        "total": len(payload["jobs"]),
+        "total": total,
         "done": done,
         "results": results,
     }
@@ -1086,6 +1600,22 @@ async def media_job_status(job_id: str) -> dict[str, Any]:
     job = await media_jobs.get(job_id)
     if job is None:
         raise HTTPException(status_code=404, detail="媒体任务不存在或已过期")
+    if job.status in {"failed", "unknown"}:
+        try:
+            payload = json.loads(job.payload_json)
+            production_run_id = str(payload.get("production_run_id") or "") or None
+            stage = "composing" if payload.get("job_kind") == "composition" else "generating"
+            await _update_production_stage(
+                production_run_id,
+                job.canvas,
+                stage,
+                "failed" if job.status == "failed" else "unknown",
+                "limited",
+                problems=[job.error or f"后台任务进入 {job.status}"],
+            )
+        except (ValueError, RuntimeError, ProductionRunConflict):
+            # 查询媒体任务不能因为附属进度同步失败而变成 500；状态仍可从任务本身读取。
+            pass
     return {"ok": True, **job.public()}
 
 
@@ -1136,6 +1666,20 @@ async def generation_plan(name: str = "main") -> dict[str, Any]:
         "ready": sum(1 for job in jobs if job["ready"]),
         "total": len(jobs),
         "providers": default_registry.describe(),
+    }
+
+
+@app.get("/api/canvas/composition-plan")
+async def composition_plan(name: str = "main") -> dict[str, Any]:
+    canvas = await registry.canvas_repository.load(name)
+    jobs = canvas.timeline_jobs()
+    return {
+        "canvas": canvas.name,
+        "jobs": jobs,
+        "ready": sum(1 for job in jobs if job["ready"]),
+        "total": len(jobs),
+        "ffmpeg": ffmpeg_capabilities(),
+        "tts_providers": tts_registry.describe(),
     }
 
 
@@ -1195,6 +1739,19 @@ async def move_node(node_id: str, req: MoveNodeRequest) -> dict[str, Any]:
     return {"ok": True, "node_id": node_id, "position": {"x": req.x, "y": req.y}, "revision": canvas.revision}
 
 
+@app.post("/api/canvas/nodes/{node_id}")
+async def update_canvas_node(node_id: str, req: UpdateCanvasNodeRequest) -> dict[str, Any]:
+    """Edit safe node metadata with the same optimistic lock as drag/connect."""
+    canvas = await registry.canvas_repository.load(req.canvas)
+    _require_revision(canvas, req.revision)
+    try:
+        node = canvas.update_node(node_id, label=req.label, status=req.status, data=req.data)
+    except CanvasError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    await registry.canvas_repository.save(canvas)
+    return {"ok": True, "canvas": canvas.name, "node": node.to_dict(), "revision": canvas.revision}
+
+
 @app.post("/api/canvas/nodes")
 async def create_canvas_node(req: CreateCanvasNodeRequest) -> dict[str, Any]:
     """在画布指定坐标创建卡片（供空白处右键菜单使用）。"""
@@ -1212,7 +1769,7 @@ async def create_canvas_node(req: CreateCanvasNodeRequest) -> dict[str, Any]:
 async def upload_canvas_media(
     request: Request,
     canvas: str = "main",
-    kind: Literal["image", "video"] = "image",
+    kind: Literal["image", "video", "audio"] = "image",
     filename: str = "media",
     node_id: str = "",
     x: float | None = None,
@@ -1236,11 +1793,13 @@ async def upload_canvas_media(
     allowed = {
         "image": {".png", ".jpg", ".jpeg", ".webp", ".gif", ".bmp", ".avif"},
         "video": {".mp4", ".webm", ".mov", ".m4v", ".avi", ".mkv"},
+        "audio": {".mp3", ".wav", ".m4a", ".aac", ".ogg", ".flac"},
     }
     original = Path(filename).name
     suffix = Path(original).suffix.lower()
     if suffix not in allowed[kind]:
-        raise HTTPException(status_code=415, detail=f"不支持的{ '图片' if kind == 'image' else '视频' }格式：{suffix or '无扩展名'}")
+        kind_label = {"image": "图片", "video": "视频", "audio": "音频"}[kind]
+        raise HTTPException(status_code=415, detail=f"不支持的{kind_label}格式：{suffix or '无扩展名'}")
     mime = (request.headers.get("content-type") or "").split(";", 1)[0].lower()
     if mime in ("", "application/octet-stream"):
         mime = {
@@ -1248,9 +1807,12 @@ async def upload_canvas_media(
             ".gif": "image/gif", ".bmp": "image/bmp", ".avif": "image/avif", ".mp4": "video/mp4",
             ".webm": "video/webm", ".mov": "video/quicktime", ".m4v": "video/x-m4v",
             ".avi": "video/x-msvideo", ".mkv": "video/x-matroska",
+            ".mp3": "audio/mpeg", ".wav": "audio/wav", ".m4a": "audio/mp4", ".aac": "audio/aac",
+            ".ogg": "audio/ogg", ".flac": "audio/flac",
         }.get(suffix, "application/octet-stream")
     if not mime.startswith(f"{kind}/"):
-        raise HTTPException(status_code=415, detail=f"请选择{ '图片' if kind == 'image' else '视频' }文件")
+        kind_label = {"image": "图片", "video": "视频", "audio": "音频"}[kind]
+        raise HTTPException(status_code=415, detail=f"请选择{kind_label}文件")
 
     board = await registry.canvas_repository.load(canvas)
     _require_revision(board, revision)
@@ -1264,7 +1826,8 @@ async def upload_canvas_media(
     else:
         title = re.sub(r"[^0-9a-zA-Z\u4e00-\u9fff._ -]+", "", Path(original).stem).strip()[:60] or kind
         position = {"x": x, "y": y} if x is not None and y is not None else None
-        node = board.add_node(kind, f"上传{ '图片' if kind == 'image' else '视频' }·{title}", position=position)
+        kind_label = {"image": "图片", "video": "视频", "audio": "音频"}[kind]
+        node = board.add_node(kind, f"上传{kind_label}·{title}", position=position)
 
     safe_stem = re.sub(r"[^0-9a-zA-Z\u4e00-\u9fff_-]+", "-", Path(original).stem).strip("-")[:48] or kind
     relative = f"assets/uploads/{node.id}/{safe_stem}-{uuid.uuid4().hex[:8]}{suffix}"
@@ -1283,6 +1846,14 @@ async def upload_canvas_media(
     node.data.update({"filename": original, "mime_type": mime, "size": len(content)})
     node.status = "ready"
     await registry.canvas_repository.save(board)
+    await _register_media_asset(
+        canvas=board.name,
+        node_id=node.id,
+        media_type=kind,
+        path=relative,
+        content_type=mime,
+        provider="upload",
+    )
     return {
         "ok": True,
         "canvas": board.name,
@@ -1357,8 +1928,13 @@ async def health() -> dict[str, Any]:
         "invocation_store": type(registry.invocations).__name__,
         "approval_store": type(registry.approvals).__name__,
         "canvas_repository": type(registry.canvas_repository).__name__,
+        "session_repository": type(registry.session_repository).__name__,
+        "production_run_repository": type(registry.production_runs).__name__,
+        "outbox_publisher": registry.outbox_publisher.stats() if registry.outbox_publisher else None,
         "media_job_store": type(media_jobs).__name__,
+        "media_asset_repository": type(registry.media_assets).__name__,
         "media_worker": media_worker.worker_id if media_worker else None,
+        "ffmpeg": ffmpeg_capabilities(),
     }
 
 

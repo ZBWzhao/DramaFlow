@@ -6,6 +6,7 @@ __pycache__/
 .coverage
 htmlcov/
 .env
+.env.production
 .agent/mcp.json
 .agent/sessions/
 .codebuddy/

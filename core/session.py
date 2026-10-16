@@ -20,7 +20,7 @@ import time
 import uuid
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 from .llm import Usage
 
@@ -43,6 +43,8 @@ class Session:
         system_prompt: str = "",
         session_id: str | None = None,
         path: Path | None = None,
+        entry_sink: Callable[[str, dict[str, Any]], None] | None = None,
+        write_start: bool = True,
     ) -> None:
         self.id = session_id or uuid.uuid4().hex[:8]
         self.system_prompt = system_prompt
@@ -55,20 +57,37 @@ class Session:
         self.current_id: str | None = None
         # custom entries：**不进上下文**的附加记录（对应 Toonflow 的 appendCustomEntry）
         self.customs: list[dict[str, Any]] = []
+        self._repository_entries: list[dict[str, Any]] | None = None
+        # 可选的仓储投影。JSONL 仍是同步本地日志；PostgreSQL Repository
+        # 通过该回调接收完全相同的不可变 entry，并在事务中连同 Outbox 一起落库。
+        self.entry_sink = entry_sink
 
         if self.path is not None:
             self.path.parent.mkdir(parents=True, exist_ok=True)
-            self._write({"type": "session_start", "id": self.id, "cwd": str(self.path.parent)})
+        if write_start and (self.path is not None or self.entry_sink is not None):
+            self._write(
+                {
+                    "type": "session_start",
+                    "id": self.id,
+                    "cwd": str(self.path.parent) if self.path is not None else "",
+                }
+            )
 
     # ---------------- 落盘 ----------------
     def _write(self, entry: dict[str, Any]) -> None:
-        if self.path is None:
-            return
-        with self.path.open("a", encoding="utf-8") as fh:
-            fh.write(json.dumps({"ts": time.time(), **entry}, ensure_ascii=False) + "\n")
+        record = {"ts": time.time(), "record_id": uuid.uuid4().hex, **entry}
+        if self.path is not None:
+            with self.path.open("a", encoding="utf-8") as fh:
+                fh.write(json.dumps(record, ensure_ascii=False) + "\n")
+        if self._repository_entries is not None:
+            self._repository_entries.append(record)
+        if self.entry_sink is not None:
+            self.entry_sink(self.id, record)
 
     def entries(self) -> list[dict[str, Any]]:
         """读出落盘的全部条目（压缩前的原始对话都还在，这就是 JSONL 的价值）。"""
+        if self._repository_entries is not None:
+            return [dict(item) for item in self._repository_entries]
         if self.path is None or not self.path.exists():
             return []
         return [json.loads(line) for line in self.path.read_text(encoding="utf-8").splitlines() if line.strip()]
@@ -99,25 +118,56 @@ class Session:
     @classmethod
     def load(cls, path: Path, system_prompt: str = "") -> "Session":
         """从 JSONL 恢复会话：消息与用量都能还原，压缩摘要不还原成消息。"""
-        session = cls(system_prompt=system_prompt, session_id=path.stem)
+        session = cls(system_prompt=system_prompt, session_id=path.stem, write_start=False)
         session.path = path
         if not path.exists():
             return session
-        for entry in session.entries():
+        session._restore(session.entries())
+        return session
+
+    @classmethod
+    def from_entries(
+        cls,
+        session_id: str,
+        entries: list[dict[str, Any]],
+        *,
+        system_prompt: str = "",
+        path: Path | None = None,
+        entry_sink: Callable[[str, dict[str, Any]], None] | None = None,
+    ) -> "Session":
+        """从任意 Repository 的事件序列恢复会话，不要求底层一定是 JSONL。"""
+        session = cls(
+            system_prompt=system_prompt,
+            session_id=session_id,
+            path=path,
+            entry_sink=entry_sink,
+            write_start=False,
+        )
+        session._repository_entries = [dict(item) for item in entries]
+        session._restore(entries)
+        return session
+
+    def _restore(self, entries: list[dict[str, Any]]) -> None:
+        for entry in entries:
             kind = entry.get("type")
             if kind == "message":
-                session.messages.append({k: v for k, v in entry.items() if k not in ("type", "ts", "id", "parent")})
-                session.message_ids.append(entry.get("id") or session._new_id())
-                session.current_id = entry.get("id")
+                self.messages.append(
+                    {
+                        k: v for k, v in entry.items()
+                        if k not in ("type", "ts", "record_id", "id", "parent")
+                    }
+                )
+                self.message_ids.append(entry.get("id") or self._new_id())
+                self.current_id = entry.get("id")
             elif kind == "usage":
-                session.usage_log.append(
+                self.usage_log.append(
                     UsageEntry(
                         usage=Usage(
                             input_tokens=entry.get("input_tokens", 0),
                             output_tokens=entry.get("output_tokens", 0),
                         ),
                         label=entry.get("label", "main"),
-                        seq=len(session.usage_log),
+                        seq=len(self.usage_log),
                         ts=entry.get("ts", time.time()),
                     )
                 )
@@ -128,28 +178,28 @@ class Session:
                 #   · 摘要正文在 compaction 条目里（摘要那条 message 只写了占位文本）
                 # 不这么做的话，重启后上下文会膨胀回压缩前（付过的压缩钱白花，还可能超窗口）。
                 kept = int(entry.get("kept") or 0)
-                summary_id = session.message_ids[-1] if session.message_ids else session._new_id()
+                summary_id = self.message_ids[-1] if self.message_ids else self._new_id()
                 # 末尾那条是摘要自己，所以保留段是 [-(kept+1):-1]（不能把摘要算进"保留的 N 条"）
-                kept_messages = session.messages[-(kept + 1) : -1] if kept else []
-                kept_ids = session.message_ids[-(kept + 1) : -1] if kept else []
-                session.messages = [
+                kept_messages = self.messages[-(kept + 1) : -1] if kept else []
+                kept_ids = self.message_ids[-(kept + 1) : -1] if kept else []
+                self.messages = [
                     {"role": "user", "content": f"[之前的对话摘要]\n{entry.get('summary', '')}"}
                 ] + kept_messages
-                session.message_ids = [summary_id] + kept_ids
-                session.current_id = session.message_ids[-1] if session.message_ids else None
-                session.compact_count += 1
+                self.message_ids = [summary_id] + kept_ids
+                self.current_id = self.message_ids[-1] if self.message_ids else None
+                self.compact_count += 1
             elif kind == "branch":
                 # 分叉 / 重发：截断到 from 为止（含 from）。form 为空表示截到空会话。
                 from_id = entry.get("from")
-                if from_id and from_id in session.message_ids:
-                    cut = session.message_ids.index(from_id) + 1
-                    session.messages = session.messages[:cut]
-                    session.message_ids = session.message_ids[:cut]
-                    session.current_id = from_id
+                if from_id and from_id in self.message_ids:
+                    cut = self.message_ids.index(from_id) + 1
+                    self.messages = self.messages[:cut]
+                    self.message_ids = self.message_ids[:cut]
+                    self.current_id = from_id
                 elif from_id:
                     # 允许切回已经不在当前活动分支里的历史节点。
                     all_messages = [
-                        item for item in session.entries()
+                        item for item in entries
                         if item.get("type") == "message" and item.get("id")
                     ]
                     by_id = {item["id"]: item for item in all_messages}
@@ -163,25 +213,27 @@ class Session:
                         cursor = item.get("parent")
                     lineage.reverse()
                     visible = [item for item in lineage if item.get("content") != "[之前的对话摘要]"]
-                    session.messages = [
-                        {k: v for k, v in item.items() if k not in ("type", "ts", "id", "parent")}
+                    self.messages = [
+                        {
+                            k: v for k, v in item.items()
+                            if k not in ("type", "ts", "record_id", "id", "parent")
+                        }
                         for item in visible
                     ]
-                    session.message_ids = [item["id"] for item in visible]
-                    session.current_id = session.message_ids[-1] if session.message_ids else None
+                    self.message_ids = [item["id"] for item in visible]
+                    self.current_id = self.message_ids[-1] if self.message_ids else None
                 else:
-                    session.messages = []
-                    session.message_ids = []
-                    session.current_id = None
+                    self.messages = []
+                    self.message_ids = []
+                    self.current_id = None
             elif kind == "custom":
-                session.customs.append(
+                self.customs.append(
                     {
                         "custom_type": entry.get("custom_type"),
                         "id": entry.get("id"),
                         "data": entry.get("data", {}),
                     }
                 )
-        return session
 
     # ---------------- 历史（会话树） ----------------
     def _new_id(self) -> str:

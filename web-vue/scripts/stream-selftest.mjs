@@ -81,12 +81,107 @@ const TRUNCATED = [
   PING(18),
 ];
 
+// 场景三：团队模式没有父 Agent 的 message_start，前端必须用 team_step_start /
+// sub_agent_start 主动建立消息容器，并把成员内部的思考、工具和正文放进子块。
+const TEAM_EVENTS = [
+  { type: "session", session_id: "selftest-team", team: "dramaTeam" },
+  { type: "user_message_committed", entry_id: "user-team-1" },
+  {
+    type: "production_run_started",
+    production_run_id: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    stage: "planning",
+    production_status: "running",
+    production_run: {
+      id: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      session_id: "selftest-team",
+      canvas_name: "main",
+      team: "dramaTeam",
+      user_request: "生成一段团队短剧",
+      current_stage: "planning",
+      status: "running",
+      stages: {},
+    },
+  },
+  { type: "team_step_start", member: "director", role: "plan", tools: ["get_canvas"] },
+  { type: "sub_agent_start", sub_agent: "director" },
+  { type: "agent_start", sub_agent: "director", agent: "director" },
+  { type: "message_start", sub_agent: "director", role: "assistant", block_id: "team-b1" },
+  { type: "thinking_update", sub_agent: "director", block_id: "team-b1", delta: "先制定验收标准" },
+  { type: "thinking_end", sub_agent: "director", block_id: "team-b1", chars: 8 },
+  { type: "tool_execution_start", sub_agent: "director", tool: "get_canvas", tool_call_id: "team-call-1", args: '{"canvas":"main"}' },
+  { type: "tool_execution_end", sub_agent: "director", tool: "get_canvas", tool_call_id: "team-call-1", isError: false, result: "ok", result_chars: 2 },
+  { type: "message_update", sub_agent: "director", block_id: "team-b1", delta: "验收标准已确定。" },
+  { type: "message_end", sub_agent: "director", role: "assistant", block_id: "team-b1", chars: 8 },
+  { type: "agent_end", sub_agent: "director", status: "completed" },
+  { type: "sub_agent_usage", sub_agent: "director", total_tokens: 1200 },
+  { type: "sub_agent_end", sub_agent: "director", status: "done" },
+  { type: "team_step_end", member: "director", role: "plan", chars: 8 },
+  {
+    type: "production_stage_passed",
+    production_run_id: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    stage: "planning",
+    production_status: "running",
+    production_run: {
+      id: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      session_id: "selftest-team",
+      canvas_name: "main",
+      team: "dramaTeam",
+      user_request: "生成一段团队短剧",
+      current_stage: "planning",
+      status: "running",
+      stages: { planning: { stage: "planning", status: "succeeded", attempts: 1 } },
+    },
+  },
+  {
+    type: "production_waiting_approval",
+    production_run_id: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    stage: "waiting_approval",
+    production_status: "waiting_approval",
+    production_run: {
+      id: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      session_id: "selftest-team",
+      canvas_name: "main",
+      team: "dramaTeam",
+      user_request: "生成一段团队短剧",
+      current_stage: "waiting_approval",
+      status: "waiting_approval",
+      stages: {
+        planning: { stage: "planning", status: "succeeded", attempts: 1 },
+        waiting_approval: { stage: "waiting_approval", status: "waiting_approval" },
+      },
+    },
+  },
+  { type: "assistant_message_committed", entry_id: "assistant-team-1", parent_id: "user-team-1" },
+  {
+    type: "team_done",
+    status: "waiting_approval",
+    production_run_id: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    result: "团队制作完成。",
+    usage: { input_tokens: 1000, output_tokens: 200, total_tokens: 1200 },
+    usage_all: { input_tokens: 1000, output_tokens: 200, total_tokens: 1200 },
+  },
+];
+
 let call = 0;
 let capturedBodies = [];
 let canvasRefreshes = 0;
 
 globalThis.fetch = async (url, options = {}) => {
   const target = String(url);
+  if (target.includes("/api/team")) {
+    capturedBodies.push(JSON.parse(options.body || "{}"));
+    const stream = new ReadableStream({
+      start(controller) {
+        const encoder = new TextEncoder();
+        controller.enqueue(encoder.encode(TEAM_EVENTS.map((event) => JSON.stringify(event) + "\n").join("")));
+        controller.close();
+      },
+    });
+    return new Response(stream, {
+      status: 200,
+      headers: { "X-Session-ID": "selftest-team", "X-Run-ID": "11111111111111111111111111111111" },
+    });
+  }
   if (target.includes("/api/agent")) {
     call += 1;
     capturedBodies.push(JSON.parse(options.body || "{}"));
@@ -196,6 +291,28 @@ check("中断后不再显示为运行中", state.running === false && state.acti
 check("中断的最后一条消息也盖了结束章", stuck.ended?.reason === "unknown");
 check("feed 增加了本次的内容", state.feed.length > before);
 check("思考块在中断时也被收尾（不留转圈）", stuck.parts.find((p) => p.kind === "thinking")?.streaming === false);
+
+// ============ 场景三：团队模式完整事件 ============
+console.log("\n=== 场景三：团队模式显示成员过程并正常结束 ===\n");
+state.mode = "team:dramaTeam";
+const teamBefore = state.feed.length;
+await actions.send("生成一段团队短剧");
+
+const teamItems = state.feed.slice(teamBefore);
+const teamMessage = teamItems.find((item) => item.type === "assistant");
+const teamPart = teamMessage?.parts.find((part) => part.kind === "team");
+const teamSub = teamMessage?.parts.find((part) => part.kind === "sub" && part.name === "director");
+check("团队模式主动创建 assistant 事件容器", !!teamMessage);
+check("团队步骤显示且能从执行中进入完成", teamPart?.status === "done");
+check("子 Agent 块默认展开，运行过程可直接看到", teamSub?.expanded === true);
+check("子 Agent 思考过程被保留", teamSub?.steps.some((step) => step.kind === "thinking" && step.text.includes("验收标准")));
+check("子 Agent 工具调用被保留", teamSub?.steps.some((step) => step.kind === "tool" && step.name === "get_canvas" && step.status === "success"));
+check("子 Agent 正文被保留", teamSub?.steps.some((step) => step.kind === "text" && step.text.includes("已确定")));
+check("子 Agent 的 agent_end 不会提前结束整条团队消息", teamMessage?.ended?.reason === "waiting_approval");
+check("team_done 被识别为等待审批终态", state.endReason === "waiting_approval", `endReason=${state.endReason}`);
+check("团队完成后不会追加“未正常结束”", !teamItems.some((item) => item.type === "note" && item.title === "运行未正常结束"));
+check("团队最终结论显示在同一条消息", teamMessage?.parts.some((part) => part.kind === "text" && part.text.includes("团队制作完成")));
+check("生产阶段状态被前端保存", state.productionRun?.status === "waiting_approval" && state.productionRun?.stages?.planning?.status === "succeeded");
 
 console.log(`\n${failures.length ? `✗ ${failures.length} 项未通过：${failures.join("、")}` : "✓ 全部通过"}`);
 process.exit(failures.length ? 1 : 0);

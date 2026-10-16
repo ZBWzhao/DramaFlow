@@ -20,13 +20,25 @@ API Key：环境变量 `DEEPSEEK_API_KEY` 优先，否则读 `~/.pi/agent/auth.j
 
 ### 启用 Redis + PostgreSQL 完整后端（推荐演示方式）
 
+只启动本机基础服务时：
+
 ```powershell
 docker compose -f compose.postgres.yml up -d
 python run_full.py
 ```
 
+需要 API、独立媒体 Worker、Redis、PostgreSQL 和持久卷一起部署时，使用
+[`compose.full.yml`](compose.full.yml)。完整的本机与云服务器步骤见
+[`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md)。
+
+```powershell
+Copy-Item .env.production.example .env.production
+docker compose --env-file .env.production -f compose.full.yml up -d --build
+python demo/full_stack_acceptance.py
+```
+
 `run_full.py` 默认把 Redis 用于事件流、运行状态、Follow-up 和结构化问答，把 PostgreSQL
-用于工具调用账本、审批、媒体任务和画布；已有环境变量可覆盖默认连接地址。服务启动时会自动
+用于会话投影、生产阶段检查点、工具调用账本、审批、媒体任务和画布；已有环境变量可覆盖默认连接地址。服务启动时会自动
 执行 `migrations/*.sql`。独立媒体 Worker 模式还需要让 API 与 Worker
 使用相同的 `DATABASE_URL` 和 `INVOCATION_STORE_BACKEND`，避免远端 operation_id 只存在某个进程内。
 
@@ -55,9 +67,12 @@ docker compose -f compose.postgres.yml down
 | `python demo/acceptance.py` | **一键验收**：10 个 CLI 场景 + 8 个 HTTP 接口，产出 `acceptance_report.md` |
 | `python demo/events_overflow.py` | 事件总线不变量：队列满时**只丢流式增量**，生命周期事件必须送达 |
 | `python demo/runtime_store_invariants.py` | 运行状态接口、递增事件 ID、断点补发与持久化后广播顺序 |
+| `python demo/agent_completion_invariants.py` | Agent 完成/受限终态、最大轮次检查点与画布局部更新语义 |
 | `python demo/redis_stream_invariants.py` | 真实 Redis Streams：原子递增 ID、游标补发与测试数据清理 |
 | `python demo/postgres_contract_invariants.py` | PostgreSQL 持久层契约、幂等约束、画布版本与 Outbox 表结构 |
+| `python demo/full_stack_acceptance.py` | 已启动的完整系统：真实 Redis/PostgreSQL 仓储、Outbox、FFmpeg 与会话往返 |
 | `python demo/postgres_live_invariants.py` | 真实 PostgreSQL：并发幂等、审批行锁、媒体任务租约与画布乐观锁 |
+| `python demo/session_repository_invariants.py` | PostgreSQL 会话回放：会话事件持久化并与 Outbox 同事务写入 |
 | `python demo/canvas_repository_invariants.py` | 画布 revision 乐观锁：旧版本写入被拒绝且不覆盖新内容 |
 | `python demo/session_invariants.py` | 会话不变量：取消不清、并发互串、开关粘住、压缩/分支恢复不还原（纯本地） |
 | `python demo/canvas_cycle.py` | 画布成环防护：写入前拒绝 + 精确报出环路（纯本地，不花 API 费用） |
@@ -66,7 +81,9 @@ docker compose -f compose.postgres.yml down
 | `python demo/drama_demo.py --repair` | 提示词审校修正：校验发现编号问题 → 模型自纠 → 导出（实测未展开编号清零） |
 | `python demo/run_team.py --team dramaTeam "做一个 30 秒短剧…"` | **短剧生产团队**：导演→编剧→美术→分镜→提示词→审校（5 成员流水线） |
 | `python demo/canvas_inspect.py --all` | 画布体检报告（不花钱）：拓扑序、时长、资产 tags、编号可展开性 |
-| `python demo/generate_demo.py` | **P2**：给画布补生成节点 → 按拓扑序执行 → 产物落 `assets/generated/`（mock provider，真 PNG） |
+| `python demo/generate_demo.py` | 给画布补生成节点 → 按拓扑序执行 → 产物落 `assets/generated/`（Mock 图片为 PNG、视频为 MP4） |
+| `python demo/composition_invariants.py` | 真实 FFmpeg 回归：两个 Mock MP4 → 时间线排序 → Mock TTS/字幕 → 可播放成片 |
+| `python demo/production_workflow_invariants.py` | 制片状态机：阶段产物契约、失败拦截、本地检查点与 revision 冲突 |
 
 ### 媒体 Provider 与人工审批
 
@@ -78,8 +95,20 @@ docker compose -f compose.postgres.yml down
 - `INVOCATION_STORE_BACKEND=redis` 时，调用与审批状态可跨实例共享；默认仍可使用零依赖的内存实现。外部 Provider 暂未统一支持幂等键，因此这里只保证应用侧防重，不宣称端到端 exactly-once。
 - `INVOCATION_STORE_BACKEND=postgres` 与 `MEDIA_JOB_STORE_BACKEND=postgres` 时，不可丢的工具调用、审批和媒体任务写入 PostgreSQL。启动时按 `migrations/*.sql` 幂等建表；调用和任务使用唯一幂等键，审批消费使用行锁，媒体 Worker 使用 `FOR UPDATE SKIP LOCKED` 抢占任务。
 - `CANVAS_STORE_BACKEND=postgres` 时，API、Agent 工具和媒体 Worker 统一通过 `CanvasRepository` 访问画布；`UPDATE ... WHERE revision=?` 防止旧快照覆盖新版本，首次启用会导入工作区已有画布。
-- 推荐生产拆分：PostgreSQL 保存业务事实，Redis Streams/Redis 保存事件与运行态，媒体文件保存到对象存储。当前 PostgreSQL 已接管副作用账本、媒体队列和画布；JSONL 会话适配器与 Outbox Publisher 尚未切换，不能宣称已完成全量迁移。
+- 推荐生产拆分：PostgreSQL 保存业务事实，Redis Streams/Redis 保存事件与运行态，媒体文件保存到对象存储。完整模式已把 JSONL 会话事件投影到 PostgreSQL，并在同一事务写入 Outbox；Publisher 通过租约抢占、退避重试和 Redis 事件键去重发布到独立 Stream。JSONL 暂时保留为本地 WAL 与降级恢复来源；对象存储仍未接通，不能宣称已完成全量迁移。
 - 对话框提供“逐步询问后审批 / 自动准备后审批 / 仅策划不生成”三种协作方式。
+
+### 时间线与最终成片
+
+项目现在支持 `audio`、`tts_gen` 和 `timeline` 节点。多个视频素材连接到时间线后，可以在节点详情中调整
+播放顺序，再点击画布底部“成片”。后端会先展示并冻结片段、裁剪、音频、字幕和输出规格，只有用户批准后
+才把合成任务交给现有后台 Worker。Worker 使用 FFmpeg 统一分辨率/帧率、拼接片段、混入音频、封装字幕，
+再用 ffprobe 校验最终 MP4；`generation_id` 会阻止旧任务覆盖用户刚修改的新时间线。
+
+本机需要安装 FFmpeg，并保证 `ffmpeg`、`ffprobe` 可执行；也可以在 `.env` 中显式配置
+`FFMPEG_BIN` 和 `FFPROBE_BIN`。Windows 可使用 `winget install Gyan.FFmpeg`。当前 Mock 视频也会生成真正的
+H.264 MP4，不再用 PNG 首帧伪装视频。TTS 默认 `mock` 只用于无费用回归，配置 `TTS_BASE_URL`、
+`TTS_API_KEY` 后可调用 OpenAI-compatible `/audio/speech` 生成真实旁白；也可以直接上传音频素材。
 | `python demo/compact_bench.py` | 上下文压缩基准：实测 24 轮会话压缩后降 **90%**（13388 → 1364 字符） |
 
 > 验收脚本支持 `--cli-range 1,3` 分批、`--api-only` 只验后端。最近一次验收：**16/16 通过**。
@@ -88,6 +117,15 @@ docker compose -f compose.postgres.yml down
 
 把 Agent 运行时改造成**短剧生成工具**（剧本 → 分镜 → 资产 → 片段提示词 → 画布连线 → 导出），
 可执行清单见 `ROADMAP.md`；方案与 Toonflow 实证对照见笔记 `T9-01 短剧生成工具改造方案`。
+
+主 Agent 默认最多执行 40 轮（可用 `AGENT_MAX_TURNS` 调整）。达到上限不是“成功完成”：运行会进入
+`limited`，把轮次、工具调用、错误数和恢复指令保存为 `runCheckpoint`，前端显示“继续制作”。只有模型在
+没有待执行工具时返回非空交付正文，运行才进入 `completed`。
+
+`dramaTeam` 进一步使用验收驱动的生产状态机。导演、编剧、美术、分镜、提示词和审校每一环结束后，
+服务端都会读取真实画布产物进行结构校验；不合格时最多定向返工一次，仍失败则进入 `limited`，不会把
+半成品误报为完成。阶段检查点默认保存在 `.agent/production-runs/`，完整模式写入 PostgreSQL，恢复时跳过
+已经通过的阶段。创作包全部通过后停在 `waiting_approval`，真实媒体生成仍需要用户拍板。
 
 ## 前端
 
@@ -213,13 +251,13 @@ python demo/mcp_invariants.py
 ## 与 Toonflow 的差距（如实说明）
 
 **等价实现**：手写 agent loop、ToolContext（沙箱更严）、ToolPlugin 契约 + 动态装载/热重载、
-`previousEntries` 增量计量、事件打标转发、父子双通道、JSONL 会话（含分支）、技能渐进式披露、
-声明式团队、分段提示词、NDJSON 流。
+`previousEntries` 增量计量、事件打标转发、父子双通道、会话分支与压缩、技能渐进式披露、
+声明式团队、结构化 `inputRequired`、画布工具、媒体生成和 NDJSON 流。
 
 **简化**：
-- `ToolContext` 的 `media` / `question` / `canvas` 只有**协议能力位**（Protocol + 可空 + 缺失时 `CapabilityUnavailable`），
-  没有真实 provider；Toonflow 的 `ffmpeg`、`sdk` 未实现。能力自检见 `tools/capabilities/`
-- 子 Agent 状态机 5/6（缺 `inputRequired`，它依赖 `question` 能力）
+- 媒体侧实现 Mock、TF-router、FFmpeg 时间线与基础音频/字幕合成，尚未覆盖完整 Provider、专业多轨剪辑和 3D 导演台。
+- MCP 已覆盖 Client/Server 主链路，但没有完整插件市场、动态端口管理和插件治理 UI。
+- 前端覆盖无限画布、素材上传、悬浮 Agent 和审批卡，桌面打包、多语言与复杂资产管理仍未实现。
 
 **已补齐（原先是缺口）**：
 - 子 Agent **状态与上报写进父会话 JSONL**（custom entry，不进上下文）；子会话**独立落盘**
@@ -227,10 +265,12 @@ python demo/mcp_invariants.py
 - 同名子 Agent 复用：历史从文件加载，**增量计量的起始偏移也跟着恢复**
 - 用量结算移入 `finally`（成功/中止/被取消/报错四条路径都不漏账）
 - 子 Agent 结果 16000 字符截断 + `limited` 状态 + 空结果校验
-- 服务端 `session_id` 的历史重启后可续（`Session.load`）
+- `inputRequired`、Follow-up、安全点恢复与跨实例共享状态
+- Redis Streams 断线补发；PostgreSQL 会话投影、事务 Outbox 和 Redis Publisher
+- 服务端 `session_id` 的历史重启后可续（JSONL 本地 WAL + PostgreSQL 回放）
 
-**未做**：A2A 协议、远程团队、@文件 mentions、memory 工具、前端交互桥（画布/提问卡片）、
-askUser / canvas / ffmpeg / mediaGeneration / webSearch / webFetch 工具、多用户与鉴权。
+**未做**：A2A 协议、远程团队、@文件 mentions、长期语义 memory、webSearch、webFetch、
+插件市场、完整对象存储、多用户与鉴权。
 
 定位说明：这不是"把 Toonflow 改成 Python"（TS 项目无法配置切换语言），
 而是**参考其架构用 Python 重写编排层核心**；SDK 为 `openai`（provider 用 DeepSeek，改配置即可切 OpenAI）。

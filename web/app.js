@@ -8,6 +8,8 @@ const state = {
   sessionId: null,
   running: false,
   currentBubble: null,
+  lastRunStatus: "idle",
+  limitedNoticeShown: false,
   tools: new Map(),   // toolCallId? -> element（这里用 name 做 key，够用）
   subs: new Map(),
 };
@@ -37,6 +39,31 @@ function addUser(text) {
   wrap.appendChild(el("div", "bubble", text));
   streamEl().appendChild(wrap);
   scrollBottom();
+}
+
+function addRunNotice(text, kind = "") {
+  clearEmpty();
+  const notice = el("div", `run-notice ${kind}`.trim(), text);
+  streamEl().appendChild(notice);
+  scrollBottom();
+}
+
+function applyRunStatus(status) {
+  state.lastRunStatus = status || "completed";
+  const continueBtn = $("continue-btn");
+  if (state.lastRunStatus === "limited") {
+    setStatus("已暂停，可继续", "status-limited");
+    continueBtn.classList.remove("hidden");
+  } else if (state.lastRunStatus === "aborted") {
+    setStatus("已中止", "status-run");
+    continueBtn.classList.remove("hidden");
+  } else if (state.lastRunStatus === "error") {
+    setStatus("出错", "status-error");
+    continueBtn.classList.remove("hidden");
+  } else {
+    setStatus("已完成", "status-idle");
+    continueBtn.classList.add("hidden");
+  }
 }
 
 function addAssistant() {
@@ -140,7 +167,10 @@ function handleEvent(ev) {
       $("session-id").textContent = ev.session_id;
       break;
     case "agent_start":
-      if (!ev.sub_agent) setStatus("运行中", "status-run");
+      if (!ev.sub_agent) {
+        state.lastRunStatus = "running";
+        setStatus("运行中", "status-run");
+      }
       break;
     case "message_start":
       if (!ev.sub_agent && ev.role === "assistant") addAssistant();
@@ -194,9 +224,24 @@ function handleEvent(ev) {
     case "sub_agent_state":
       refreshSubagents();
       break;
+    case "limited":
+      if (!ev.sub_agent) {
+        state.lastRunStatus = "limited";
+        if (!state.limitedNoticeShown) {
+          addRunNotice(ev.message || "本次运行达到安全限制，已保存进度，可继续制作。", "warning");
+          state.limitedNoticeShown = true;
+        }
+        applyRunStatus("limited");
+      }
+      break;
+    case "checkpoint":
+      // 检查点由后端持久化；前端只负责明确告诉用户可以无损继续。
+      if (!ev.sub_agent) $("continue-btn").classList.remove("hidden");
+      break;
     case "done":
       updateUsage(ev.stats);
       refreshSubagents();
+      applyRunStatus(ev.status);
       break;
     case "aborted":
       setStatus("已中止", "status-run");
@@ -230,16 +275,19 @@ async function readStream(res) {
   }
 }
 
-async function send() {
+async function send(promptOverride = null) {
   if (state.running) return;
   const input = $("input");
-  const prompt = input.value.trim();
+  const prompt = (typeof promptOverride === "string" ? promptOverride : input.value).trim();
   if (!prompt) return;
 
   clearEmpty();
   addUser(prompt);
   input.value = "";
   state.running = true;
+  state.lastRunStatus = "running";
+  state.limitedNoticeShown = false;
+  $("continue-btn").classList.add("hidden");
   $("send-btn").disabled = true;
   $("stop-btn").disabled = false;
   setStatus("运行中", "status-run");
@@ -258,7 +306,7 @@ async function send() {
       ),
     });
     await readStream(res);
-    setStatus("空闲", "status-idle");
+    if (state.lastRunStatus === "running") applyRunStatus("completed");
   } catch (err) {
     setStatus("出错", "status-run");
     console.error(err);
@@ -339,6 +387,9 @@ async function loadSkills() {
 
 $("send-btn").onclick = send;
 $("stop-btn").onclick = stop;
+$("continue-btn").onclick = () => send(
+  "继续当前任务：先读取上次运行检查点和当前画布，核对已有产物，只完成尚未完成的部分；不要重复创建已有节点，完成后给出交付总结。"
+);
 $("input").addEventListener("keydown", (e) => {
   if (e.key === "Enter" && !e.shiftKey) {
     e.preventDefault();

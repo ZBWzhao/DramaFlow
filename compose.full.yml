@@ -1,0 +1,95 @@
+x-dramaflow-environment: &dramaflow-environment
+  DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY:?请在 .env.production 中配置 DEEPSEEK_API_KEY}
+  LLM_BASE_URL: ${LLM_BASE_URL:-https://api.deepseek.com}
+  LLM_MODEL: ${LLM_MODEL:-deepseek-chat}
+  TF_ROUTER_API_KEY: ${TF_ROUTER_API_KEY:-}
+  TF_ROUTER_BASE_URL: ${TF_ROUTER_BASE_URL:-https://api.toonflow.net/v1}
+  MEDIA_PROVIDER: ${MEDIA_PROVIDER:-mock}
+  DATABASE_URL: postgresql://dramaflow:${POSTGRES_PASSWORD:?请配置 POSTGRES_PASSWORD}@postgres:5432/dramaflow
+  REDIS_URL: redis://redis:6379/0
+  EVENT_STORE_BACKEND: redis
+  RUN_STATE_STORE_BACKEND: redis
+  QUESTION_STORE_BACKEND: redis
+  INVOCATION_STORE_BACKEND: postgres
+  MEDIA_JOB_STORE_BACKEND: postgres
+  CANVAS_STORE_BACKEND: postgres
+  SESSION_STORE_BACKEND: postgres
+  MEDIA_ASSET_STORE_BACKEND: postgres
+  PRODUCTION_RUN_STORE_BACKEND: postgres
+  OUTBOX_PUBLISHER_ENABLED: "true"
+  MEDIA_WORKER_EMBEDDED: "false"
+  POSTGRES_POOL_MIN_SIZE: "1"
+  POSTGRES_POOL_MAX_SIZE: "10"
+  DRAMAFLOW_PROJECT_ID: ${DRAMAFLOW_PROJECT_ID:-default}
+
+services:
+  postgres:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: dramaflow
+      POSTGRES_USER: dramaflow
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?请配置 POSTGRES_PASSWORD}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U dramaflow -d dramaflow"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes", "--appendfsync", "everysec"]
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  app:
+    image: dramaflow:${DRAMAFLOW_IMAGE_TAG:-latest}
+    build:
+      context: .
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    environment:
+      <<: *dramaflow-environment
+    ports:
+      - "${APP_BIND_ADDRESS:-127.0.0.1}:${APP_PORT:-8000}:8000"
+    volumes:
+      - workspace_data:/app/workspace
+      - agent_data:/app/.agent
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "--fail", "--silent", "http://127.0.0.1:8000/api/health"]
+      interval: 15s
+      timeout: 5s
+      start_period: 30s
+      retries: 5
+
+  worker:
+    image: dramaflow:${DRAMAFLOW_IMAGE_TAG:-latest}
+    restart: unless-stopped
+    command: ["python", "-m", "server.media_worker"]
+    environment:
+      <<: *dramaflow-environment
+    volumes:
+      - workspace_data:/app/workspace
+      - agent_data:/app/.agent
+    depends_on:
+      app:
+        condition: service_healthy
+
+volumes:
+  postgres_data:
+  redis_data:
+  workspace_data:
+  agent_data:

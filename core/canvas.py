@@ -45,6 +45,11 @@ NODE_SPEC: dict[str, dict[str, dict[str, str]]] = {
         "in": {},
         "out": {"video": "VIDEO"},
     },
+    "audio": {
+        "label": "音频素材",
+        "in": {},
+        "out": {"audio": "AUDIO"},
+    },
     "text": {
         "label": "文本（剧本/大纲/备注）",
         "in": {"in": "STRING"},
@@ -73,6 +78,16 @@ NODE_SPEC: dict[str, dict[str, dict[str, str]]] = {
     "video_gen": {
         "label": "视频生成",
         "in": {"prompt": "STRING", "ref": "IMAGE", "video_ref": "VIDEO"},
+        "out": {"video": "VIDEO"},
+    },
+    "tts_gen": {
+        "label": "旁白生成",
+        "in": {"text": "STRING"},
+        "out": {"audio": "AUDIO"},
+    },
+    "timeline": {
+        "label": "时间线 / 成片",
+        "in": {"video": "VIDEO", "audio": "AUDIO", "subtitle": "STRING"},
         "out": {"video": "VIDEO"},
     },
 }
@@ -305,7 +320,7 @@ class Canvas:
 
     def update_node(self, node_id: str, **fields: Any) -> Node:
         node = self.require(node_id)
-        if "status" in fields and fields["status"] not in NODE_STATUS:
+        if fields.get("status") is not None and fields["status"] not in NODE_STATUS:
             raise CanvasError(f"未知状态：{fields['status']}（可选：{', '.join(NODE_STATUS)}）")
         for key in ("label", "status", "position", "data", "outputs"):
             if key not in fields or fields[key] is None:
@@ -313,6 +328,16 @@ class Canvas:
             if key in ("data", "outputs"):
                 merged = dict(getattr(node, key))
                 merged.update(fields[key])
+                # A user/Agent edit made while a Worker is rendering must
+                # invalidate that Worker's generation token.  The Worker only
+                # writes ``active_generation_id`` itself, so that internal
+                # update is exempt from invalidation.
+                if (
+                    key == "data"
+                    and node.data.get("active_generation_id")
+                    and any(name != "active_generation_id" for name in fields[key])
+                ):
+                    merged["active_generation_id"] = f"edit_{uuid.uuid4().hex}"
                 setattr(node, key, merged)
             else:
                 setattr(node, key, fields[key])
@@ -686,6 +711,14 @@ class Canvas:
                 prompt_inputs = [edge for edge in self.incoming(node.id) if edge.target_handle == "prompt"]
                 if not prompt_inputs:
                     problems.append(f"生成节点「{node.label}」没有连接 prompt 输入，无法执行")
+            if node.type == "tts_gen":
+                text_inputs = [edge for edge in self.incoming(node.id) if edge.target_handle == "text"]
+                if not text_inputs and not str(node.data.get("text") or "").strip():
+                    problems.append(f"旁白节点「{node.label}」没有文本输入")
+            if node.type == "timeline":
+                video_inputs = [edge for edge in self.incoming(node.id) if edge.target_handle == "video"]
+                if not video_inputs:
+                    problems.append(f"时间线「{node.label}」没有连接任何视频片段")
             if node.type == "asset" and node.data.get("kind") in ("character", "scene") and not node.data.get("consistency_tags"):
                 problems.append(f"资产「{node.label}」缺少 consistency_tags（拼进提示词的稳定特征）")
 
@@ -846,7 +879,10 @@ class Canvas:
         for node_id, lv in level.items():
             buckets.setdefault(lv, []).append(node_id)
 
-        type_order = {"text": 0, "storyboard": 1, "asset": 2, "image": 2, "video": 2, "prompt": 3, "image_gen": 4, "video_gen": 5}
+        type_order = {
+            "text": 0, "storyboard": 1, "asset": 2, "image": 2, "video": 2, "audio": 2,
+            "prompt": 3, "image_gen": 4, "video_gen": 5, "tts_gen": 5, "timeline": 6,
+        }
 
         def visual_order(node_id: str) -> tuple[Any, ...]:
             node = self.nodes[node_id]
@@ -895,6 +931,93 @@ class Canvas:
             )
         return jobs
 
+    def timeline_jobs(self) -> list[dict[str, Any]]:
+        """Resolve timeline dependencies without mutating the canvas.
+
+        Edges express dependency.  ``clip_order`` is the authoritative playback
+        order because edge insertion order is an implementation detail.
+        """
+        order_index = {node_id: index for index, node_id in enumerate(self.nodes)}
+        jobs: list[dict[str, Any]] = []
+        for node_id in self.topo_order():
+            node = self.nodes[node_id]
+            if node.type != "timeline":
+                continue
+            incoming = self.incoming(node_id)
+            video_edges = [edge for edge in incoming if edge.target_handle == "video" and self.edge_type(edge) == "VIDEO"]
+            requested = [str(item) for item in (node.data.get("clip_order") or [])]
+            rank = {source_id: index for index, source_id in enumerate(requested)}
+            video_edges.sort(key=lambda edge: (rank.get(edge.source, 10**9), order_index.get(edge.source, 10**9)))
+            trims = node.data.get("trims") if isinstance(node.data.get("trims"), dict) else {}
+            clips: list[dict[str, Any]] = []
+            for edge in video_edges:
+                source = self.nodes.get(edge.source)
+                media = self.media_output(edge.source, "VIDEO")
+                trim = trims.get(edge.source) if isinstance(trims.get(edge.source), dict) else {}
+                clips.append(
+                    {
+                        "node_id": edge.source,
+                        "label": source.label if source else edge.source,
+                        "path": str(media.get("path") or ""),
+                        "mime_type": media.get("mime_type") or media.get("mime") or "",
+                        "trim_start": float(trim.get("start") or 0),
+                        "trim_end": trim.get("end"),
+                        "transition": "cut",
+                    }
+                )
+            audio = None
+            tts = None
+            for edge in incoming:
+                if edge.target_handle == "audio" and self.edge_type(edge) == "AUDIO":
+                    media = self.media_output(edge.source, "AUDIO")
+                    if media.get("path"):
+                        audio = {"node_id": edge.source, "path": str(media["path"])}
+                        break
+                    source = self.nodes.get(edge.source)
+                    if source and source.type == "tts_gen":
+                        narration = str(source.data.get("text") or "").strip()
+                        if not narration:
+                            for text_input in self.text_inputs(source.id):
+                                narration = str(text_input.get("text") or "").strip()
+                                if narration:
+                                    break
+                        if narration:
+                            tts = {
+                                "node_id": source.id,
+                                "text": narration,
+                                "provider": str(source.data.get("provider") or "mock"),
+                                "model": str(source.data.get("model") or "tts-1"),
+                                "voice": str(source.data.get("voice") or "alloy"),
+                                "speed": float(source.data.get("speed") or 1.0),
+                            }
+                            break
+            subtitle_text = str(node.data.get("subtitle_text") or "").strip()
+            if not subtitle_text:
+                for edge in incoming:
+                    if edge.target_handle == "subtitle" and self.edge_type(edge) == "STRING":
+                        subtitle_text = self.read_text(edge.source).strip()
+                        if subtitle_text:
+                            break
+            output = node.data.get("output") if isinstance(node.data.get("output"), dict) else {}
+            jobs.append(
+                {
+                    "node_id": node.id,
+                    "label": node.label,
+                    "clips": clips,
+                    "audio": audio,
+                    "tts": tts,
+                    "subtitle_text": subtitle_text,
+                    "output": {
+                        "width": int(output.get("width") or 1280),
+                        "height": int(output.get("height") or 720),
+                        "fps": int(output.get("fps") or 24),
+                    },
+                    "ready": bool(clips) and all(clip["path"] for clip in clips),
+                    "status": node.status,
+                }
+            )
+        return jobs
+
     # ------------------------------------------------------------------
     # 给模型看的紧凑视图 / 给前端看的完整视图
     # ------------------------------------------------------------------
@@ -904,6 +1027,14 @@ class Canvas:
         for node in self.nodes.values():
             outs = ", ".join(f"{name}({kind})" for name, kind in node.out_ports.items()) or "无"
             line = f"- {node.id}｜{node.type}｜{node.status}｜{node.label}｜输出：{outs}"
+            # 下游团队成员只拿紧凑画布摘要，不复制上游全文。正文路径必须出现在
+            # 摘要里，否则分镜师只能看到“有一个剧本节点”，却无法用 read_file
+            # 读取它，最终会退化成凭摘要写作或跳过 set_storyboard。
+            content_path = str(node.data.get("content_path") or "").strip()
+            if content_path:
+                line += f"｜正文：{content_path}"
+            if node.type == "storyboard" and isinstance(node.data.get("shots"), list):
+                line += f"｜结构化镜头：{len(node.data['shots'])} 个"
             if node.type == "prompt":
                 refs = self.refs_for(node.id)
                 if refs:

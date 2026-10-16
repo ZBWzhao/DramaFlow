@@ -25,6 +25,10 @@ FULL_BACKEND_DEFAULTS = {
     "INVOCATION_STORE_BACKEND": "postgres",
     "MEDIA_JOB_STORE_BACKEND": "postgres",
     "CANVAS_STORE_BACKEND": "postgres",
+    "SESSION_STORE_BACKEND": "postgres",
+    "MEDIA_ASSET_STORE_BACKEND": "postgres",
+    "PRODUCTION_RUN_STORE_BACKEND": "postgres",
+    "OUTBOX_PUBLISHER_ENABLED": "true",
     # 本地完整演示仍使用内嵌 Worker；多进程部署可覆盖为 false。
     "MEDIA_WORKER_EMBEDDED": "true",
 }

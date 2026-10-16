@@ -46,7 +46,7 @@ class CanvasConfig(BaseModel):
 # 参数模型（Pydantic → JSON Schema，模型乱传会被挡住并收到可读错误）
 # ---------------------------------------------------------------------------
 class GetCanvasArgs(BaseModel):
-    canvas: str = Field(DEFAULT_CANVAS, description="画布名（不带扩展名）")
+    canvas: str = Field("", description="画布名（不带扩展名）；留空使用用户当前选择的画布")
 
 
 class IdentifyStoryArgs(BaseModel):
@@ -57,25 +57,25 @@ class IdentifyStoryArgs(BaseModel):
 
 
 class AddNodeArgs(BaseModel):
-    canvas: str = Field(DEFAULT_CANVAS, description="画布名")
-    type: Literal["text", "storyboard", "asset", "image", "video", "prompt", "image_gen", "video_gen"] = Field(description="节点类型")
+    canvas: str = Field("", description="画布名；留空使用用户当前选择的画布")
+    type: Literal["text", "storyboard", "asset", "image", "video", "audio", "prompt", "image_gen", "video_gen", "tts_gen", "timeline"] = Field(description="节点类型")
     label: str = Field(min_length=1, max_length=80, description="节点显示名，如「第1场·片段2」")
     data: dict[str, Any] = Field(default_factory=dict, description="节点业务数据（见节点类型说明）")
 
 
 class NodeSpec(BaseModel):
-    type: Literal["text", "storyboard", "asset", "image", "video", "prompt", "image_gen", "video_gen"]
+    type: Literal["text", "storyboard", "asset", "image", "video", "audio", "prompt", "image_gen", "video_gen", "tts_gen", "timeline"]
     label: str = Field(min_length=1, max_length=80)
     data: dict[str, Any] = Field(default_factory=dict)
 
 
 class AddNodesArgs(BaseModel):
-    canvas: str = DEFAULT_CANVAS
+    canvas: str = Field("", description="画布名；留空使用用户当前选择的画布")
     nodes: list[NodeSpec] = Field(min_length=1)
 
 
 class UpdateNodeArgs(BaseModel):
-    canvas: str = DEFAULT_CANVAS
+    canvas: str = Field("", description="画布名；留空使用用户当前选择的画布")
     node_id: str = Field(description="节点 id")
     label: str | None = None
     status: Literal["draft", "ready", "generating", "done", "error"] | None = None
@@ -91,24 +91,24 @@ class Connection(BaseModel):
 
 
 class ConnectArgs(BaseModel):
-    canvas: str = DEFAULT_CANVAS
+    canvas: str = Field("", description="画布名；留空使用用户当前选择的画布")
     connections: list[Connection] = Field(min_length=1)
 
 
 class DeleteNodesArgs(BaseModel):
-    canvas: str = Field(DEFAULT_CANVAS)
+    canvas: str = Field("", description="画布名；留空使用用户当前选择的画布")
     node_ids: list[str] = Field(min_length=1)
 
 
 class SetTextArgs(BaseModel):
-    canvas: str = Field(DEFAULT_CANVAS)
+    canvas: str = Field("", description="画布名；留空使用用户当前选择的画布")
     node_id: str = Field(description="必须是 text / storyboard / prompt 这类文本节点")
     content: str = Field(min_length=1, description="正文内容（会写到 assets/<node_id>/content.md）")
     segment_no: int | None = Field(None, ge=1, description="prompt 节点对应的全局片段号；其他类型留空")
 
 
 class ExportPromptArgs(BaseModel):
-    canvas: str = Field(DEFAULT_CANVAS)
+    canvas: str = Field("", description="画布名；留空使用用户当前选择的画布")
     path: str = Field("", description="导出路径，默认 assets/export/<画布名>-prompts.md")
 
 
@@ -129,7 +129,7 @@ class Shot(BaseModel):
 
 
 class SetStoryboardArgs(BaseModel):
-    canvas: str = DEFAULT_CANVAS
+    canvas: str = Field("", description="画布名；留空使用用户当前选择的画布")
     node_id: str = Field(description="分镜节点 id")
     target_duration: float | None = Field(None, gt=0, description="目标总时长(秒)，会校验合计")
     shots: list[Shot] = Field(min_length=1)
@@ -166,7 +166,9 @@ def _info(canvas: Canvas) -> dict[str, Any]:
 
 
 def build_tools(ctx: ToolContext) -> list[Any]:
-    default_canvas = str(ctx.config.get("default_canvas") or DEFAULT_CANVAS)
+    def current_canvas(context: ToolContext) -> str:
+        """按本次请求绑定的画布动态解析，不能在工具装载时把默认值写死。"""
+        return str(context.config.get("default_canvas") or DEFAULT_CANVAS)
 
     async def _identify_story(args: IdentifyStoryArgs, context: ToolContext) -> ToolResult:
         """把自然语言创意确定性地路由到一张单故事画布。"""
@@ -213,7 +215,7 @@ def build_tools(ctx: ToolContext) -> list[Any]:
         )
 
     async def _get_canvas(args: GetCanvasArgs, context: ToolContext) -> ToolResult:
-        canvas = await _load(context, args.canvas or default_canvas)
+        canvas = await _load(context, args.canvas or current_canvas(context))
         known = await context.require_canvas_repository().list()
         body = canvas.summary()
         if len(known) > 1:
@@ -224,7 +226,7 @@ def build_tools(ctx: ToolContext) -> list[Any]:
         return tool_result(body, **_info(canvas))
 
     async def _add_node(args: AddNodeArgs, context: ToolContext) -> ToolResult:
-        canvas = await _load(context, args.canvas or default_canvas)
+        canvas = await _load(context, args.canvas or current_canvas(context))
         try:
             node = canvas.add_node(args.type, args.label, data=dict(args.data))
         except CanvasError as exc:
@@ -240,7 +242,7 @@ def build_tools(ctx: ToolContext) -> list[Any]:
 
     async def _add_nodes(args: AddNodesArgs, context: ToolContext) -> ToolResult:
         """批量建节点：一次工具往返建多个（成本优化：资产多的场景省 5+ 次往返）。"""
-        canvas = await _load(context, args.canvas or default_canvas)
+        canvas = await _load(context, args.canvas or current_canvas(context))
         created: list[Any] = []
         errors: list[str] = []
         for spec in args.nodes:
@@ -263,15 +265,12 @@ def build_tools(ctx: ToolContext) -> list[Any]:
         )
 
     async def _update_node(args: UpdateNodeArgs, context: ToolContext) -> ToolResult:
-        canvas = await _load(context, args.canvas or default_canvas)
+        canvas = await _load(context, args.canvas or current_canvas(context))
         try:
-            node = canvas.update_node(
-                args.node_id,
-                label=args.label,
-                status=args.status,
-                data=args.data,
-                outputs=args.outputs,
-            )
+            changes = args.model_dump(exclude={"canvas", "node_id"}, exclude_none=True)
+            if not changes:
+                return tool_result("更新失败：至少提供 label/status/data/outputs 中的一项", is_error=True)
+            node = canvas.update_node(args.node_id, **changes)
         except CanvasError as exc:
             return tool_result(f"更新失败：{exc}", is_error=True)
         await _save(context, canvas)
@@ -282,7 +281,7 @@ def build_tools(ctx: ToolContext) -> list[Any]:
         )
 
     async def _connect(args: ConnectArgs, context: ToolContext) -> ToolResult:
-        canvas = await _load(context, args.canvas or default_canvas)
+        canvas = await _load(context, args.canvas or current_canvas(context))
         done: list[str] = []
         try:
             for conn in args.connections:
@@ -301,13 +300,13 @@ def build_tools(ctx: ToolContext) -> list[Any]:
         )
 
     async def _delete_nodes(args: DeleteNodesArgs, context: ToolContext) -> ToolResult:
-        canvas = await _load(context, args.canvas or default_canvas)
+        canvas = await _load(context, args.canvas or current_canvas(context))
         nodes, edges = canvas.remove_nodes(args.node_ids)
         await _save(context, canvas)
         return tool_result(f"已删除 {nodes} 个节点、{edges} 条相关连线", **_changed(canvas))
 
     async def _set_text(args: SetTextArgs, context: ToolContext) -> ToolResult:
-        canvas = await _load(context, args.canvas or default_canvas)
+        canvas = await _load(context, args.canvas or current_canvas(context))
         try:
             node = canvas.require(args.node_id)
         except CanvasError as exc:
@@ -343,7 +342,7 @@ def build_tools(ctx: ToolContext) -> list[Any]:
         )
 
     async def _export_prompt(args: ExportPromptArgs, context: ToolContext) -> ToolResult:
-        canvas = await _load(context, args.canvas or default_canvas)
+        canvas = await _load(context, args.canvas or current_canvas(context))
         try:
             markdown = canvas.render_all()  # 展开 {{ref N}} → 【参考N】+ 参考声明
         except CanvasError as exc:
@@ -360,7 +359,7 @@ def build_tools(ctx: ToolContext) -> list[Any]:
         )
 
     async def _set_storyboard(args: SetStoryboardArgs, context: ToolContext) -> ToolResult:
-        canvas = await _load(context, args.canvas or default_canvas)
+        canvas = await _load(context, args.canvas or current_canvas(context))
         try:
             node = canvas.require(args.node_id)
         except CanvasError as exc:
@@ -438,18 +437,27 @@ def build_tools(ctx: ToolContext) -> list[Any]:
         ),
         define_tool(
             name="add_nodes",
-            description="批量创建多个节点（建资产/提示词这类成组的节点时用它，比一个个建省往返）",
+            description=(
+                "批量创建多个节点；nodes 中每一项都必须独立提供 type、label 和可选 data，"
+                "不能只在外层提供一次 type"
+            ),
             args_model=AddNodesArgs,
             execute=_add_nodes,
             side_effect=True,
-            prompt_guidelines=["要建 2 个以上同类节点时用 add_nodes 一次建完"],
+            prompt_guidelines=[
+                "要建 2 个以上同类节点时用 add_nodes 一次建完",
+                "nodes 数组的每个对象都必须包含 type；asset 节点的文字规格放在 data.spec",
+            ],
         ),
         define_tool(
             name="update_node",
-            description="更新节点：改标签、改状态、合并业务数据、写端口产出",
+            description="局部更新节点：只传需要修改的 label/status/data/outputs，未传字段保持不变",
             args_model=UpdateNodeArgs,
             execute=_update_node,
             side_effect=True,
+            prompt_guidelines=[
+                "不要为未修改字段传 null；资产说明写入 data.spec，不要对 asset 节点调用 set_text",
+            ],
         ),
         define_tool(
             name="connect_nodes",
@@ -482,7 +490,10 @@ def build_tools(ctx: ToolContext) -> list[Any]:
         ),
         define_tool(
             name="set_text",
-            description="把正文写进文本类节点（剧本/提示词），落盘到 assets/<节点id>/content.md",
+            description=(
+                "把正文写进 text/storyboard/prompt 文本类节点，落盘到 assets/<节点id>/content.md；"
+                "asset/image/video 节点不支持此工具"
+            ),
             args_model=SetTextArgs,
             execute=_set_text,
             side_effect=True,

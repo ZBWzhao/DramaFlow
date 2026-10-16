@@ -26,11 +26,23 @@ import struct
 import time
 import uuid
 import zlib
+import subprocess
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Protocol, runtime_checkable
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
+
+from .composition import CompositionError, ffmpeg_capabilities, probe_media
+
+
+class TFRouterHTTPError(RuntimeError):
+    """保留 HTTP 状态，便于区分任务创建后的短暂不可见和真正失败。"""
+
+    def __init__(self, code: int, detail: str) -> None:
+        self.code = code
+        self.detail = detail
+        super().__init__(f"TF-router 请求失败（HTTP {code}）：{detail}")
 
 
 @dataclass
@@ -130,22 +142,42 @@ class MockProvider:
         if not (64 <= width <= 2048 and 64 <= height <= 2048):
             raise ValueError("尺寸需在 64–2048 之间")
 
-        # 文件名对齐 Toonflow 的 <mediaType><uuid>.<ext>
-        filename = f"{kind}-{uuid.uuid4().hex[:10]}.png"
+        if kind not in {"image", "video"}:
+            raise ValueError(f"MockProvider 暂不支持 {kind}")
+        # 文件名对齐 Toonflow 的 <mediaType><uuid>.<ext>。视频必须是真的 MP4，
+        # 不能再拿 PNG 首帧伪装，否则后面的时间线永远无法被 FFmpeg 解码。
+        extension = ".png" if kind == "image" else ".mp4"
+        filename = f"{kind}-{uuid.uuid4().hex[:10]}{extension}"
         relative = f"assets/generated/{filename}"
         target = root / relative
         target.parent.mkdir(parents=True, exist_ok=True)
 
-        # image 直接出图；video 先出**首帧**，并明确标注是 mock（不假装有视频文件）
-        frame = _placeholder_png(prompt, width, height)
-        target.write_bytes(frame)
-
         meta: dict[str, Any] = {"prompt_head": prompt[:60], "size": f"{width}x{height}", "model": model}
-        if kind == "video":
-            meta["note"] = "mock 只产出首帧；真实视频需要 provider 支持异步任务"
-            meta["plan"] = {"duration": request.get("duration", 5), "fps": 24, "first_frame": relative}
+        if kind == "image":
+            target.write_bytes(_placeholder_png(prompt, width, height))
+            return MediaResult(kind=kind, path=relative, mime="image/png", provider=self.name, mock=True, meta=meta)
 
-        return MediaResult(kind=kind, path=relative, mime="image/png", provider=self.name, mock=True, meta=meta)
+        capability = ffmpeg_capabilities()
+        if not capability["available"]:
+            raise CompositionError("Mock 视频需要 FFmpeg 才能生成真实 MP4；" + capability["reason"])
+        duration = max(1, min(30, int(request.get("duration") or 5)))
+        digest = hashlib.sha256(prompt.encode("utf-8")).digest()
+        color = f"0x{digest[0]:02x}{digest[1]:02x}{digest[2]:02x}"
+        command = [
+            str(capability["ffmpeg"]), "-nostdin", "-y", "-f", "lavfi",
+            "-i", f"color=c={color}:s={width}x{height}:r=24:d={duration}",
+            "-an", "-c:v", "libx264", "-preset", "veryfast", "-pix_fmt", "yuv420p",
+            "-movflags", "+faststart", str(target),
+        ]
+        completed = subprocess.run(
+            command, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+            text=True, encoding="utf-8", errors="replace", timeout=120, check=False, shell=False,
+        )
+        if completed.returncode != 0:
+            raise RuntimeError(f"Mock 视频生成失败：{completed.stderr[-1000:]}")
+        inspected = probe_media(target)
+        meta.update({"duration": inspected["duration"], "fps": 24, "note": "FFmpeg 生成的可复现 Mock MP4"})
+        return MediaResult(kind=kind, path=relative, mime="video/mp4", provider=self.name, mock=True, meta=meta)
 
     def resume(self, kind: str, operation_id: str, request: dict[str, Any], root: Path) -> MediaResult:
         raise RuntimeError("Mock 任务没有远端 operation_id，无法恢复")
@@ -172,10 +204,12 @@ class TFRouterProvider:
         {"id": "全能图片G-2.5", "kind": "image", "label": "全能图片 G-2.5", "sizes": ["1K", "2K", "4K"]},
     ]
 
-    def __init__(self, api_key: str) -> None:
+    def __init__(self, api_key: str, api_url: str | None = None) -> None:
         self.api_key = api_key.strip().removeprefix("Bearer ").strip()
         if not self.api_key:
             raise ValueError("TF-router API Key 为空")
+        # 在实例化时读取地址，避免测试/部署过程中修改环境变量后仍使用旧地址。
+        self.api_url = (api_url or os.environ.get("TF_ROUTER_BASE_URL") or "https://api.toonflow.net/v1").rstrip("/")
 
     def list_models(self) -> list[dict[str, Any]]:
         return [dict(model) for model in self.MODELS]
@@ -192,7 +226,7 @@ class TFRouterProvider:
                 value = json.loads(response.read().decode("utf-8"))
         except HTTPError as exc:
             detail = exc.read().decode("utf-8", errors="replace")[:500]
-            raise RuntimeError(f"TF-router 请求失败（HTTP {exc.code}）：{detail}") from exc
+            raise TFRouterHTTPError(exc.code, detail) from exc
         except (URLError, TimeoutError) as exc:
             raise RuntimeError(f"TF-router 连接失败：{exc}") from exc
         if not isinstance(value, dict):
@@ -201,17 +235,46 @@ class TFRouterProvider:
 
     @staticmethod
     def _result_value(payload: dict[str, Any]) -> str | None:
+        """兼容 Provider 常见的 data/url/output/result 媒体返回形态。"""
+        def find(value: Any) -> str | None:
+            if isinstance(value, str) and value.strip():
+                return value.strip()
+            if isinstance(value, dict):
+                for key in ("url", "data", "output", "result", "file_url", "download_url"):
+                    found = find(value.get(key))
+                    if found:
+                        return found
+            if isinstance(value, list):
+                for item in value:
+                    found = find(item)
+                    if found:
+                        return found
+            return None
+
+        return find(payload.get("data")) or find(payload.get("output")) or find(payload.get("result"))
+
+    @staticmethod
+    def _task_id(payload: dict[str, Any]) -> str | None:
+        """从不同版本的创建响应中提取远端任务 ID。"""
         data = payload.get("data")
+        candidates: list[Any] = [payload.get("taskICode"), payload.get("task_id"), payload.get("id")]
         if isinstance(data, dict):
-            value = data.get("data") or data.get("url")
-            return value.strip() if isinstance(value, str) and value.strip() else None
-        return data.strip() if isinstance(data, str) and data.strip() else None
+            candidates.extend([data.get("taskICode"), data.get("task_id"), data.get("id"), data.get("code")])
+        else:
+            candidates.append(data)
+        for value in candidates:
+            if isinstance(value, str) and value.strip():
+                return value.strip()
+        return None
 
     def _save_asset(self, value: str, kind: str, root: Path, model: str) -> MediaResult:
         if value.startswith("data:"):
             header, encoded = value.split(",", 1)
-            mime = header[5:].split(";", 1)[0]
-            content = base64.b64decode(encoded)
+            mime = header[5:].split(";", 1)[0].lower()
+            try:
+                content = base64.b64decode(encoded, validate=True)
+            except (ValueError, TypeError) as exc:
+                raise RuntimeError("TF-router 返回的 data URL 不是有效 Base64") from exc
         elif value.startswith(("http://", "https://")):
             try:
                 with urlopen(value, timeout=180) as response:  # noqa: S310 - Provider result URL
@@ -246,11 +309,20 @@ class TFRouterProvider:
             requested_size = str(request.get("size") or "2K")
             if "x" in requested_size.lower():
                 requested_size = "2K"
+            size_alias = {"1k": "1K", "1.5k": "1.5K", "2k": "2K", "3k": "3K", "4k": "4K"}
+            requested_size = size_alias.get(requested_size.strip().lower(), requested_size.strip())
             body = {
                 "model": model,
                 "prompt": prompt,
+                # TF-router 的 Seedream 兼容层要求尺寸为小写，元数据字段与官方适配器一致。
                 "size": requested_size.lower(),
-                "metadata": {"aspectRatio": str(request.get("ratio") or "16:9")},
+                "metadata": {
+                    "response_format": "url",
+                    "aspectRatio": str(request.get("ratio") or "16:9"),
+                    "sequential_image_generation": "disabled",
+                    "stream": False,
+                    "watermark": False,
+                },
             }
             suffix = "Image"
         else:
@@ -268,8 +340,8 @@ class TFRouterProvider:
             suffix = "Video"
 
         created = self._json(f"{kind}/generate{suffix}", body)
-        task_id = created.get("data")
-        if not isinstance(task_id, str) or not task_id.strip():
+        task_id = self._task_id(created)
+        if not task_id:
             raise RuntimeError("TF-router 未返回任务 ID")
         callback = request.get("operation_callback")
         if callable(callback):
@@ -289,10 +361,30 @@ class TFRouterProvider:
         suffix = "Image" if kind == "image" else "Video"
         deadline = time.monotonic() + int(os.environ.get("MEDIA_GENERATION_TIMEOUT", "1800"))
         interval = max(1.0, float(os.environ.get("MEDIA_POLL_INTERVAL", "3")))
+        # 创建接口落库与状态查询接口之间可能有几秒最终一致性窗口。
+        # Provider 创建任务后可能需要几十秒才在查询服务可见；这段时间不能把
+        # “暂时查不到”误判成远端失败，否则会留下已扣费但未落盘的任务。
+        not_found_grace_deadline = time.monotonic() + min(60.0, max(interval * 10, 30.0))
         while time.monotonic() < deadline:
-            result = self._json(f"{kind}/get{suffix}Status", {"taskICode": task_id})
+            try:
+                result = self._json(f"{kind}/get{suffix}Status", {"taskICode": task_id})
+            except TFRouterHTTPError as exc:
+                detail = exc.detail.lower()
+                transient_not_found = exc.code in {400, 404} and any(
+                    marker in detail for marker in ("不存在", "not found", "not exist", "does not exist")
+                )
+                if transient_not_found and time.monotonic() < not_found_grace_deadline:
+                    time.sleep(interval)
+                    continue
+                raise
             nested = result.get("data") if isinstance(result.get("data"), dict) else {}
-            status = str(result.get("status") or nested.get("status") or "").lower()
+            status = str(
+                result.get("status")
+                or result.get("state")
+                or nested.get("status")
+                or nested.get("state")
+                or ""
+            ).lower()
             if status in {"success", "completed"}:
                 value = self._result_value(result)
                 if not value:

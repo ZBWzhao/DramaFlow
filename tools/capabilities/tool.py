@@ -89,7 +89,7 @@ class Plugin:
                 ),
                 "log": "结构化运行日志",
                 "media": (
-                    "仅 Mock Provider：可验证生成链路，但图片是占位图、视频只产出占位首帧，不是真实媒体"
+                    "仅 Mock Provider：可验证完整链路；图片是占位图，视频是可播放的占位 MP4，但都不是真实模型作品"
                     if media_mode == "mock"
                     else f"真实媒体 Provider 已配置：{provider}；执行前仍需用户审批" if media_mode == "real"
                     else "没有注入媒体 Provider"

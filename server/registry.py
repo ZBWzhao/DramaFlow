@@ -27,8 +27,11 @@ from core.context import ToolContext
 from core.events import EventBus
 from core.llm import LLM
 from core.invocation_store import ApprovalStore, ToolInvocationStore, create_invocation_stores
+from core.media_asset_repository import MediaAssetRepository, create_media_asset_repository
 from core.loader import TOOLS_ROOT, create_agent_tools, reload_tool
 from core.mcp import MCPManager
+from core.outbox import PostgresRedisOutboxPublisher, create_outbox_publisher
+from core.production_repository import ProductionRunRepository, create_production_run_repository
 from core.questions import QuestionBroker, build_question_tool
 from core.question_store import QuestionStateStore, create_question_store
 from core.runtime_store import (
@@ -39,6 +42,11 @@ from core.runtime_store import (
     create_run_state_store,
 )
 from core.session import SESSIONS_DIR, Session
+from core.session_repository import (
+    PostgresSessionRepository,
+    SessionRepository,
+    create_session_repository,
+)
 from core.skills import SKILLS_ROOT, build_skill_tools, discover_skills
 from core.subagent import DelegationManager, restore_subagents
 
@@ -83,6 +91,9 @@ class SessionRegistry:
         invocations: ToolInvocationStore | None = None,
         approvals: ApprovalStore | None = None,
         canvas_repository: CanvasRepository | None = None,
+        session_repository: SessionRepository | None = None,
+        media_assets: MediaAssetRepository | None = None,
+        production_runs: ProductionRunRepository | None = None,
     ) -> None:
         self.llm = llm
         self.workspace = workspace
@@ -98,6 +109,14 @@ class SessionRegistry:
         self.invocations = invocations or default_invocations
         self.approvals = approvals or default_approvals
         self.canvas_repository = canvas_repository or create_canvas_repository(Path(workspace))
+        self.session_repository = session_repository or create_session_repository(SESSIONS_DIR)
+        self.media_assets = media_assets or create_media_asset_repository()
+        self.production_runs = production_runs or create_production_run_repository(
+            Path(workspace).resolve().parent / ".agent" / "production-runs"
+        )
+        self.outbox_publisher: PostgresRedisOutboxPublisher | None = None
+        if isinstance(self.session_repository, PostgresSessionRepository):
+            self.outbox_publisher = create_outbox_publisher(self.session_repository.database)
         # MCP 配置属于项目而不是工作区内容；缺少配置文件时保持空插件集。
         self.mcp = MCPManager(Path(workspace).resolve().parent / ".agent" / "mcp.json")
 
@@ -109,6 +128,11 @@ class SessionRegistry:
         await self.invocations.start()
         await self.approvals.start()
         await self.canvas_repository.start()
+        await self.session_repository.start()
+        await self.media_assets.start()
+        await self.production_runs.start()
+        if self.outbox_publisher is not None:
+            await self.outbox_publisher.start()
         tools, _, ctx = await create_agent_tools(
             cwd=self.workspace, root=TOOLS_ROOT, canvas_repository=self.canvas_repository
         )
@@ -134,6 +158,14 @@ class SessionRegistry:
         await self.invocations.close()
         await self.approvals.close()
         await self.canvas_repository.close()
+        # Drain synchronous JSONL -> PostgreSQL projection writes before stopping
+        # the publisher, otherwise shutdown could leave avoidable pending rows.
+        await self.session_repository.flush()
+        if self.outbox_publisher is not None:
+            await self.outbox_publisher.close()
+        await self.session_repository.close()
+        await self.media_assets.close()
+        await self.production_runs.close()
 
     # ------------------------------------------------------------------
     def session_path(self, session_id: str) -> Any:
@@ -157,7 +189,7 @@ class SessionRegistry:
         # 会话落盘：一条 entry 一行 JSONL，压缩前的原始对话也留在文件里。
         # 文件已存在就 load —— 服务重启后同一个 session_id 还能接着聊（对应 sessions.ts 的 getAgentSession）。
         path = self.session_path(sid)
-        session = Session.load(path) if path.exists() else Session(session_id=sid, path=path)
+        session = self.session_repository.get_or_create(sid, path)
         # 运行上下文必须继承启动阶段注入的 media/question/canvas 等能力。
         # 之前这里只复制写锁，导致工具虽然已加载，执行时 require_media() 却失败。
         ctx = self.base_context.derive() if self.base_context is not None else ToolContext(cwd=self.workspace)
@@ -205,6 +237,10 @@ class SessionRegistry:
     def bind_canvas(self, live: LiveSession, canvas: str, title: str = "") -> None:
         """把会话归属写进 JSONL；画布切换和进程重启后都能恢复。"""
         canvas = (canvas or "main").strip()[:120]
+        # 工具执行时从 context 读取当前画布。只把归属写进 sessionMeta 不够：
+        # 团队/子 Agent 会从父 Context 派生运行上下文，如果这里不更新，
+        # 它们会继续把节点写进服务启动时的默认画布（通常是 main）。
+        live.agent.context.config["default_canvas"] = canvas
         latest = live.agent.session.customs_of(CUSTOM_SESSION_META)
         current = latest[-1] if latest else {}
         if current.get("canvas") == canvas and (not title or current.get("title") == title):
@@ -230,18 +266,11 @@ class SessionRegistry:
 
     def delete_session(self, session_id: str) -> list[str]:
         """删除主会话和它的子 Agent 文件；只接受已通过边界校验的精确 ID。"""
-        path = self.session_path(session_id)
+        self.session_path(session_id)
         live = self.sessions.get(session_id)
         if live and live.task and not live.task.done():
             raise RuntimeError("运行中的会话不能删除，请先停止")
-        deleted: list[str] = []
-        targets = [path, *path.parent.glob(f"{session_id}.*.jsonl")]
-        for target in targets:
-            resolved = target.resolve()
-            if resolved.parent != path.parent or not resolved.is_file():
-                continue
-            resolved.unlink()
-            deleted.append(resolved.name)
+        deleted = self.session_repository.delete(session_id)
         self.sessions.pop(session_id, None)
         return deleted
 
@@ -357,13 +386,12 @@ class SessionRegistry:
 
     def list_sessions(self, canvas: str | None = None) -> list[dict[str, Any]]:
         rows: list[dict[str, Any]] = []
-        SESSIONS_DIR.mkdir(parents=True, exist_ok=True)
-        for path in SESSIONS_DIR.glob("*.jsonl"):
-            sid = path.stem
+        for stored_session in self.session_repository.all():
+            sid = stored_session.id
             if not SESSION_ID_PATTERN.fullmatch(sid):
                 continue  # 子 Agent 文件含点号，不出现在主会话列表
             try:
-                session = self.sessions[sid].agent.session if sid in self.sessions else Session.load(path)
+                session = self.sessions[sid].agent.session if sid in self.sessions else stored_session
                 meta = self._meta(session)
                 bound_canvas = meta.get("canvas")
                 if canvas and bound_canvas not in (None, "", canvas):
@@ -378,7 +406,10 @@ class SessionRegistry:
                         "title": meta.get("title") or str(first_user).strip()[:40] or "新对话",
                         "canvas": bound_canvas,
                         "messages": sum(1 for m in self._active_message_entries(session) if m.get("role") in {"user", "assistant"}),
-                        "updated_at": path.stat().st_mtime,
+                        "updated_at": max(
+                            (float(item.get("ts") or 0) for item in session.entries()),
+                            default=0.0,
+                        ),
                         "running": bool(sid in self.sessions and self.sessions[sid].task and not self.sessions[sid].task.done()),
                     }
                 )
@@ -389,6 +420,28 @@ class SessionRegistry:
     def session_detail(self, session_id: str) -> dict[str, Any]:
         live = self.get_or_create(session_id)
         session = live.agent.session
+        run_records = session.customs_of("runCheckpoint")
+        last_run = run_records[-1] if run_records else None
+        if last_run is None:
+            # 兼容升级前的会话：正常完成一定以“无工具调用的 assistant 正文”收尾；
+            # 若活动分支最后停在 tool（或仍带 tool_calls 的 assistant），说明旧运行被轮次上限截断。
+            active_messages = self._active_message_entries(session)
+            tail = active_messages[-1] if active_messages else None
+            if tail and (
+                tail.get("role") == "tool"
+                or (tail.get("role") == "assistant" and tail.get("tool_calls"))
+            ):
+                last_run = {
+                    "status": "limited",
+                    "reason": "legacy_incomplete_tool_chain",
+                    "turn": None,
+                    "max_turns": None,
+                    "last_entry_id": tail.get("id"),
+                    "resume_instruction": (
+                        "继续当前任务：先读取当前画布和已有产物，核对未完成项；"
+                        "不要重复创建已有节点，只补齐缺失内容并最终给出交付总结。"
+                    ),
+                }
         return {
             "id": live.id,
             "meta": self._meta(session),
@@ -397,6 +450,7 @@ class SessionRegistry:
             "sub_agents": self.subagents(live.id),
             "pending_questions": live.questions.snapshot(),
             "running": bool(live.task and not live.task.done()),
+            "last_run": last_run,
         }
 
     async def session_detail_async(self, session_id: str) -> dict[str, Any]:
@@ -405,6 +459,7 @@ class SessionRegistry:
         detail["pending_questions"] = [item.to_public() for item in questions]
         active = await self.run_states.active_run(session_id)
         detail["running"] = bool(active) or detail["running"]
+        detail["production_run"] = await self.production_runs.latest_for_session(session_id)
         return detail
 
     async def answer_question(self, session_id: str, question_id: str, answer: str) -> dict[str, Any]:
@@ -566,12 +621,13 @@ class SessionRegistry:
         }
 
     def entries(self, session_id: str, limit: int = 60) -> list[dict[str, Any]]:
-        path = self.session_path(session_id)
+        self.session_path(session_id)
         live = self.sessions.get(session_id)
         if live is None:
-            if not path.exists():
+            session = self.session_repository.get(session_id)
+            if session is None:
                 return []
-            return Session.load(path).entries()[-limit:]
+            return session.entries()[-limit:]
         return live.agent.session.entries()[-limit:]
 
     def subagents(self, session_id: str) -> list[dict[str, Any]]:

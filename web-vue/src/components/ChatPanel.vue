@@ -11,6 +11,7 @@ import { ElMessage, ElMessageBox } from "element-plus";
 import { actions, state } from "../store.js";
 import AssistantMessage from "./AssistantMessage.vue";
 import QuestionCard from "./QuestionCard.vue";
+import ProductionProgress from "./ProductionProgress.vue";
 
 const draft = ref("");
 const streamEl = ref(null);
@@ -146,6 +147,8 @@ const silent = computed(() => {
 
 const statusText = computed(() => {
   if (state.running) return `${elapsed.value.toFixed(1)}s · ${state.activity || "处理中…"}`;
+  if (state.endReason === "limited") return "已暂停，进度已保存";
+  if (state.endReason === "waiting_approval") return "创作包已验收，等待生成审批";
   if (state.endReason === "unknown") return "上次运行未正常结束";
   if (state.status === "error") return "上次运行出错";
   return "空闲";
@@ -209,6 +212,25 @@ async function onSend() {
   } catch (err) {
     draft.value = text;
     ElMessage.error(`发送失败：${err.message || err}`);
+  }
+}
+
+async function onContinue() {
+  if (state.productionRun?.status === "limited") {
+    try {
+      await actions.resumeProduction();
+    } catch (err) {
+      ElMessage.error(`继续制作失败：${err.message || err}`);
+    }
+    return;
+  }
+  const instruction = state.resumeInstruction
+    || "继续当前任务：先读取当前画布和已有产物，核对未完成项；不要重复创建已有节点，只补齐缺失内容并最终给出交付总结。";
+  stickBottom.value = true;
+  try {
+    await actions.send(instruction);
+  } catch (err) {
+    ElMessage.error(`继续制作失败：${err.message || err}`);
   }
 }
 
@@ -279,6 +301,7 @@ watch(lastActivity, () => scrollToBottom());
       </span>
     </div>
     <div ref="streamEl" class="chat-stream" @scroll="onScroll">
+      <ProductionProgress />
       <div v-if="!state.feed.length" class="chat-empty">
         <h2>做一集短剧</h2>
         <p>“把『外卖员深夜送单，发现店员是失散多年的姐姐』做成 60 秒短剧生产图”</p>
@@ -407,12 +430,15 @@ watch(lastActivity, () => scrollToBottom());
           <el-select v-model="state.mode" size="small" class="agent-mode-select">
             <el-option v-for="opt in modeOptions" :key="opt.value" :label="opt.label" :value="opt.value" />
           </el-select>
-          <span class="composer-status" :class="{ running: state.running, warn: silent > 0 }">
+          <span class="composer-status" :class="{ running: state.running, warn: silent > 0 || state.endReason === 'limited' }">
             <i v-if="state.running" class="pulse" />
             {{ statusText }}
           </span>
           <span v-if="usageText" class="dim mono usage-strip">{{ usageText }}</span>
           <span style="flex: 1" />
+          <el-button v-if="state.endReason === 'limited' && !state.running" size="small" type="warning" plain @click="onContinue">
+            继续制作
+          </el-button>
           <el-button v-if="state.feed.length && !state.running" link size="small" @click="actions.clearFeed()">
             清屏
           </el-button>

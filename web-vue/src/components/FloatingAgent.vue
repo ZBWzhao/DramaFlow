@@ -17,6 +17,7 @@ let drag = null;
 
 const statusText = computed(() => {
   if (state.running) return state.activity || "运行中";
+  if (state.endReason === "limited") return "已暂停，可继续";
   if (state.status === "error") return "需要检查";
   return "空闲";
 });

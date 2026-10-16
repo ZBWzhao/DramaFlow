@@ -62,6 +62,7 @@ const silent = computed(() => {
 
 const STAMP = {
   done: { cls: "ok", icon: "CircleCheck", text: "完成" },
+  waiting_approval: { cls: "warn", icon: "WarningFilled", text: "创作包已验收，等待审批" },
   aborted: { cls: "warn", icon: "WarningFilled", text: "已中断" },
   error: { cls: "danger", icon: "WarningFilled", text: "出错了" },
   unknown: { cls: "danger", icon: "WarningFilled", text: "未正常结束" },
@@ -148,6 +149,9 @@ async function deleteAnswer() {
           <b>{{ part.member }}</b>
           <span class="dim">角色 {{ part.role }}</span>
           <span class="dim">工具白名单：{{ part.tools.join("、") || "无" }}</span>
+          <el-tag size="small" :type="part.status === 'done' ? 'success' : 'warning'">
+            {{ part.status === "done" ? "已完成" : "执行中" }}
+          </el-tag>
         </div>
         <component v-else :is="canBind.get(part.kind)" :part="part" />
       </template>

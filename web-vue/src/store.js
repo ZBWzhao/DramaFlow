@@ -65,6 +65,7 @@ export const state = reactive({
   runResult: null, // { total, done, results: [] }  一键生成的结果条
   mediaJobId: null,
   generationReview: null, // 生成前人工审批卡
+  compositionReview: null, // 成片合成前人工审批卡
   canvasActivity: null, // Agent 正在/刚刚对画布做了什么
   changedNodeIds: [], // 最近一次工具调用改变的节点，用于画布脉冲高亮
   canvasRevision: 0,
@@ -75,7 +76,7 @@ export const state = reactive({
   // ---------------- 对话 ----------------
   feed: [], // { type:'user' } | { type:'assistant', parts:[], streaming } | { type:'note' }
   running: false,
-  status: "idle", // idle | running | done | error
+  status: "idle", // idle | running | done | limited | error
   sessionId: null,
   mode: "agent", // agent | team:<name>
   mediaPolicy: savedSetting("toonflow-media-policy", "ask"),
@@ -89,7 +90,8 @@ export const state = reactive({
   runStartedAt: null, // 本次运行开始（Date.now）
   lastEventAt: null, // 最近一次收到事件（含心跳）
   activity: null, // 当前在做什么（"执行工具 get_canvas" 之类）
-  endReason: null, // done | aborted | error | unknown
+  endReason: null, // done | limited | aborted | error | unknown
+  resumeInstruction: null,
   stopRequested: false,
   pings: 0, // 收到几次心跳（服务端仍在跑的证据）
   runId: null,
@@ -97,6 +99,7 @@ export const state = reactive({
   reconnectAttempts: 0,
   followupPending: 0,
   pendingQuestions: [],
+  productionRun: null, // 短剧生产状态机：阶段、验收问题、重试次数
   compacting: false, // 正在压缩上下文（这个阶段也要在界面上可见）
   nowTick: Date.now(), // 由组件定时刷新，驱动所有"计时器"重绘
 
@@ -229,6 +232,23 @@ async function moveNode({ id, position }) {
   }
 }
 
+async function updateNode(id, fields) {
+  try {
+    const result = await postJSON(`/api/canvas/nodes/${encodeURIComponent(id)}`, {
+      canvas: state.canvasName,
+      ...fields,
+      revision: state.canvasServerRevision,
+    });
+    await loadCanvas();
+    state.selectedId = id;
+    state.changedNodeIds = [id];
+    state.canvasRevision += 1;
+    return result;
+  } catch (error) {
+    throw await refreshAfterCanvasConflict(error);
+  }
+}
+
 async function connectNodes({ source, sourceHandle, target, targetHandle }) {
   try {
     const result = await postJSON("/api/canvas/connect", {
@@ -287,6 +307,7 @@ async function runCanvas({ approved = false } = {}) {
       ratio: "16:9",
       generate_audio: false,
       revision: state.canvasServerRevision,
+      production_run_id: state.productionRun?.id || null,
     };
     if (approved) {
       const approval = await postJSON("/api/canvas/approvals", payload);
@@ -299,7 +320,9 @@ async function runCanvas({ approved = false } = {}) {
     state.mediaJobId = accepted.job_id;
     rememberMediaJob(state.canvasName, accepted.job_id);
     state.generationReview = null;
-    return await waitForMediaJob(accepted.job_id, accepted.total);
+    const result = await waitForMediaJob(accepted.job_id, accepted.total);
+    await prepareCompositionReview().catch(() => {});
+    return result;
   } catch (error) {
     throw await refreshAfterCanvasConflict(error);
   } finally {
@@ -329,6 +352,7 @@ async function waitForMediaJob(jobId, total = 0) {
     rememberMediaJob(state.canvasName, null);
     if (job.status === "succeeded" && job.result) {
       state.runResult = { ...job.result, job_id: jobId, status: job.status };
+      await refreshProductionRun();
       return state.runResult;
     }
     state.runResult = {
@@ -339,6 +363,7 @@ async function waitForMediaJob(jobId, total = 0) {
       results: job.result?.results || [],
       error: job.error || job.result?.error || "媒体任务未完成",
     };
+    await refreshProductionRun();
     throw new Error(state.runResult.error);
   }
 }
@@ -525,6 +550,9 @@ const ACTIVITY = {
   sub_agent_start: "子 Agent 执行中…",
   sub_agent_report: "子 Agent 上报…",
   team_step_start: "团队成员执行中…",
+  production_stage_started: "开始新的制作阶段…",
+  production_stage_validating: "正在验收阶段产物…",
+  production_stage_retry: "验收未通过，正在定向返工…",
   compaction_start: "正在压缩上下文…",
 };
 
@@ -538,6 +566,9 @@ function handleEvent(ev) {
   }
   state.lastEventAt = Date.now();
   const list = partsListFor(ev);
+  if (ev.type.startsWith("production_") && ev.production_run) {
+    state.productionRun = ev.production_run;
+  }
   switch (ev.type) {
     case "session":
       state.sessionId = ev.session_id;
@@ -578,8 +609,9 @@ function handleEvent(ev) {
 
     // ---- 工具 ----
     case "tool_execution_start":
-      if (!ev.sub_agent && ["add_node", "add_nodes", "update_node", "connect_nodes", "delete_nodes", "set_text", "set_storyboard", "run_canvas", "generate_media"].includes(ev.tool)) {
-        state.canvasActivity = { phase: "running", tool: ev.tool, summary: `Agent 正在操作画布 · ${ev.tool}`, at: Date.now() };
+      if (["identify_story", "add_node", "add_nodes", "update_node", "connect_nodes", "delete_nodes", "set_text", "set_storyboard", "run_canvas", "generate_media"].includes(ev.tool)) {
+        const actor = ev.sub_agent ? `子 Agent ${ev.sub_agent}` : "Agent";
+        state.canvasActivity = { phase: "running", tool: ev.tool, summary: `${actor} 正在操作画布 · ${ev.tool}`, at: Date.now() };
       }
       if (ev.sub_agent) {
         // 子 Agent 的工具进它自己的 steps（保持父子层次）
@@ -658,20 +690,20 @@ function handleEvent(ev) {
 
     // ---- 子 Agent ----
     case "sub_agent_start": {
-      const message = currentAssistant();
-      if (message) {
-        finishThinking(message.parts);
-        message.parts.push({
-          kind: "sub",
-          name: ev.sub_agent,
-          status: "running",
-          tokens: null,
-          reports: [],
-          steps: [],
-          text: "",
-          expanded: false,
-        });
-      }
+      // 团队模式没有父 Agent 的 message_start；第一位成员启动时要主动
+      // 建立承载容器，否则后续子 Agent 的思考、工具和正文事件都会被丢掉。
+      const message = currentAssistant() || beginAssistant(`team-${state.runId || Date.now()}`);
+      finishThinking(message.parts);
+      message.parts.push({
+        kind: "sub",
+        name: ev.sub_agent,
+        status: "running",
+        tokens: null,
+        reports: [],
+        steps: [],
+        text: "",
+        expanded: true,
+      });
       break;
     }
     case "sub_agent_report": {
@@ -738,13 +770,44 @@ function handleEvent(ev) {
       };
       break;
     case "team_step_start": {
-      const message = currentAssistant();
-      if (message) {
-        finishThinking(message.parts);
-        message.parts.push({ kind: "team", member: ev.member, role: ev.role, tools: ev.tools || [] });
+      const message = currentAssistant() || beginAssistant(`team-${state.runId || Date.now()}`);
+      finishThinking(message.parts);
+      message.parts.push({
+        kind: "team",
+        member: ev.member,
+        role: ev.role,
+        tools: ev.tools || [],
+        status: "running",
+      });
+      break;
+    }
+    case "team_step_end": {
+      const message = currentAssistant() || [...state.feed].reverse().find((item) => item.type === "assistant");
+      const part = message?.parts
+        ?.slice()
+        .reverse()
+        .find((item) => item.kind === "team" && item.member === ev.member && item.role === ev.role && item.status === "running");
+      if (part) {
+        part.status = "done";
+        part.chars = ev.chars ?? null;
       }
       break;
     }
+    case "production_stage_retry":
+      feedPush({
+        type: "note",
+        title: "阶段验收未通过，已定向返工",
+        text: (ev.problems || []).slice(0, 4).join("；") || "正在让对应 Agent 修复已有产物",
+      });
+      break;
+    case "production_stage_failed":
+    case "production_run_limited":
+      state.status = "limited";
+      state.resumeInstruction = "只重试当前未通过阶段，不要重做已经验收成功的阶段。";
+      break;
+    case "production_waiting_approval":
+      state.activity = "创作包已通过验收，等待生成审批";
+      break;
     case "team_done": {
       if (ev.stats) state.stats = ev.stats;
       if (ev.result) {
@@ -760,17 +823,25 @@ function handleEvent(ev) {
           text: `增量 ${ev.usage.total_tokens} tokens｜全量 ${ev.usage_all?.total_tokens ?? "-"} tokens`,
         });
       }
+      state.endReason = ["done", "completed"].includes(ev.status) ? "done" : (ev.status || "done");
+      if (ev.production_run_id && state.productionRun) state.productionRun.id = ev.production_run_id;
+      if (state.endReason === "error") state.status = "error";
+      settleFeed();
       break;
     }
 
     // ---- 收尾 ----
     case "agent_end":
-      if (!ev.sub_agent && !state.endReason) state.endReason = "done";
-      settleFeed();
+      if (!ev.sub_agent && !state.endReason) {
+        state.endReason = ev.status === "completed" ? "done" : (ev.status || "done");
+        settleFeed();
+      }
       break;
     case "done":
       if (ev.stats) state.stats = ev.stats;
-      if (!state.endReason) state.endReason = "done";
+      if (!state.endReason || ev.status === "error") {
+        state.endReason = ev.status === "completed" || ev.status === "done" ? "done" : (ev.status || "done");
+      }
       settleFeed();
       refreshSubagents().catch(() => {});
       break;
@@ -781,10 +852,17 @@ function handleEvent(ev) {
       if (!state.stopRequested) feedPush({ type: "note", title: "已中止", text: "运行被取消" });
       break;
     case "limited":
-      state.status = "idle";
+      state.status = "limited";
       state.endReason = "limited";
       settleFeed();
-      feedPush({ type: "note", title: "输出达到长度限制", text: ev.message || "当前结果可能不完整，请继续生成" });
+      feedPush({
+        type: "note",
+        title: ev.reason === "max_turns" ? "本次制作已暂停" : "输出达到长度限制",
+        text: ev.message || "当前结果可能不完整，进度已保存，可以继续制作",
+      });
+      break;
+    case "checkpoint":
+      state.resumeInstruction = ev.resume_instruction || null;
       break;
     case "error":
       state.status = "error";
@@ -836,7 +914,7 @@ function settleFeed() {
   }
 }
 
-async function send(prompt) {
+async function send(prompt, options = {}) {
   const text = String(prompt || "").trim();
   if (!text) return;
   if (state.running) return queueFollowup(text);
@@ -850,6 +928,7 @@ async function send(prompt) {
   state.lastEventAt = Date.now();
   state.activity = "连接中…";
   state.endReason = null;
+  state.resumeInstruction = null;
   state.stopRequested = false;
   state.pings = 0;
   state.runId = null;
@@ -863,7 +942,13 @@ async function send(prompt) {
   const teamName = state.mode.startsWith("team:") ? state.mode.slice(5) : null;
   const path = teamName ? "/api/team" : "/api/agent";
   const body = teamName
-    ? { task: text, team: teamName, session_id: state.sessionId, canvas: state.canvasName }
+    ? {
+        task: text,
+        team: teamName,
+        session_id: state.sessionId,
+        canvas: state.canvasName,
+        production_run_id: options.productionRunId || null,
+      }
     : { prompt: text, session_id: state.sessionId, canvas: state.canvasName, media_policy: state.mediaPolicy };
 
   await streamNDJSON(
@@ -908,11 +993,26 @@ async function send(prompt) {
   settleFeed();
   state.running = false;
   state.activity = null;
-  if (state.status !== "error") state.status = ["done", "aborted", "limited"].includes(state.endReason) ? "idle" : "error";
+  if (state.status !== "error") {
+    state.status = state.endReason === "limited"
+      ? "limited"
+      : (["done", "aborted", "waiting_approval"].includes(state.endReason) ? "idle" : "error");
+  }
   if (state.sessionId) await Promise.all([refreshStats(), refreshSubagents()]);
-  if (state.mediaPolicy === "auto_review" && state.canvasRevision > canvasRevisionBefore && state.endReason === "done") {
+  if (
+    state.mediaPolicy === "auto_review"
+    && state.canvasRevision > canvasRevisionBefore
+    && ["done", "waiting_approval"].includes(state.endReason)
+  ) {
     await prepareGenerationReview().catch(() => {});
   }
+}
+
+async function resumeProduction() {
+  const run = state.productionRun;
+  if (!run?.id || state.running) return null;
+  state.mode = `team:${run.team || "dramaTeam"}`;
+  return send(run.user_request || "继续完成当前短剧生产任务", { productionRunId: run.id });
 }
 
 async function queueFollowup(text) {
@@ -1016,6 +1116,35 @@ async function approveGeneration() {
   return runCanvas({ approved: true });
 }
 
+async function prepareCompositionReview() {
+  const plan = await getJSON(`/api/canvas/composition-plan?name=${encodeURIComponent(state.canvasName)}`);
+  state.compositionReview = plan.total ? { ...plan, requestedAt: Date.now() } : null;
+  return plan;
+}
+
+async function composeCanvas() {
+  state.canvasBusy = true;
+  try {
+    const payload = {
+      canvas: state.canvasName,
+      approved: true,
+      revision: state.canvasServerRevision,
+      production_run_id: state.productionRun?.id || null,
+    };
+    const approval = await postJSON("/api/canvas/composition-approvals", payload);
+    payload.approval_id = approval.approval_id;
+    const accepted = await postJSON("/api/canvas/compose", payload);
+    state.mediaJobId = accepted.job_id;
+    rememberMediaJob(state.canvasName, accepted.job_id);
+    state.compositionReview = null;
+    return await waitForMediaJob(accepted.job_id, accepted.total);
+  } catch (error) {
+    throw await refreshAfterCanvasConflict(error);
+  } finally {
+    state.canvasBusy = false;
+  }
+}
+
 function dismissGenerationReview() {
   state.generationReview = null;
 }
@@ -1058,8 +1187,15 @@ async function openSession(sessionId) {
       answer: "",
     }));
     state.feed.push(...state.pendingQuestions);
-    state.status = "idle";
-    state.endReason = null;
+    state.productionRun = data.production_run || null;
+    const lastRun = data.last_run || null;
+    const productionStatus = state.productionRun?.status || null;
+    const limited = productionStatus === "limited" || lastRun?.status === "limited";
+    state.status = limited ? "limited" : "idle";
+    state.endReason = limited ? "limited" : (productionStatus === "waiting_approval" ? "waiting_approval" : null);
+    state.resumeInstruction = limited
+      ? (lastRun?.resume_instruction || "只重试当前未通过阶段，不要重做已经验收成功的阶段。")
+      : null;
     state.usage = null;
     rememberSession(state.canvasName, data.id);
     return data;
@@ -1085,6 +1221,7 @@ async function deleteSession() {
   state.stats = null;
   state.subagents = [];
   state.pendingQuestions = [];
+  state.productionRun = null;
   await loadSessions();
   return data;
 }
@@ -1120,6 +1257,7 @@ async function restoreSessionForCanvas() {
   state.stats = null;
   state.subagents = [];
   state.pendingQuestions = [];
+  state.productionRun = null;
   return null;
 }
 
@@ -1138,6 +1276,21 @@ async function refreshStats() {
     state.stats = await getJSON(`/api/sessions/${state.sessionId}/stats`);
   } catch {
     /* 会话刚建、统计还没落盘时忽略 */
+  }
+}
+
+async function refreshProductionRun() {
+  if (!state.sessionId) return null;
+  try {
+    const data = await getJSON(`/api/sessions/${encodeURIComponent(state.sessionId)}/production-run`);
+    state.productionRun = data.production_run || null;
+    if (state.productionRun?.status === "limited") {
+      state.status = "limited";
+      state.endReason = "limited";
+    }
+    return state.productionRun;
+  } catch {
+    return null;
   }
 }
 
@@ -1217,6 +1370,7 @@ export const actions = {
   loadCanvases,
   loadCanvas,
   moveNode,
+  updateNode,
   connectNodes,
   deleteEdge,
   createNode,
@@ -1225,12 +1379,15 @@ export const actions = {
   runCanvas,
   reconcileMediaJob,
   prepareGenerationReview,
+  prepareCompositionReview,
+  composeCanvas,
   approveGeneration,
   dismissGenerationReview,
   exportPrompts,
   send,
   queueFollowup,
   answerQuestion,
+  resumeProduction,
   stop,
   clearFeed,
   loadSessions,
@@ -1242,6 +1399,7 @@ export const actions = {
   restoreSessionForCanvas,
   switchCanvas,
   refreshStats,
+  refreshProductionRun,
   refreshSubagents,
   loadTools,
   loadSkills,

@@ -139,6 +139,8 @@ class TeamResult:
     team: str
     steps: list[StepResult] = field(default_factory=list)
     final: str = ""
+    status: str = "done"
+    production_run_id: str | None = None
 
     @property
     def usage(self) -> Usage:
@@ -193,10 +195,14 @@ class TeamRunner:
         member = self.manifest.members[name]
         tools = [t for t in member.tools if t in self.by_name]
         instructions = read_instructions(self.team_dir, member)
+        # 不同团队经常都有 director / reviewer。若直接拿成员名作为子会话键，
+        # 同一个聊天里切换团队会复用另一团队的历史和 system prompt。
+        # 用 team + member 做运行时命名空间，彻底隔离角色会话。
+        runtime_name = f"{self.manifest.name}_{name}"
 
         self.bus.emit("team_step_start", member=name, role=role, tools=tools)
         result = await self.manager.delegate(
-            name=name,
+            name=runtime_name,
             task=task,
             tool_names=tools,
             role_prompt=f"# 你的角色：{name}\n\n{instructions}",

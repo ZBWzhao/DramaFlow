@@ -56,11 +56,21 @@ const labelTop = (index) => `${19 + index * 30}px`;
           preload="metadata"
           @click.stop
         />
+        <audio
+          v-else-if="media.port === 'audio'"
+          class="nowheel nodrag"
+          :src="mediaSrc"
+          controls
+          preload="metadata"
+          @click.stop
+        />
         <img v-else :src="mediaSrc" :alt="node.label" />
         <span v-if="media.mock" class="mock-badge">mock 占位</span>
       </div>
       <div v-if="node.type === 'image'" class="tnode-connect-hint">从右侧橙色圆点拖到 ref / image 输入</div>
       <div v-else-if="node.type === 'video'" class="tnode-connect-hint">从右侧紫色圆点拖到 video_ref 输入</div>
+      <div v-else-if="node.type === 'audio'" class="tnode-connect-hint">从右侧音频端口拖到时间线 audio 输入</div>
+      <div v-else-if="node.type === 'timeline'" class="tnode-connect-hint">连接视频后，点击底部“成片”并人工确认</div>
 
       <!-- 输入端口（左） -->
       <Handle

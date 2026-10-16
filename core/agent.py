@@ -15,6 +15,7 @@ from __future__ import annotations
 import asyncio
 import inspect
 import json
+import os
 import time
 from collections import deque
 from dataclasses import dataclass, field
@@ -34,6 +35,15 @@ from .session import Session
 MAX_EVENT_TEXT = 6000
 
 
+def _positive_env_int(name: str, default: int) -> int:
+    """读取正整数配置；配置写错时使用安全默认值，而不是让服务启动失败。"""
+    try:
+        value = int(os.environ.get(name, str(default)))
+    except (TypeError, ValueError):
+        return default
+    return value if value > 0 else default
+
+
 class AgentAborted(Exception):
     """被取消。对应 Toonflow 的 AbortError。"""
 
@@ -46,7 +56,9 @@ class Agent:
     context: ToolContext
     bus: EventBus = field(default_factory=EventBus)
     name: str = "main"
-    max_turns: int = 12
+    # 12 轮不足以稳定完成“剧本→分镜→资产→提示词→连线”的完整生产图。
+    # 仍保留硬上限防止无限工具循环，但达到上限属于 limited，不伪装成 completed。
+    max_turns: int = field(default_factory=lambda: _positive_env_int("AGENT_MAX_TURNS", 40))
     usage_label: str = "main"
     cancel: asyncio.Event | None = None  # 取消信号（子 Agent 的取消级联靠它 + task.cancel）
     # 压缩阈值（字符数）。None = 用全局默认；子 Agent 会传更小的值。
@@ -54,6 +66,8 @@ class Agent:
     compact_threshold: int | None = None
     compact_token_limit: int | None = None
     last_finish_reason: str | None = None
+    last_status: str = "idle"
+    last_checkpoint: dict[str, Any] | None = None
     # 运行中追加的要求。只在模型/工具调用之间的安全点进入上下文，避免破坏
     # assistant(tool_calls) -> tool 的协议配对。
     followups: deque[str] = field(default_factory=deque)
@@ -117,13 +131,19 @@ class Agent:
     # ------------------------------------------------------------------
     async def run(self, user_input: str) -> str:
         self.last_finish_reason = None
+        self.last_status = "running"
+        self.last_checkpoint = None
         self.accepting_followups = True
         self._emit("agent_start", agent=self.name)
         user_entry_id = self.session.append({"role": "user", "content": user_input})
         self._emit("user_message_committed", entry_id=user_entry_id)
         final = ""
+        tool_calls = 0
+        tool_errors = 0
+        last_turn = 0
 
         for turn in range(1, self.max_turns + 1):
+            last_turn = turn
             self._check_abort()
             await self._pull_external_followups()
             self._drain_followups()
@@ -150,6 +170,7 @@ class Agent:
             self._emit("assistant_message_committed", entry_id=assistant_entry_id, parent_id=assistant_parent_id)
 
             if message.finish_reason == "length":
+                self.last_status = "limited"
                 self._emit(
                     "limited",
                     reason="length",
@@ -171,20 +192,69 @@ class Agent:
                 if self.followups:
                     continue
                 self.accepting_followups = False
+                if final.strip():
+                    self.last_status = "completed"
+                else:
+                    self.last_status = "error"
+                    self.last_finish_reason = "empty_response"
+                    self._emit("error", message="模型未返回可交付正文，任务没有完成。")
                 break
 
-            await self._run_tools(message, turn)
+            calls, errors = await self._run_tools(message, turn)
+            tool_calls += calls
+            tool_errors += errors
             self._emit("turn_end", turn=turn)
         else:
             self.last_finish_reason = "max_turns"
+            self.last_status = "limited"
             self._emit(
                 "limited",
                 reason="max_turns",
                 message=f"Agent 已达到最大工具循环轮次（{self.max_turns}），任务可能尚未完成。",
             )
-            final = final or "（达到最大轮次，提前结束）"
+            final = final or "（已暂停：达到本次运行的最大轮次，可从检查点继续制作。）"
 
-        self._emit("agent_end", agent=self.name)
+        if self.last_status == "limited":
+            self.last_checkpoint = {
+                "status": "limited",
+                "reason": self.last_finish_reason or "unknown",
+                "turn": last_turn,
+                "max_turns": self.max_turns,
+                "tool_calls": tool_calls,
+                "tool_errors": tool_errors,
+                "last_entry_id": self.session.current_id,
+                "resume_instruction": (
+                    "继续当前任务：先读取当前画布和已有产物，核对未完成项；"
+                    "不要重复创建已存在的节点，只补齐缺失内容并最终给出交付总结。"
+                ),
+            }
+            checkpoint_id = self.session.append_custom(
+                "runCheckpoint", self.last_checkpoint, display=True
+            )
+            self._emit("checkpoint", checkpoint_id=checkpoint_id, **self.last_checkpoint)
+        else:
+            # 写入最新终态，用来覆盖更早的 limited 检查点；否则成功续跑后刷新页面，
+            # 前端会错误地把旧检查点当成仍需继续的任务。
+            self.session.append_custom(
+                "runCheckpoint",
+                {
+                    "status": self.last_status,
+                    "reason": self.last_finish_reason or "unknown",
+                    "turn": last_turn,
+                    "max_turns": self.max_turns,
+                    "tool_calls": tool_calls,
+                    "tool_errors": tool_errors,
+                    "last_entry_id": self.session.current_id,
+                },
+                display=False,
+            )
+
+        self._emit(
+            "agent_end",
+            agent=self.name,
+            status=self.last_status,
+            finish_reason=self.last_finish_reason,
+        )
         self.accepting_followups = False
         return final
 
@@ -235,7 +305,8 @@ class Agent:
         )
         return message
 
-    async def _run_tools(self, message: AssistantMessage, turn: int) -> None:
+    async def _run_tools(self, message: AssistantMessage, turn: int) -> tuple[int, int]:
+        errors = 0
         for index, call in enumerate(message.tool_calls):
             self._check_abort()
             tool = self.tool_map.get(call.name)
@@ -274,13 +345,19 @@ class Agent:
                 **details,
             )
             self.session.append({"role": "tool", "tool_call_id": call.id, "content": content})
+            errors += int(is_error)
+        return len(message.tool_calls), errors
 
     async def _execute_one(
         self, tool: ToolDefinition, raw_args: dict, name: str, call_id: str
     ) -> tuple[str, dict, bool]:
         try:
             validated = tool.validate_args(raw_args)  # Pydantic 校验
-            normalized_args = validated.model_dump(mode="json") if validated is not None else raw_args
+            normalized_args = (
+                validated.model_dump(mode="json", exclude_none=True)
+                if validated is not None
+                else raw_args
+            )
         except Exception as exc:
             return f"Error: {type(exc).__name__}: {exc}", {}, True
 
@@ -325,7 +402,8 @@ class Agent:
                 )
 
         try:
-            result = tool.execute(raw_args, self.context)
+            # 校验后的参数才是唯一执行输入：默认值已补齐，Optional=None 不会被误当成更新字段。
+            result = tool.execute(normalized_args, self.context)
             if inspect.isawaitable(result):
                 result = await result
         except asyncio.CancelledError:
@@ -388,7 +466,7 @@ def build_system_prompt(
         "- 只有用户明确表示续写、修改或继续某个已有故事时才复用旧画布；用户说另一段、新故事或内容核心人物/事件不同，就建立独立剧本画布",
         "- 用户只有一句创意时，先补成可审阅的完整剧本；已有定稿剧情且目标是视频制作时，按 workflow 锁存 Seedance 路由和后续阶段",
         "- 用户提出短剧、视频或图片创意时，完成当前已授权且可执行的上游工作；不要因为最终媒体生成暂不可用而拒绝剧本、分镜、资产和正式提示词",
-        "- 媒体生成前先检查实际 provider；只有 Mock 时必须明确它仅验证链路，不能把占位首帧说成真实视频",
+        "- 媒体生成前先检查实际 provider；只有 Mock 时必须明确它仅验证链路，不能把可播放的占位 MP4 说成真实模型作品",
         "- 缺少非关键参数时采用合理默认值继续；缺少会实质改变结果的参数时可直接在回复中询问，question 工具不可用不代表不能提问",
         "- 如果用户要求最终视频但只有 Mock：仍可建立完整生产包和生成节点；在消耗算力或执行 Mock 前展示完整方案并取得明确确认",
         "- 不擅自增加用户未提供的剧情事件、人物、前史、字幕、站立或转场；合理的摄影与物理执行细节必须保持剧情事实不变",

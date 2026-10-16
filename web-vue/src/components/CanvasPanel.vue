@@ -17,6 +17,7 @@ import { assetUrl, mediaOf } from "../utils.js";
 const { fitView, onConnect, screenToFlowCoordinate } = useVueFlow();
 const imageFileInput = ref(null);
 const videoFileInput = ref(null);
+const audioFileInput = ref(null);
 const replaceMediaNodeId = ref("");
 const mediaUploadPosition = ref(null);
 const contextMenu = ref({ visible: false, x: 0, y: 0, flow: { x: 0, y: 0 } });
@@ -29,6 +30,8 @@ const cardItems = [
   { type: "prompt", icon: "词", label: "提示词卡片", defaultLabel: "未命名提示词" },
   { type: "image_gen", icon: "图", label: "图片生成卡片", defaultLabel: "图片生成" },
   { type: "video_gen", icon: "影", label: "视频生成卡片", defaultLabel: "视频生成" },
+  { type: "tts_gen", icon: "声", label: "旁白生成卡片", defaultLabel: "旁白生成", data: { provider: "mock", voice: "alloy", speed: 1 } },
+  { type: "timeline", icon: "片", label: "时间线 / 成片卡片", defaultLabel: "时间线·最终成片", data: { output: { width: 1280, height: 720, fps: 24 } } },
 ];
 
 function closeContextMenu() {
@@ -64,7 +67,7 @@ function onPaneContextMenu(event) {
   state.selectedEdgeId = null;
   closeEdgeMenu();
   const menuWidth = 224;
-  const menuHeight = 390;
+  const menuHeight = 500;
   contextMenu.value = {
     visible: true,
     x: Math.min(event.clientX, window.innerWidth - menuWidth - 8),
@@ -147,6 +150,27 @@ const detailData = computed(() => {
   ]);
 });
 
+const timelineClips = computed(() => {
+  if (selectedNode.value?.type !== "timeline") return [];
+  const videos = upstreamOfSelected.value.filter((node) => mediaOf(node)?.port === "video");
+  const requested = selectedNode.value.data?.clip_order || [];
+  const rank = new Map(requested.map((id, index) => [id, index]));
+  return [...videos].sort((a, b) => (rank.get(a.id) ?? 1e9) - (rank.get(b.id) ?? 1e9));
+});
+
+async function moveTimelineClip(index, delta) {
+  const target = index + delta;
+  if (target < 0 || target >= timelineClips.value.length) return;
+  const ids = timelineClips.value.map((node) => node.id);
+  [ids[index], ids[target]] = [ids[target], ids[index]];
+  try {
+    await actions.updateNode(selectedNode.value.id, { data: { clip_order: ids } });
+    ElMessage.success("时间线顺序已更新");
+  } catch (err) {
+    ElMessage.error(`调整失败：${err.message || err}`);
+  }
+}
+
 // 新建/切换/整理之后自动适应窗口（布局未稳定时等一帧）
 watch(
   () => [state.canvasName, state.canvas.nodes.length],
@@ -214,6 +238,31 @@ async function onReconcile() {
   }
 }
 
+async function onCompose() {
+  try {
+    const plan = await actions.prepareCompositionReview();
+    if (!plan.total) throw new Error("没有时间线节点，请先添加时间线并连接视频片段");
+    if (!plan.ffmpeg?.available) throw new Error(plan.ffmpeg?.reason || "FFmpeg 不可用");
+    const clips = (plan.jobs || []).reduce((sum, item) => sum + (item.clips?.length || 0), 0);
+    const details = (plan.jobs || []).map((item) => {
+      const output = item.output || {};
+      const extras = [item.audio || item.tts ? "含音频" : "无音频", item.subtitle_text ? "含字幕" : "无字幕"].join("、");
+      return `${item.label}：${item.clips?.length || 0} 段，${output.width || 1280}×${output.height || 720}/${output.fps || 24}fps，${extras}`;
+    }).join("\n");
+    await ElMessageBox.confirm(
+      `将把 ${clips} 个视频片段合成为 ${plan.ready}/${plan.total} 个成片。\n${details}\n片段顺序、字幕、音频和输出规格会在本次审批中冻结。`,
+      "合成成片前需要你拍板",
+      { confirmButtonText: "批准并合成", cancelButtonText: "暂不合成", type: "warning" },
+    );
+    const result = await actions.composeCanvas();
+    if (result.done < result.total) ElMessage.warning(`合成完成 ${result.done}/${result.total}`);
+    else ElMessage.success(`已生成 ${result.done} 个可播放成片`);
+  } catch (err) {
+    if (err === "cancel" || err === "close") ElMessage.info("已取消，本次没有开始合成");
+    else ElMessage.error({ message: `合成失败：${err.message || err}`, duration: 5000 });
+  }
+}
+
 async function onExport() {
   try {
     const data = await actions.exportPrompts();
@@ -226,7 +275,7 @@ async function onExport() {
 function requestMediaUpload(kind, nodeId = "", position = null) {
   replaceMediaNodeId.value = nodeId;
   mediaUploadPosition.value = position;
-  const input = kind === "image" ? imageFileInput.value : videoFileInput.value;
+  const input = kind === "image" ? imageFileInput.value : (kind === "video" ? videoFileInput.value : audioFileInput.value);
   input?.click();
 }
 
@@ -263,7 +312,8 @@ async function onMediaFile(event, kind) {
   }
   try {
     const result = await actions.uploadMedia(file, kind, replaceMediaNodeId.value, mediaUploadPosition.value);
-    ElMessage.success(`${result.replaced ? "已替换" : "已添加"}${kind === "image" ? "图片" : "视频"}素材`);
+    const label = { image: "图片", video: "视频", audio: "音频" }[kind] || kind;
+    ElMessage.success(`${result.replaced ? "已替换" : "已添加"}${label}素材`);
     await nextTick();
     fitView({ padding: 0.18 });
   } catch (err) {
@@ -332,6 +382,9 @@ async function onMediaFile(event, kind) {
       <button type="button" role="menuitem" @click="uploadFromContext('video')">
         <span class="context-icon video">影</span><span>上传视频素材</span>
       </button>
+      <button type="button" role="menuitem" @click="uploadFromContext('audio')">
+        <span class="context-icon media">声</span><span>上传音频素材</span>
+      </button>
     </div>
 
     <div
@@ -374,6 +427,9 @@ async function onMediaFile(event, kind) {
       <el-button :loading="state.mediaUploading" title="上传视频素材" @click="requestMediaUpload('video')">
         <el-icon><VideoCamera /></el-icon>
       </el-button>
+      <el-button :loading="state.canvasBusy" title="把时间线合成为最终 MP4" @click="onCompose">
+        <span>成片</span>
+      </el-button>
       <el-button title="按依赖整理成流程图" @click="onArrange">
         <el-icon><Grid /></el-icon>
       </el-button>
@@ -409,6 +465,14 @@ async function onMediaFile(event, kind) {
         accept="video/*,.mkv"
         aria-label="选择视频素材"
         @change="onMediaFile($event, 'video')"
+      />
+      <input
+        ref="audioFileInput"
+        class="media-file-input"
+        type="file"
+        accept="audio/*,.m4a,.aac,.flac"
+        aria-label="选择音频素材"
+        @change="onMediaFile($event, 'audio')"
       />
     </div>
 
@@ -468,6 +532,21 @@ async function onMediaFile(event, kind) {
         </tr>
       </table>
 
+      <template v-if="selectedNode.type === 'timeline'">
+        <h4>片段顺序</h4>
+        <p v-if="!timelineClips.length" class="dim">请把视频素材或视频生成节点连接到 timeline 的 video 输入。</p>
+        <ol v-else class="timeline-list">
+          <li v-for="(clip, index) in timelineClips" :key="clip.id">
+            <span>{{ clip.label }}</span>
+            <span class="timeline-actions">
+              <el-button link :disabled="index === 0" @click="moveTimelineClip(index, -1)">上移</el-button>
+              <el-button link :disabled="index === timelineClips.length - 1" @click="moveTimelineClip(index, 1)">下移</el-button>
+            </span>
+          </li>
+        </ol>
+        <p class="dim">输出：{{ selectedNode.data?.output?.width || 1280 }}×{{ selectedNode.data?.output?.height || 720 }} / {{ selectedNode.data?.output?.fps || 24 }}fps</p>
+      </template>
+
       <template v-if="detailMedia">
         <h4>产物{{ detailMedia.mock ? "（mock 占位）" : "" }}</h4>
         <video
@@ -477,16 +556,23 @@ async function onMediaFile(event, kind) {
           controls
           preload="metadata"
         />
+        <audio
+          v-else-if="detailMedia.port === 'audio'"
+          class="detail-audio"
+          :src="detailMediaSrc"
+          controls
+          preload="metadata"
+        />
         <a v-else :href="detailMediaSrc" target="_blank">
           <img class="detail-media" :src="detailMediaSrc" :alt="selectedNode.label" />
         </a>
         <p class="dim">{{ detailMedia.path }}</p>
         <el-button
-          v-if="selectedNode.type === 'image' || selectedNode.type === 'video'"
+          v-if="['image', 'video', 'audio'].includes(selectedNode.type)"
           size="small"
           :loading="state.mediaUploading"
           @click="requestMediaUpload(selectedNode.type, selectedNode.id)"
-        >替换{{ selectedNode.type === "image" ? "图片" : "视频" }}</el-button>
+        >替换{{ { image: "图片", video: "视频", audio: "音频" }[selectedNode.type] }}</el-button>
         <div v-if="selectedNode.type === 'image'" class="connection-guide">
           <b>怎么连接</b>
           从图片卡右侧橙色圆点拖出，连接到资产卡的 <code>image</code>，或提示词/生成卡的 <code>ref</code>。
@@ -521,4 +607,7 @@ async function onMediaFile(event, kind) {
 <style scoped>
 .run-bar { color: var(--text-2); }
 .run-bar b { color: var(--text); }
+.timeline-list { margin: 0; padding-left: 20px; }
+.timeline-list li { margin: 5px 0; display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.timeline-actions { display: flex; flex-shrink: 0; }
 </style>

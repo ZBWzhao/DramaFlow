@@ -351,15 +351,28 @@
 .btn.ghost:hover { background: var(--card-strong); color: var(--text); }
 .btn:disabled { opacity: 0.45; cursor: not-allowed; }
 
-.status-idle, .status-run {
+.status-idle, .status-run, .status-limited, .status-error {
   display: inline-flex; align-items: center; gap: 6px;
   font-size: var(--fs-xs); color: var(--text-3);
 }
-.status-idle::before, .status-run::before {
+.status-idle::before, .status-run::before, .status-limited::before, .status-error::before {
   content: ""; width: 6px; height: 6px; border-radius: 50%; background: var(--text-3);
 }
 .status-run { color: var(--primary); }
 .status-run::before { background: var(--primary); animation: cnode-pulse 1.3s ease-in-out infinite; }
+.status-limited { color: var(--warning); }
+.status-limited::before { background: var(--warning); }
+.status-error { color: var(--danger); }
+.status-error::before { background: var(--danger); }
+
+.run-notice {
+  padding: 10px 14px; border: 1px solid var(--line); border-radius: var(--ui-radius-large);
+  background: var(--card); color: var(--text-2); font-size: var(--fs-sm); line-height: 1.6;
+}
+.run-notice.warning {
+  border-color: color-mix(in srgb, var(--warning) 45%, var(--line));
+  background: color-mix(in srgb, var(--warning) 9%, var(--card)); color: var(--warning);
+}
 
 /* ============ 弹层 ============ */
 .modal {
