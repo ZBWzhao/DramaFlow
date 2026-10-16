@@ -161,6 +161,11 @@ class BindSessionRequest(BaseModel):
     canvas: str = "main"
 
 
+class RenameCanvasRequest(BaseModel):
+    title: str
+    revision: int | None = None
+
+
 class RenameSessionRequest(BaseModel):
     title: str
 
@@ -1692,6 +1697,33 @@ async def list_canvases() -> dict[str, Any]:
         canvas = await registry.canvas_repository.load(name)
         metadata[name] = canvas.meta
     return {"canvases": names, "meta": metadata}
+
+
+@app.post("/api/canvases/{name}/rename")
+async def rename_canvas(name: str, req: RenameCanvasRequest) -> dict[str, Any]:
+    """修改项目展示名，保留内部画布 ID，避免破坏会话和节点引用。"""
+    title = str(req.title or "").strip()[:120]
+    if not title:
+        raise HTTPException(status_code=400, detail="项目名称不能为空")
+    canvas = await registry.canvas_repository.load(name)
+    if not canvas.persisted:
+        raise HTTPException(status_code=404, detail="项目不存在")
+    _require_revision(canvas, req.revision)
+    canvas.meta["story_title"] = title
+    await registry.canvas_repository.save(canvas)
+    return {"ok": True, "name": canvas.name, "title": title, "revision": canvas.revision}
+
+
+@app.delete("/api/canvases/{name}")
+async def delete_canvas(name: str) -> dict[str, Any]:
+    """删除项目画布；会话历史保留为可审计记录，但不再出现在项目列表中。"""
+    if name == "main":
+        raise HTTPException(status_code=400, detail="默认项目不能删除")
+    canvas = await registry.canvas_repository.load(name)
+    if not canvas.persisted:
+        raise HTTPException(status_code=404, detail="项目不存在")
+    await registry.canvas_repository.delete(name)
+    return {"ok": True, "name": name}
 
 
 @app.get("/api/canvas")

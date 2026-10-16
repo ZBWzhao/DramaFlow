@@ -10,7 +10,7 @@
  */
 
 import { computed, reactive } from "vue";
-import { getJSON, postFile, postJSON, streamNDJSON } from "./api.js";
+import { deleteJSON, getJSON, postFile, postJSON, streamNDJSON } from "./api.js";
 
 let activeRunController = null;
 const settingsStorage = typeof localStorage === "undefined" ? null : localStorage;
@@ -1268,6 +1268,33 @@ async function switchCanvas(name) {
   restoreMediaJobForCanvas();
 }
 
+async function renameCanvas(name, title) {
+  if (state.running || state.canvasBusy) throw new Error("运行期间不能重命名项目");
+  const target = String(name || state.canvasName);
+  const canvas = target === state.canvasName ? state.canvas : await getJSON(`/api/canvas?name=${encodeURIComponent(target)}`);
+  const res = await postJSON(`/api/canvases/${encodeURIComponent(target)}/rename`, {
+    title: String(title || "").trim(),
+    revision: canvas.revision,
+  });
+  await loadCanvases();
+  if (target === state.canvasName) await loadCanvas(target);
+  return res;
+}
+
+async function deleteCanvas(name) {
+  if (state.running || state.canvasBusy) throw new Error("运行期间不能删除项目");
+  const target = String(name || "");
+  if (!target) return null;
+  const wasCurrent = target === state.canvasName;
+  const res = await deleteJSON(`/api/canvases/${encodeURIComponent(target)}`);
+  await loadCanvases();
+  if (wasCurrent) {
+    const next = state.canvases.find((item) => item !== target) || "main";
+    await switchCanvas(next);
+  }
+  return res;
+}
+
 /* ==================== 信息 ==================== */
 
 async function refreshStats() {
@@ -1398,6 +1425,8 @@ export const actions = {
   mutateMessage,
   restoreSessionForCanvas,
   switchCanvas,
+  renameCanvas,
+  deleteCanvas,
   refreshStats,
   refreshProductionRun,
   refreshSubagents,

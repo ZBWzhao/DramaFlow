@@ -2,12 +2,13 @@
 /* 外壳：画布始终挂载为工作台，Agent 以浮窗覆盖在画布上。
  * 这样模型调用画布工具时，用户不需要离开对话就能看到节点和连线发生变化。
  */
-import { onMounted, ref } from "vue";
+import { computed, onMounted, ref } from "vue";
 import { actions, bootstrap, state } from "./store.js";
 import CanvasPanel from "./components/CanvasPanel.vue";
 import FloatingAgent from "./components/FloatingAgent.vue";
 import InfoDrawer from "./components/InfoDrawer.vue";
 import ExportDialog from "./components/ExportDialog.vue";
+import ProjectPanel from "./components/ProjectPanel.vue";
 
 onMounted(async () => {
   await bootstrap().catch((err) => console.error("初始化失败", err));
@@ -21,11 +22,9 @@ onMounted(async () => {
   }
 });
 
-async function onPickCanvas(name) {
-  await actions.switchCanvas(name);
-}
-
 const agentVisible = ref(true);
+const projectPanelOpen = ref(false);
+const currentProjectTitle = computed(() => state.canvasMeta[state.canvasName]?.story_title || state.canvasName || "未选择项目");
 </script>
 
 <template>
@@ -39,23 +38,18 @@ const agentVisible = ref(true);
         <span class="brand-name">短剧工作台</span>
       </div>
       <span class="dock-sep" />
-      <span class="dock-label">项目</span>
-      <el-select
-        :model-value="state.canvasName"
-        size="small"
-        class="project-select"
-        title="切换项目工作区"
-        aria-label="当前项目工作区"
+      <button
+        class="project-trigger"
+        type="button"
+        title="打开项目管理"
+        aria-label="打开项目管理"
         :disabled="state.running || state.canvasBusy"
-        @update:model-value="onPickCanvas"
+        @click="projectPanelOpen = true"
       >
-        <el-option
-          v-for="name in state.canvases"
-          :key="name"
-          :label="state.canvasMeta[name]?.story_title || name"
-          :value="name"
-        />
-      </el-select>
+        <span class="project-trigger-label">项目</span>
+        <span class="project-trigger-title">{{ currentProjectTitle }}</span>
+        <el-icon><ArrowDown /></el-icon>
+      </button>
       <span class="dock-sep" />
       <el-button size="small" title="会话信息 / 技能 / 工具" @click="state.drawerOpen = !state.drawerOpen">
         <el-icon><InfoFilled /></el-icon>
@@ -75,6 +69,7 @@ const agentVisible = ref(true);
     </div>
 
     <InfoDrawer v-if="state.drawerOpen" />
+    <ProjectPanel :open="projectPanelOpen" @close="projectPanelOpen = false" />
     <ExportDialog />
     <FloatingAgent v-model="agentVisible" />
   </div>

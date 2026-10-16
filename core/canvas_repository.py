@@ -41,6 +41,7 @@ class CanvasRepository(Protocol):
     async def load(self, name: str) -> Canvas: ...
     async def save(self, canvas: Canvas) -> int: ...
     async def list(self) -> list[str]: ...
+    async def delete(self, name: str) -> None: ...
     async def close(self) -> None: ...
 
 
@@ -114,6 +115,18 @@ class FileCanvasRepository:
 
     async def list(self) -> list[str]:
         return sorted(path.name[: -len(".canvas.json")] for path in self.root.glob("*.canvas.json"))
+
+    async def delete(self, name: str) -> None:
+        path = self._path(name)
+        async with self._guard(path):
+            if not path.exists():
+                raise FileNotFoundError(name)
+            await asyncio.to_thread(path.unlink)
+            lock_path = path.with_suffix(path.suffix + ".lock")
+            try:
+                lock_path.unlink()
+            except FileNotFoundError:
+                pass
 
     async def close(self) -> None:
         return None
@@ -207,6 +220,14 @@ class PostgresCanvasRepository:
             "SELECT name FROM canvases WHERE project_id=$1 ORDER BY name", self.project_id
         )
         return [str(row["name"]) for row in rows]
+
+    async def delete(self, name: str) -> None:
+        name = validate_canvas_name(name)
+        deleted = await self.database.client().execute(
+            "DELETE FROM canvases WHERE project_id=$1 AND name=$2", self.project_id, name
+        )
+        if deleted == "DELETE 0":
+            raise FileNotFoundError(name)
 
     async def close(self) -> None:
         await self.database.close()
