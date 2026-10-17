@@ -28,6 +28,30 @@ const textPreview = computed(() => {
   return value ? value.trim() : "";
 });
 
+// 节点状态是后端的协议值，卡片上用用户能快速理解的生产阶段展示。
+// 不修改已有状态协议，避免 Agent、媒体任务和旧画布数据产生兼容问题。
+const lifecycleSteps = [
+  { key: "draft", label: "创建" },
+  { key: "generating", label: "生成" },
+  { key: "ready", label: "待确认" },
+  { key: "done", label: "完成" },
+];
+const lifecycleMap = {
+  draft: { label: "创建中", index: 0, hint: "节点已创建，等待 Agent 写入内容" },
+  generating: { label: "生成中", index: 1, hint: "Agent 或媒体 Provider 正在生成" },
+  ready: { label: "待确认", index: 2, hint: "内容已生成，等待检查或继续制作" },
+  done: { label: "已完成", index: 3, hint: "该节点的产物已经完成" },
+  error: { label: "生成失败", index: -1, hint: "生成失败，可打开详情检查并重试" },
+};
+const lifecycle = computed(() => lifecycleMap[node.value.status] || lifecycleMap.draft);
+const lifecycleClass = computed(() => node.value.status || "draft");
+const lifecycleMessage = computed(() => {
+  if (node.value.status === "error") return node.value.data?.error || "生成失败，可打开详情检查并重试";
+  if (node.value.status === "generating") return textPreview.value ? "正在继续生成，当前内容已保留" : "Agent 正在写入内容";
+  if (node.value.status === "draft") return "等待 Agent 写入内容";
+  return "";
+});
+
 const portTop = (index) => `${22 + index * 30}px`;
 const labelTop = (index) => `${19 + index * 30}px`;
 </script>
@@ -36,11 +60,35 @@ const labelTop = (index) => `${19 + index * 30}px`;
   <div class="tnode" :class="[`type-${node.type}`, `status-${node.status}`, { 'agent-changed': data.changed }]">
     <div class="tnode-head">
       <span class="tnode-type" :title="spec.label || node.type">{{ shortType }}</span>
-      <span class="tnode-status">{{ node.status }}</span>
+      <span class="tnode-status" :class="`lifecycle-${lifecycleClass}`" :title="lifecycle.hint">{{ lifecycle.label }}</span>
+    </div>
+
+    <div
+      class="tnode-lifecycle"
+      :class="`lifecycle-${lifecycleClass}`"
+      role="status"
+      aria-live="polite"
+      :title="lifecycle.hint"
+    >
+      <div v-if="lifecycleClass !== 'error'" class="tnode-lifecycle-track">
+        <span
+          v-for="(step, index) in lifecycleSteps"
+          :key="step.key"
+          class="tnode-lifecycle-segment"
+          :class="{ active: index <= lifecycle.index, current: index === lifecycle.index }"
+          :title="step.label"
+        />
+      </div>
+      <span v-else class="tnode-lifecycle-error-mark" aria-hidden="true">!</span>
+      <span class="tnode-lifecycle-label">{{ lifecycle.label }}</span>
     </div>
 
     <div class="tnode-body" :style="bodyStyle">
       <div class="tnode-label">{{ node.label }}</div>
+      <div v-if="lifecycleMessage" class="tnode-lifecycle-message" :class="`lifecycle-${lifecycleClass}`">
+        <span v-if="lifecycleClass === 'generating'" class="tnode-progress-dot" aria-hidden="true" />
+        {{ lifecycleMessage }}
+      </div>
       <div
         v-if="textPreview"
         class="tnode-preview nowheel nodrag"

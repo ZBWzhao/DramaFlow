@@ -136,6 +136,14 @@ const topoIndex = computed(() => {
 
 const detailMedia = computed(() => mediaOf(selectedNode.value));
 const detailMediaSrc = computed(() => assetUrl(detailMedia.value?.path));
+const lifecycleLabels = {
+  draft: "创建中",
+  generating: "生成中",
+  ready: "待确认",
+  done: "已完成",
+  error: "生成失败",
+};
+const selectedLifecycleLabel = computed(() => lifecycleLabels[selectedNode.value?.status] || "创建中");
 const detailText = computed(() => {
   if (typeof selectedNode.value?.content === "string" && selectedNode.value.content) return selectedNode.value.content;
   const outputs = Object.values(selectedNode.value?.outputs || {});
@@ -524,7 +532,7 @@ async function onMediaFile(event, kind) {
         </tr>
         <tr>
           <td>状态</td>
-          <td>{{ selectedNode.status }}</td>
+          <td>{{ selectedLifecycleLabel }}</td>
         </tr>
         <tr v-if="topoIndex.total">
           <td>执行序</td>

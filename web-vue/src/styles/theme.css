@@ -249,8 +249,49 @@ body {
   margin-left: auto; padding: 0 7px;
   border-radius: var(--radius-pill);
   background: var(--card-strong); color: var(--text-3);
-  font-size: 11px; font-family: ui-monospace, Consolas, monospace;
+  font-size: 11px; font-weight: 600; white-space: nowrap;
 }
+.tnode-status.lifecycle-generating { color: var(--primary); background: var(--el-color-primary-light-9); }
+.tnode-status.lifecycle-ready { color: var(--warning); background: var(--el-color-warning-light-9); }
+.tnode-status.lifecycle-done { color: var(--success); background: var(--el-color-success-light-9); }
+.tnode-status.lifecycle-error { color: var(--danger); background: var(--el-color-danger-light-9); }
+.tnode-lifecycle {
+  display: flex; align-items: center; gap: 7px;
+  min-height: 15px; margin: -2px 4px 8px;
+  color: var(--text-3);
+}
+.tnode-lifecycle-track { display: flex; align-items: center; gap: 3px; flex: 1; min-width: 0; }
+.tnode-lifecycle-segment {
+  display: block; flex: 1; height: 3px;
+  border-radius: var(--radius-pill); background: var(--line);
+  transition: background var(--dur-base) var(--ease-out), box-shadow var(--dur-base) var(--ease-out);
+}
+.tnode-lifecycle-segment.active { background: currentColor; }
+.tnode-lifecycle-segment.current { box-shadow: 0 0 0 3px color-mix(in srgb, currentColor 13%, transparent); }
+.tnode-lifecycle-label { flex: none; font-size: 10px; font-weight: 600; white-space: nowrap; }
+.tnode-lifecycle.lifecycle-generating { color: var(--primary); }
+.tnode-lifecycle.lifecycle-ready { color: var(--warning); }
+.tnode-lifecycle.lifecycle-done { color: var(--success); }
+.tnode-lifecycle.lifecycle-error { color: var(--danger); }
+.tnode-lifecycle-error-mark {
+  display: grid; place-items: center; width: 13px; height: 13px;
+  border-radius: 50%; background: currentColor; color: white;
+  font-size: 9px; font-weight: 800;
+}
+.tnode-lifecycle-message {
+  display: flex; align-items: center; gap: 5px;
+  margin-top: 7px; padding: 6px 8px;
+  border-radius: var(--ui-radius-small);
+  background: #f7f8fa; color: var(--text-3);
+  font-size: 10px; line-height: 1.4;
+}
+.tnode-lifecycle-message.lifecycle-generating { background: var(--el-color-primary-light-9); color: var(--primary); }
+.tnode-lifecycle-message.lifecycle-error { background: var(--el-color-danger-light-9); color: var(--danger); }
+.tnode-progress-dot {
+  width: 6px; height: 6px; flex: none; border-radius: 50%;
+  background: currentColor; animation: tnode-progress-dot 900ms ease-in-out infinite;
+}
+@keyframes tnode-progress-dot { 0%, 100% { opacity: .35; } 50% { opacity: 1; } }
 .tnode-body {
   position: relative; min-height: 82px; padding: 12px;
   border: 1px solid var(--line);
