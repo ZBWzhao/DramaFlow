@@ -213,7 +213,7 @@ class SessionRegistry:
         )
         ctx.question = questions
         # 循环依赖的解法：先有 agent 才能建 manager。技能读取工具也交给委派
-        # 管理器，子 Agent 才能按系统规则读取 drama_script/storyboard 等技能。
+        # 管理器，子 Agent 才能按系统规则读取 workflow/drama_craft 等技能。
         skill_tools = build_skill_tools(SKILLS_ROOT)
         question_tool = build_question_tool()
         agent.tools.extend(skill_tools)
