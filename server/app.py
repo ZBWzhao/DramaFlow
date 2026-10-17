@@ -1658,6 +1658,24 @@ async def media_providers() -> dict[str, Any]:
     return {"providers": default_registry.describe(), "active": default_registry.active}
 
 
+class ActivateProviderRequest(BaseModel):
+    provider: str
+
+
+@app.post("/api/media/providers/activate")
+async def activate_media_provider(payload: ActivateProviderRequest) -> dict[str, Any]:
+    """运行时切换 Mock / 真模型。
+
+    没配 Key 的 Provider 不在注册表里，切不过去，所以这个开关不会偷偷产生费用；
+    真正决定花不花钱的是「Provider 已在注册表中」这件事。
+    """
+    try:
+        active = default_registry.activate(payload.provider)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return {"ok": True, "active": active, "providers": default_registry.describe()}
+
+
 @app.get("/api/canvas/generation-plan")
 async def generation_plan(name: str = "main") -> dict[str, Any]:
     canvas = await registry.canvas_repository.load(name)
@@ -1969,6 +1987,25 @@ async def health() -> dict[str, Any]:
         "ffmpeg": ffmpeg_capabilities(),
     }
 
+
+# ---------------------------------------------------------------------------
+# 制片台（Studio）适配层
+#
+# 制作者视角的 Project/Episode/Asset/Look/Segment/Take 全部从画布派生，
+# 不新建表、不改 `core/canvas.py`。必须注册在下面的静态目录挂载之前，
+# 否则会被 `app.mount("/", …)` 兜住而 404。
+# ---------------------------------------------------------------------------
+from server import studio  # noqa: E402
+
+studio.configure(
+    registry=registry,
+    workspace=WORKSPACE,
+    media_registry=default_registry,
+    # 制片台的「让 Agent 开始制作」复用同一条 Agent 运行链路，不另写一套执行器。
+    agent_runner=_execute_agent_run,
+    prompt_builder=build_system_prompt,
+)
+app.include_router(studio.router)
 
 # 产物目录：前端用 <img src="/assets/generated/xxx.png"> 直接显示生成的图
 (WORKSPACE / "assets").mkdir(parents=True, exist_ok=True)

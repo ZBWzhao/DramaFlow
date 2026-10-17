@@ -30,6 +30,10 @@ class CapabilityUnavailable(RuntimeError):
     """
 
 
+# 没有显式绑定画布时的兜底画布名（与 tools/canvas/tool.py、tools/media/tool.py 一致）。
+DEFAULT_CANVAS = "main"
+
+
 @runtime_checkable
 class MediaCapability(Protocol):
     """媒体生成能力位（对应 Toonflow ToolContext.media）。本实现只有协议，没有 provider。"""
@@ -57,6 +61,55 @@ class CanvasRepositoryCapability(Protocol):
     async def load(self, name: str) -> Any: ...
     async def save(self, canvas: Any) -> int: ...
     async def list(self) -> list[str]: ...
+
+
+class CanvasScopeError(Exception):
+    """Agent 试图操作不属于本次会话的画布。
+
+    画布是**项目数据的边界**：一张画布就是一个项目。如果没有这道墙，
+    模型只要猜中一个名字（或者按 40% 相似度"认"错一张），就能改掉别人的标题、
+    往别人的图里塞节点，而且不会有任何报错——用户只会某天发现项目被改乱了。
+    所以作用域必须在能力层强制，不能只靠工具自觉遵守约定。
+    """
+
+
+class _ScopedCanvasRepository:
+    """把画布仓库收窄到**唯一一张**画布。
+
+    所有 Agent 侧画布读写都经过这里：读写别的画布会直接抛 `CanvasScopeError`，
+    `list()` 也只回当前这一张——模型看不见别的项目，也就不会去猜它们。
+    """
+
+    def __init__(self, inner: CanvasRepositoryCapability, bound: str) -> None:
+        self._inner = inner
+        self._bound = bound
+
+    def _check(self, name: str) -> str:
+        value = (name or "").strip() or self._bound
+        if value != self._bound:
+            raise CanvasScopeError(
+                f"你只能操作当前画布「{self._bound}」，不能读写「{value}」。"
+                "换项目要由用户在界面上操作。"
+            )
+        return self._bound
+
+    async def load(self, name: str) -> Any:
+        return await self._inner.load(self._check(name))
+
+    async def save(self, canvas: Any) -> int:
+        return await self._inner.save(canvas) if self._check(canvas.name) else 0
+
+    async def list(self) -> list[str]:
+        return [self._bound]
+
+    async def delete(self, name: str) -> None:
+        await self._inner.delete(self._check(name))
+
+    async def close(self) -> None:
+        await self._inner.close()
+
+    def __getattr__(self, item: str) -> Any:
+        return getattr(self._inner, item)
 
 
 class SandboxError(Exception):
@@ -203,7 +256,10 @@ class ToolContext:
     def require_canvas_repository(self) -> CanvasRepositoryCapability:
         if self.canvas_repository is None:
             raise CapabilityUnavailable("canvas_repository 能力未接入")
-        return self.canvas_repository
+        # 没有绑定就按默认画布算：未绑定属于调用方的疏漏，此时宁可让工具报错，
+        # 也不能让它拿着「什么都能改」的仓库到处写。
+        bound = str(self.config.get("default_canvas") or "").strip() or DEFAULT_CANVAS
+        return _ScopedCanvasRepository(self.canvas_repository, bound)
 
     def require_canvas(self) -> CanvasCapability:
         if self.canvas is None:

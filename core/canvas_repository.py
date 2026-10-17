@@ -35,6 +35,23 @@ def validate_canvas_name(name: str) -> str:
     return value
 
 
+async def _replace_atomic(tmp: Path, path: Path, *, attempts: int = 12) -> None:
+    """把临时文件换成正式文件。
+
+    Windows 上 `os.replace` 在目标文件正被另一个句柄打开时会抛 WinError 5（拒绝访问）。
+    读侧（load）故意不加写锁——读盘不该被写操作阻塞——所以写侧必须容忍这种瞬时占用：
+    退避重试几次通常就过去了，比让一次已经付过费的生成整个失败划算得多。
+    """
+    for attempt in range(attempts):
+        try:
+            await asyncio.to_thread(os.replace, tmp, path)
+            return
+        except PermissionError:
+            if attempt == attempts - 1:
+                raise
+            await asyncio.sleep(0.05 * (attempt + 1))
+
+
 @runtime_checkable
 class CanvasRepository(Protocol):
     async def start(self) -> None: ...
@@ -109,7 +126,7 @@ class FileCanvasRepository:
             await asyncio.to_thread(
                 tmp.write_text, json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8"
             )
-            await asyncio.to_thread(os.replace, tmp, path)
+            await _replace_atomic(tmp, path)
             canvas.path, canvas.revision, canvas.persisted = path, next_revision, True
             return next_revision
 
@@ -118,15 +135,12 @@ class FileCanvasRepository:
 
     async def delete(self, name: str) -> None:
         path = self._path(name)
+        # 锁文件由 _guard 的 finally 释放后再删：Windows 下删除仍被自己持有的
+        # 文件句柄会抛 WinError 32，所以这里绝对不能自己去 unlink 锁文件。
         async with self._guard(path):
             if not path.exists():
                 raise FileNotFoundError(name)
             await asyncio.to_thread(path.unlink)
-            lock_path = path.with_suffix(path.suffix + ".lock")
-            try:
-                lock_path.unlink()
-            except FileNotFoundError:
-                pass
 
     async def close(self) -> None:
         return None

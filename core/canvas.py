@@ -117,10 +117,13 @@ def _new_id(prefix: str) -> str:
 
 
 def story_similarity(left: str, right: str) -> float:
-    """中文友好的轻量故事相似度；用于路由，不让模型凭画布名猜。
+    """中文友好的轻量故事相似度（字符二元组包含系数）。
 
-    采用字符二元组的包含系数，短标题（如“奶龙破土升天”）也能和较长的
-    自然语言请求匹配；同时过滤常见创作套话，避免“帮我做一段视频”造成误判。
+    **不再用于路由。** 曾经用它把自然语言创意匹配到「最像」的一张画布（阈值 0.34），
+    结果 40% 的相似度就足以让 Agent 把新故事写进别人的项目、并改掉人家的标题——
+    模型没有能力判断两个项目是否同一故事，用户也无法预期它什么时候会认错。
+    现在画布由用户在界面上选定，工具侧只认当前画布（见 core/context.py 的作用域仓库）。
+    这个函数保留下来只作离线分析与回归对照。
     """
     stop = ("帮我", "做一段", "生成", "制作", "视频", "动画", "短剧", "一个", "一段", "请")
 
@@ -272,7 +275,15 @@ class Canvas:
         self.path.parent.mkdir(parents=True, exist_ok=True)
         tmp = self.path.with_suffix(".tmp")
         tmp.write_text(json.dumps(self.to_dict(), ensure_ascii=False, indent=2), encoding="utf-8")
-        os.replace(tmp, self.path)
+        # Windows 下目标文件被别的句柄打开时 os.replace 会抛 WinError 5，退避重试。
+        for attempt in range(12):
+            try:
+                os.replace(tmp, self.path)
+                return
+            except PermissionError:
+                if attempt == 11:
+                    raise
+                time.sleep(0.05 * (attempt + 1))
 
     # ------------------------------------------------------------------
     # 节点 / 连线操作（都做校验）

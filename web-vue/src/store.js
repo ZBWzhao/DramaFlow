@@ -1,4 +1,4 @@
-﻿/* 全局状态与动作（一个模块级 reactive，等价于轻量版 Pinia，省一个依赖）。
+/* 全局状态与动作（一个模块级 reactive，等价于轻量版 Pinia，省一个依赖）。
  *
  * 三条设计要点：
  *   1. 画布数据保持"服务端原样"，Vue Flow 需要的 nodes/edges 由 computed 派生 ——
@@ -1387,8 +1387,9 @@ async function loadTeams() {
 export async function bootstrap() {
   await Promise.all([loadTools(), loadSkills(), loadTeams(), loadMediaProviders()]);
   await loadCanvases();
-  // 默认视图就是画布，所以必须主动拉一次数据（不是等切换才加载）
-  await loadCanvas(state.canvases[0] || "main");
+  // 画布已降级为结构视图：只有从制片台「结构视图」进来时才有指定画布，
+  // 否则退回第一个画布（保留旧行为，方便直接打开 /?demo=1 调试）。
+  await loadCanvas(state.canvasName || state.canvases[0] || "main");
   await restoreSessionForCanvas();
   restoreMediaJobForCanvas();
 }

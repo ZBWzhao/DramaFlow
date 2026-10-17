@@ -110,7 +110,11 @@ class FakeTeam:
     def __init__(self, root: Path, canvases: FileCanvasRepository) -> None:
         self.root = root
         self.bus = EventBus()
-        context = ToolContext(str(root), canvas_repository=canvases)
+        # 画布仓库是**按会话绑定收窄**的（Agent 只能动自己当前那张画布），
+        # 所以测试上下文也要显式声明它工作在哪张画布上。
+        context = ToolContext(
+            str(root), config={"default_canvas": "runner-test"}, canvas_repository=canvases
+        )
         self.manager = SimpleNamespace(parent=SimpleNamespace(context=context))
         self.manifest = SimpleNamespace(
             name="dramaTeam",

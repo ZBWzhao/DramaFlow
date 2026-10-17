@@ -13,13 +13,12 @@
 
 from __future__ import annotations
 
-import hashlib
 import re
 from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
-from core.canvas import NODE_SPEC, Canvas, CanvasError, canvas_path, story_similarity
+from core.canvas import NODE_SPEC, Canvas, CanvasError, canvas_path
 from core.context import ToolContext
 from core.plugin import ToolResult, define_tool, tool_result
 
@@ -30,7 +29,9 @@ TOOL_META = {
     "version": "0.1.0",
     "author": "toonflow-py-lab",
     "prompt": (
-        "做短剧时先用 identify_story 识别并切换到独立剧本画布，再用 add_node 建节点、connect_nodes 连线，"
+        "你只能操作**用户当前打开的那一张画布**：不要试图读写别的项目，也不要按标题相似度"
+        "判断两个项目是不是同一个故事——这类判断一律由用户在界面上做。"
+        "开始产内容前先 identify_story 确认当前画布，再用 add_node 建节点、connect_nodes 连线，"
         "再按 get_canvas 返回的拓扑顺序逐个产出内容。不要一次性把正文塞进节点，正文用 set_text 落盘。"
     ),
 }
@@ -52,8 +53,8 @@ class GetCanvasArgs(BaseModel):
 class IdentifyStoryArgs(BaseModel):
     title: str = Field(min_length=2, max_length=100, description="本次故事的短标题，必须包含核心人物/事件")
     summary: str = Field(min_length=2, max_length=500, description="本次故事的一句话事件摘要")
-    force_new: bool = Field(False, description="用户明确说新故事/另一段/无关项目时设为 true")
-    continuation_canvas: str = Field("", description="用户明确要续写某画布时填写画布名")
+    force_new: bool = Field(False, description="已废弃：新建项目由用户在首页完成，这里不再建画布")
+    continuation_canvas: str = Field("", description="留空即可；只能填当前画布，填别的会被拒绝")
 
 
 class AddNodeArgs(BaseModel):
@@ -171,55 +172,49 @@ def build_tools(ctx: ToolContext) -> list[Any]:
         return str(context.config.get("default_canvas") or DEFAULT_CANVAS)
 
     async def _identify_story(args: IdentifyStoryArgs, context: ToolContext) -> ToolResult:
-        """把自然语言创意确定性地路由到一张单故事画布。"""
-        repository = context.require_canvas_repository()
-        candidates: list[tuple[float, Canvas]] = []
-        for name in await repository.list():
-            canvas = await repository.load(name)
-            if args.continuation_canvas and canvas.name == args.continuation_canvas:
-                candidates = [(1.0, canvas)]
-                break
-            score = story_similarity(f"{args.title}\n{args.summary}", canvas.story_text())
-            candidates.append((score, canvas))
+        """把这次工作固定到会话绑定的那张画布上，不去别的项目里找。
 
-        selected: Canvas | None = None
-        score = 0.0
-        if args.continuation_canvas:
-            match = next((item for item in candidates if item[1].name == args.continuation_canvas), None)
-            if match is None:
-                return tool_result(f"找不到要续写的画布：{args.continuation_canvas}", is_error=True)
-            score, selected = match
-        elif candidates and not args.force_new:
-            score, selected = max(candidates, key=lambda item: item[0])
-            if score < 0.34:
-                selected = None
+        以前这里会按标题相似度在所有画布之间路由（阈值 0.34）。结果是：
+        「便利店夜班」以 40% 的相似度被"识别"成「外卖员」那张画布，标题被覆盖、
+        布局被重排，而且不回滚也不报错。**模型没有能力判断两个项目是不是同一个故事，
+        用户也没法预期它什么时候会认错**——所以这类"智能"必须去掉：
+        画布由用户在界面上选，工具只认当前这一张。
+        """
+        bound = current_canvas(context)
+        if args.continuation_canvas and args.continuation_canvas.strip() != bound:
+            return tool_result(
+                f"只能续写当前画布「{bound}」，不能切到「{args.continuation_canvas}」。"
+                "要换项目请在界面上打开对应项目。",
+                is_error=True,
+            )
 
-        created = selected is None
+        canvas = await context.require_canvas_repository().load(bound)
+        existing = str(canvas.meta.get("story_title") or "").strip()
+        if existing and existing != args.title.strip():
+            return tool_result(
+                f"当前画布已经是《{existing}》，不会把它改名成《{args.title}》。"
+                "如果这是一个新故事，请让用户在首页「新建项目」。",
+                is_error=True,
+                canvases=[bound],
+            )
+
+        created = not canvas.nodes and not existing
+        canvas.ensure_story(args.title, args.summary)
         if created:
-            digest = hashlib.sha1(f"{args.title}\n{args.summary}".encode("utf-8")).hexdigest()[:8]
-            safe = re.sub(r"[^0-9a-zA-Z\u4e00-\u9fff-]+", "-", args.title).strip("-")[:24]
-            name = f"story-{safe or digest}-{digest}"
-            selected = Canvas(name, context.resolve_path(f"{name}.canvas.json"))
-        selected.ensure_story(args.title, args.summary)
-        selected.arrange()
-        await _save(context, selected)
-        action = "新建独立剧本画布" if created else "识别为已有剧本"
+            canvas.arrange()
+        await _save(context, canvas)
         return tool_result(
-            f"{action}「{args.title}」→ {selected.name}（匹配度 {score:.0%}）。"
+            f"当前画布《{args.title}》已就绪（{canvas.name}）。"
             "后续所有节点和连线只写入这张画布。",
-            story_id=selected.meta.get("story_id"),
-            story_title=args.title,
-            match_score=score,
+            story_id=canvas.meta.get("story_id"),
+            story_title=canvas.meta.get("story_title"),
             created=created,
-            **_changed(selected),
+            **_changed(canvas),
         )
 
     async def _get_canvas(args: GetCanvasArgs, context: ToolContext) -> ToolResult:
         canvas = await _load(context, args.canvas or current_canvas(context))
-        known = await context.require_canvas_repository().list()
         body = canvas.summary()
-        if len(known) > 1:
-            body += f"\n\n工作区里的其他画布：{', '.join(n for n in known if n != canvas.name)}"
         if not canvas.nodes:
             specs = "；".join(f"{k}={v['label']}" for k, v in NODE_SPEC.items())
             body += f"\n\n（画布还是空的）节点类型：{specs}"

@@ -255,17 +255,46 @@ class TFRouterProvider:
 
     @staticmethod
     def _task_id(payload: dict[str, Any]) -> str | None:
-        """从不同版本的创建响应中提取远端任务 ID。"""
+        """从不同版本的创建响应中提取远端任务 ID。
+
+        注意顺序：TF-router 的创建响应形如
+        ``{"code": 200, "data": "cgt-20261017145008-czhth", "message": "成功", "id": "<请求 UUID>"}``，
+        真正的任务号在 ``data`` 里；顶层的 ``id`` 只是本次请求的追踪号，拿它去查状态
+        会一直返回「任务不存在」。所以 ``data`` 必须排在 ``id`` 前面。
+        """
         data = payload.get("data")
-        candidates: list[Any] = [payload.get("taskICode"), payload.get("task_id"), payload.get("id")]
+        candidates: list[Any] = []
+        if isinstance(data, str) and data.strip():
+            candidates.append(data)
+        candidates.append(payload.get("taskICode"))
         if isinstance(data, dict):
             candidates.extend([data.get("taskICode"), data.get("task_id"), data.get("id"), data.get("code")])
-        else:
-            candidates.append(data)
+        candidates.extend([payload.get("task_id"), payload.get("id")])
         for value in candidates:
             if isinstance(value, str) and value.strip():
                 return value.strip()
         return None
+
+    @staticmethod
+    def _media_url(root: Path, item: Any) -> str | None:
+        """把参考素材转成 Provider 能吃的地址。
+
+        Provider 只能接受公网 http(s) 或 data URL，本地相对路径必须转成
+        data URL，否则远端拿不到参考图，角色一致性就断了。
+        """
+        value = str(item or "").strip()
+        if not value:
+            return None
+        if value.startswith(("http://", "https://", "data:")):
+            return value
+        path = Path(value)
+        if not path.is_absolute():
+            path = root / value
+        if not path.is_file():
+            return None
+        mime = mimetypes.guess_type(path.name)[0] or "image/png"
+        encoded = base64.b64encode(path.read_bytes()).decode("ascii")
+        return f"data:{mime};base64,{encoded}"
 
     def _save_asset(self, value: str, kind: str, root: Path, model: str) -> MediaResult:
         if value.startswith("data:"):
@@ -305,6 +334,14 @@ class TFRouterProvider:
         if not any(item["id"] == model and item["kind"] == kind for item in self.MODELS):
             raise ValueError(f"TF-router 不存在匹配的 {kind} 模型：{model}")
 
+        images = [url for url in (self._media_url(root, item) for item in request.get("references") or []) if url]
+        # 首帧模式与参考图模式在 TF-router 里是两套语义：
+        #   role="first_frame"  → “这一帧就是第 0 秒的画面，往后演”（可控调度）
+        #   role="reference_image" → “照着这几张图的意思画”（只做风格与内容参考）
+        # 视频片段必须走首帧：参考图模式下模型只会让设定图轻微动起来，
+        # 并把多张设定图里的人物并排塞进同一格。
+        first_frame = self._media_url(root, request.get("first_frame")) if request.get("first_frame") else None
+        last_frame = self._media_url(root, request.get("last_frame")) if request.get("last_frame") else None
         if kind == "image":
             requested_size = str(request.get("size") or "2K")
             if "x" in requested_size.lower():
@@ -316,6 +353,7 @@ class TFRouterProvider:
                 "prompt": prompt,
                 # TF-router 的 Seedream 兼容层要求尺寸为小写，元数据字段与官方适配器一致。
                 "size": requested_size.lower(),
+                **({"images": images} if images else {}),
                 "metadata": {
                     "response_format": "url",
                     "aspectRatio": str(request.get("ratio") or "16:9"),
@@ -326,6 +364,19 @@ class TFRouterProvider:
             }
             suffix = "Image"
         else:
+            if first_frame or last_frame:
+                references: list[dict[str, Any]] = []
+                if first_frame:
+                    references.append({"role": "first_frame", "type": "image_url", "image_url": {"url": first_frame}})
+                if last_frame:
+                    references.append({"role": "last_frame", "type": "image_url", "image_url": {"url": last_frame}})
+            else:
+                # 参考图在 TF-router 里是带 role 的结构化对象（对齐官方适配器），
+                # 直接把本地路径塞进去远端读不到。
+                references = [
+                    {"role": "reference_image", "type": "image_url", "image_url": {"url": url}}
+                    for url in images
+                ]
             body = {
                 "model": model,
                 "prompt": prompt,
@@ -334,7 +385,8 @@ class TFRouterProvider:
                 "metadata": {
                     "ratio": str(request.get("ratio") or "16:9"),
                     "generate_audio": bool(request.get("generate_audio", False)),
-                    "references": request.get("references") or [],
+                    "references": references,
+                    "resolution": str(request.get("resolution") or "720p"),
                 },
             }
             suffix = "Video"
@@ -410,6 +462,19 @@ class MediaRegistry:
         configured = os.environ.get("MEDIA_PROVIDER", "mock").strip().lower()
         self.active = configured if configured in self.providers else "mock"
         self.provider = self.providers[self.active]
+
+    def activate(self, name: str) -> str:
+        """运行时切换 Provider（制片台上的「Mock / 真模型」开关）。
+
+        只允许切到已注册的 Provider：没配 Key 的 tfrouter 不会出现在 providers 里，
+        切不过去也绝不会偷偷产生费用。
+        """
+        key = str(name or "").strip().lower()
+        if key not in self.providers:
+            raise ValueError(f"媒体 Provider 未配置：{name or '?'}")
+        self.active = key
+        self.provider = self.providers[key]
+        return self.active
 
     def list_models(self) -> list[dict[str, Any]]:
         return [
