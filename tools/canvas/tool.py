@@ -113,20 +113,65 @@ class ExportPromptArgs(BaseModel):
     path: str = Field("", description="导出路径，默认 assets/export/<画布名>-prompts.md")
 
 
-class Shot(BaseModel):
-    """一个镜头的 6 个必填字段（缺了 Pydantic 直接挡回，不用等到导出才发现）。
+class Camera(BaseModel):
+    """机位三字段。不要只写一句「镜头推近」——高度/角度/运镜是三个独立量。"""
 
-    字段描述刻意写短：工具 schema 每一轮都要进上下文，描述越长越贵。
+    height: str = Field("", description="机位高度：平视/与胸口齐平/俯拍/仰拍")
+    angle: str = Field("", description="机位角度：正面/左前侧 30°/过肩")
+    movement: str = Field("固定", description="运镜：固定/推/拉/摇/移/跟/升降")
+
+
+class Subject(BaseModel):
+    """本镜出镜主体。id 填资产 node id；同框 ≥2 人时 screen_pos 与 gaze 必填。"""
+
+    id: str = Field("", description="资产 node id")
+    name: str = Field("", description="资产名（没有 id 时用；正文里写 @名字）")
+    screen_pos: str = Field("", description="画面位置：画面左三分之一/前景偏右")
+    gaze: str = Field("", description="视线落点：看向对方喉咙/看向画外左侧")
+    start_state: str = Field("", description="本镜起始状态")
+    end_state: str = Field("", description="本镜末态（必须是看得见的）")
+
+
+class ShotProp(BaseModel):
+    id: str = Field("", description="资产 node id")
+    name: str = Field("", description="资产名（没有 id 时用）")
+    state: str = Field("", description="本镜道具状态：螺纹段贴住皮肤")
+
+
+class Light(BaseModel):
+    direction: str = Field("", description="光源方向：右后方")
+    color: str = Field("", description="色温/颜色：暖橙 2700K")
+    contrast: str = Field("", description="对比：高/中/低")
+
+
+class Dialogue(BaseModel):
+    text: str = Field("", description="同期台词原文，一字不改；没有就留空")
+    duration_s: float = Field(0, ge=0, description="台词时长秒")
+
+
+class Shot(BaseModel):
+    """一个镜头的结构化字段（一镜一段，单镜 3-8 秒）。
+
+    正文由服务端渲染（`data.rendered_by="server"`），这里**不要写长提示词**。
+    老画布的 subject/camera_move/duration 仍兼容，新内容一律用新字段。
     """
 
     no: int | None = None  # 镜号，留空自动编号
     segment_no: int = Field(1, ge=1, description="片段号")
-    subject: str = Field(min_length=1, description="主体")
-    action: str = Field(min_length=1, description="可见动作")
-    shot_size: str = Field(min_length=1, description="景别：远/全/中/近/特写")
-    camera_move: str = Field("固定", description="运镜：固定/推/拉/摇/移/跟")
-    sound: str = Field(min_length=1, description="声音/台词")
-    duration: float = Field(gt=0, le=180, description="时长秒")
+    duration_s: float = Field(4, ge=1, le=60, description="本镜时长秒（规范 3-8）")
+    shot_size: str = Field("中景", description="景别：极特写/特写/近景/中景/全景/远景/空镜")
+    camera: Camera = Field(default_factory=Camera)
+    subjects: list[Subject] = Field(default_factory=list)
+    props: list[ShotProp] = Field(default_factory=list)
+    action: str = Field("", description="可见动作：起点→可见末态；资产用 @名字 引用")
+    focus: str = Field("", description="焦点：手与喉咙的接触点")
+    light: Light = Field(default_factory=Light)
+    sound: str = Field("", description="环境音/拟音；台词写进 dialogue")
+    dialogue: Dialogue = Field(default_factory=Dialogue)
+    forbidden: list[str] = Field(default_factory=list, description="本镜禁止出现的具体东西")
+    subject: str = Field("", description="（兼容老画布）一段文字主体")
+    camera_move: str = Field("", description="（兼容老画布）运镜文字")
+    duration: float = Field(0, ge=0, le=180, description="（兼容老画布）时长秒")
 
 
 class SetStoryboardArgs(BaseModel):

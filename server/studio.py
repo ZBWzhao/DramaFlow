@@ -239,7 +239,7 @@ def _infer_duration(canvas: Canvas, node: Any, prompt: str, shots: list[dict[str
     total = 0.0
     for shot in shots:
         try:
-            total += float(shot.get("duration") or 0)
+            total += _shot_seconds(shot)
         except (TypeError, ValueError):
             continue
     if total > 0:
@@ -401,6 +401,12 @@ def _segment_view(canvas: Canvas, node: Any, *, fallback_no: int = 0, with_detai
             break
     duration, duration_source = _infer_duration(canvas, node, prompt, shots)
     refs = _reference_rows(canvas, node)
+    name_by_id: dict[str, str] = {ref["asset_id"]: ref["name"] for ref in refs}
+    # 正文由服务端从结构化字段渲染；人改过的（rendered_by=human）不覆盖。
+    if shots and str(node.data.get("rendered_by") or "") != "human":
+        rendered = _render_segment_text(_first_shot(shots, _segment_no(node, fallback_no)), name_by_id)
+        if rendered:
+            prompt = rendered
 
     gen_node = None
     for edge in canvas.outgoing(node.id):
@@ -412,8 +418,6 @@ def _segment_view(canvas: Canvas, node: Any, *, fallback_no: int = 0, with_detai
     takes = list(gen_node.data.get("takes") or []) if gen_node is not None else []
     current_take_id = str(gen_node.data.get("current_take_id") or "") if gen_node is not None else ""
     video = canvas.media_output(gen_node.id, "VIDEO") if gen_node is not None else {}
-
-    name_by_id: dict[str, str] = {ref["asset_id"]: ref["name"] for ref in refs}
 
     view: dict[str, Any] = {
         "node_id": node.id,
@@ -702,6 +706,10 @@ async def save_prompt(node_id: str, canvas: str, body: PromptPatch) -> dict[str,
         outputs["prompt"] = slot
         target.outputs = outputs
 
+    # 人改过的正文优先，服务端之后不再覆盖（渲染只在 rendered_by != "human" 时进行）
+    target.data["rendered_by"] = "human"
+    target.data["prompt"] = body.prompt
+
     if body.duration_s is not None:
         target.data["duration_s"] = float(body.duration_s)
     if body.references is not None:
@@ -871,64 +879,206 @@ def _shot_size_text(size: str) -> str:
     return f"{code}（{size}）" if code else size
 
 
-def _shot_prompt(shot: dict[str, Any], ref_names: list[str]) -> str:
-    """把「一段多镜」的提示词压成「一次生成 = 一个镜头」。
+def _shot_seconds(shot: dict[str, Any]) -> float:
+    """一镜时长：新字段 duration_s 优先，老画布退回 duration。"""
+    for key in ("duration_s", "duration"):
+        try:
+            value = float(shot.get(key) or 0)
+        except (TypeError, ValueError):
+            continue
+        if value > 0:
+            return value
+    return 0.0
 
-    视频模型一次只能演一个连续镜头，它不会切镜。给它一整条时间轴，它只能自己猜
-    怎么填满时长——实测会出现三种坏结果：把「泥土溅上镜头」演成满屏糊泥的宏观特写、
-    把场景设定图轻微推动当成全景、把两张角色参考图并排摆成「两个战友蹲在一起」。
-    所以真正送进模型的必须只有这一镜：景别 + 主体 + 一个动作 + 光线与声音约束。
+
+def _name_of(item: dict[str, Any], name_by_id: dict[str, str]) -> str:
+    """主体/道具名字：资产名优先，其次资产 id，最后 item 自带的 name。"""
+    key = str(item.get("id") or "").strip()
+    return name_by_id.get(key) or str(item.get("name") or "").strip() or key
+
+
+def _camera_text(shot: dict[str, Any]) -> str:
+    camera = shot.get("camera") if isinstance(shot.get("camera"), dict) else {}
+    height = str(camera.get("height") or "").strip()
+    angle = str(camera.get("angle") or "").strip()
+    move = str(camera.get("movement") or shot.get("camera_move") or "").strip()
+    bits: list[str] = []
+    if height:
+        bits.append(f"机位高度{height}")
+    if angle:
+        bits.append(f"角度{angle}")
+    if move:
+        bits.append(f"运镜{move}")
+    return "，".join(bits)
+
+
+def _subject_text(shot: dict[str, Any], name_by_id: dict[str, str]) -> str:
+    """主体块：站位、视线、起止状态都从字段读；没有新字段才退回老 subject。"""
+    subjects = shot.get("subjects")
+    if isinstance(subjects, list) and subjects:
+        rows: list[str] = []
+        for item in subjects:
+            if not isinstance(item, dict):
+                continue
+            name = _name_of(item, name_by_id)
+            if not name:
+                continue
+            attrs: list[str] = []
+            if item.get("screen_pos"):
+                attrs.append(str(item["screen_pos"]))
+            if item.get("gaze"):
+                attrs.append(f"视线：{item['gaze']}")
+            if item.get("start_state"):
+                attrs.append(f"起始状态：{item['start_state']}")
+            if item.get("end_state"):
+                attrs.append(f"末态：{item['end_state']}")
+            rows.append(f"@{name}" + (f"（{'；'.join(attrs)}）" if attrs else ""))
+        if rows:
+            return "画面主体：" + "；".join(rows)
+    legacy = str(shot.get("subject") or "").strip()
+    return f"画面主体：{legacy}" if legacy else ""
+
+
+def _props_text(shot: dict[str, Any], name_by_id: dict[str, str]) -> str:
+    props = shot.get("props")
+    if not isinstance(props, list):
+        return ""
+    rows: list[str] = []
+    for item in props:
+        if not isinstance(item, dict):
+            continue
+        name = _name_of(item, name_by_id)
+        if not name:
+            continue
+        state = str(item.get("state") or "").strip()
+        rows.append(f"@{name}" + (f"（{state}）" if state else ""))
+    return "道具：" + "；".join(rows) if rows else ""
+
+
+def _light_text(shot: dict[str, Any]) -> str:
+    light = shot.get("light") if isinstance(shot.get("light"), dict) else {}
+    bits: list[str] = []
+    for label, key in (("方向", "direction"), ("色温", "color"), ("对比", "contrast")):
+        value = str(light.get(key) or "").strip()
+        if value:
+            bits.append(f"{label}{value}")
+    return "光线：" + "，".join(bits) if bits else ""
+
+
+def _dialogue_text(shot: dict[str, Any]) -> str:
+    dialogue = shot.get("dialogue") if isinstance(shot.get("dialogue"), dict) else {}
+    words = str(dialogue.get("text") or "").strip()
+    if not words:
+        return ""
+    try:
+        seconds = float(dialogue.get("duration_s") or 0)
+    except (TypeError, ValueError):
+        seconds = 0.0
+    if seconds:
+        tail = f"（约 {seconds:g} 秒）" if words[-1] in "。！？…" else f"，约 {seconds:g} 秒"
+    else:
+        tail = ""
+    return f"台词（同期声，原文一字不改）：{words}{tail}"
+
+
+def _forbidden_text(shot: dict[str, Any]) -> str:
+    forbidden = shot.get("forbidden")
+    if not isinstance(forbidden, list):
+        return ""
+    rows = [str(item).strip() for item in forbidden if str(item or "").strip()]
+    return "禁止：" + "；".join(rows) if rows else ""
+
+
+def _shot_prompt(
+    shot: dict[str, Any], ref_names: list[str], *, name_by_id: dict[str, str] | None = None
+) -> str:
+    """把这一镜的结构化字段渲染成视频段正文（服务端渲染，人不再手写）。
 
     视频层铁律（skills/drama_craft/SKILL.md 第三节）：
     - 只写动作，不重描外貌——ref 与文字是权重冲突，重描会让参考图失效、角色换脸；
     - 动作要写「起点 → 可见末态」，「他很愤怒」不算末态，「下颌绷紧、手背青筋」才算；
     - 否定式要写成正面陈述，被禁词根留在提示词里就会被当画面词渲染。
     """
+    mapping = name_by_id or {}
     size = _shot_size_text(str(shot.get("shot_size") or ""))
-    move = str(shot.get("camera_move") or "").strip()
-    subject = str(shot.get("subject") or "").strip()
+    camera = _camera_text(shot)
     action = str(shot.get("action") or "").strip()
+    focus = str(shot.get("focus") or "").strip()
     sound = str(shot.get("sound") or "").strip()
     lines: list[str] = []
-    if size or move:
-        lines.append(f"镜头：{size}{'，' + move if move else ''}。")
-    if subject:
-        lines.append(f"画面主体：{subject}。")
+    if size or camera:
+        lines.append(f"镜头：{size}{('，' + camera) if camera else ''}。")
+    subject_text = _subject_text(shot, mapping)
+    if subject_text:
+        lines.append(subject_text + "。")
+    props_text = _props_text(shot, mapping)
+    if props_text:
+        lines.append(props_text + "。")
     if action:
-        lines.append(f"动作（本镜只做这一条，从起点演到可见末态）：{action}。")
+        lines.append(f"动作（本镜只演这一条，从起始状态演到可见末态）：{action}。")
+    if focus:
+        lines.append(f"焦点：{focus}。")
     if ref_names:
         lines.append(
             "身份与外观完全按参考素材（" + "、".join(f"@{name}" for name in ref_names) + "），"
             "不改变脸型、服装、泥污与人物位置。"
         )
+    light_text = _light_text(shot)
+    if light_text:
+        lines.append(light_text + "。")
+    dialogue_text = _dialogue_text(shot)
+    if dialogue_text:
+        lines.append(dialogue_text + "。")
     if sound:
         lines.append(f"声音：{sound}")
+    forbidden_text = _forbidden_text(shot)
+    if forbidden_text:
+        lines.append(forbidden_text + "。")
     lines.append("单镜头连续拍摄，中间不切镜、不换机位、不出现新角色。")
     lines.append("画面中不出现任何文字、字幕、水印；不生成 BGM。")
     return "\n".join(lines)
 
 
-def _keyframe_prompt(shot: dict[str, Any], ref_names: list[str], *, full_prompt: str = "") -> str:
+def _render_segment_text(shot: dict[str, Any], name_by_id: dict[str, str] | None = None) -> str:
+    """服务端渲染的片段正文：只由字段决定。"""
+    if not isinstance(shot, dict) or not shot:
+        return ""
+    return _shot_prompt(shot, [], name_by_id=name_by_id)
+
+
+def _keyframe_prompt(
+    shot: dict[str, Any],
+    ref_names: list[str],
+    *,
+    full_prompt: str = "",
+    name_by_id: dict[str, str] | None = None,
+) -> str:
     """为首帧生成写的提示词：一张静止剧照，按 8 段式写（skills/drama_craft/SKILL.md 第二节）。
 
     首帧是三层里最便宜也最要紧的一层：构图错了，视频再重跑一百次都是错的。
-    实测：只给一行动作摘要出首帧，模型会自己发明构图——「刀锋离皮肤一寸」被画成
-    「一个人拿铲子怼自己的脸、对手完全不在画面里」。所以站位、朝向、景别、视线
-    必须在首帧提示词里说死；能拿到这一镜的完整正文时，优先复用正文当画面描述。
     """
+    mapping = name_by_id or {}
     size = _shot_size_text(str(shot.get("shot_size") or ""))
-    move = str(shot.get("camera_move") or "").strip()
-    subject = str(shot.get("subject") or "").strip()
+    camera = _camera_text(shot)
     action = str(shot.get("action") or "").strip()
     text = (full_prompt or "").strip()
     lines = ["电影级写实剧照，竖屏 9:16 构图。这是下面这一镜的第 0 秒画面，静止定格。"]
-    lines.append(f"CHARACTER：{subject or '画面主体见下方画面描述，人数与站位严格按描述'}。")
+    subject_text = _subject_text(shot, mapping)
+    lines.append((subject_text or "画面主体见下方画面描述，人数与站位严格按描述") + "。")
+    props_text = _props_text(shot, mapping)
+    if props_text:
+        lines.append(props_text + "。")
     if text:
         lines.append(f"ACTION：定格在动作起点。画面描述如下：\n{text}")
     elif action:
         lines.append(f"ACTION：定格在动作起点——{action}。")
-    lines.append(f"CAMERA：{size or '中景'}，{move or '机位固定'}；构图按上面的画面描述，主体完整入画、不裁掉关键动作。")
-    lines.append("LIGHT：光源方向与色温按场景参考素材，保持同一场戏的光线方向一致。")
+    lines.append(
+        f"CAMERA：{size or '中景'}"
+        + (f"，{camera}" if camera else "，机位固定")
+        + "；构图按上面的画面描述，主体完整入画、不裁掉关键动作。"
+    )
+    light_text = _light_text(shot)
+    lines.append(light_text + "。" if light_text else "LIGHT：光源方向与色温按场景参考素材，保持同一场戏的光线方向一致。")
     lines.append("TEXT：画面中不出现任何文字。")
     lines.append("STYLE：写实电影质感，胶片颗粒，色调统一。")
     if ref_names:
@@ -1100,8 +1250,9 @@ async def generate_segment(node_id: str, canvas: str, body: GenerateRequest) -> 
         use_keyframe = bool(keyframe.get("path")) and body.use_keyframe is not False
 
         if use_keyframe:
-            prompt_text = _shot_prompt(shot, ref_names)
-            shot_duration = float(shot.get("duration") or 0) or float(view["duration_s"] or 5)
+            shot_names = {ref["asset_id"]: ref["name"] for ref in refs}
+            prompt_text = _shot_prompt(shot, ref_names, name_by_id=shot_names)
+            shot_duration = _shot_seconds(shot) or float(view["duration_s"] or 5)
             duration = float(body.duration or shot_duration)
             request = {
                 "prompt": prompt_text,
@@ -1183,7 +1334,10 @@ async def generate_keyframe(node_id: str, canvas: str, body: KeyframeRequest) ->
         if full_prompt.startswith("参考素材："):
             head, _, rest = full_prompt.partition("\n\n")
             full_prompt = rest.strip() or full_prompt
-        prompt = (body.prompt or "").strip() or _keyframe_prompt(shot, ref_names, full_prompt=full_prompt)
+        shot_names = {str(ref.get("asset_id") or ""): str(ref.get("name") or "") for ref in view["references"]}
+        prompt = (body.prompt or "").strip() or _keyframe_prompt(
+            shot, ref_names, full_prompt=full_prompt, name_by_id=shot_names
+        )
         project = _project_meta(graph)
         model = body.model or _default_image_model()
         size = body.size or _default_size(project.get("aspect_ratio"), project.get("quality"))
@@ -2016,37 +2170,37 @@ _PRODUCE_INSTRUCTION = """把第{no}集做成可以进入「制作」的状态�
 也不要改画布标题；直接在当前画布上写节点和连线。
 
 剧本正文在 `assets/{node_id}/content.md`（也用 read_node 读一次，不要凭标题猜）。
-工艺规范见技能 `drama_craft`（三层工艺分离：素材图=身份证 / 首帧=画面 / 视频段=动作）。**先读它再动手。**
+流程与门禁见技能 `workflow`（正文是路由表，按阶段指到 references），提示词工艺见技能 `drama_craft`
+（三层工艺分离：素材图=身份证 / 首帧=画面 / 视频段=动作）。**先读它们再动手。**
 
 请依次完成：
-1. 按「**一条分镜 = 一个镜头 = 一次生成**」把这一集拆成片段：每段 4-6 秒，只有一个子镜头，不跨场景。
+1. 按「**一条分镜 = 一个镜头 = 一次生成**」把这一集拆成片段：每段 3-8 秒（常规 4-6 秒），只有一个子镜头，不跨场景。
    不要把几个镜头装进同一段——视频模型一次只能演一个连续镜头，它不会切镜；
-   也不要在一段里写「0-3 秒…3-7 秒…」的时间轴，那等于让它自己猜怎么填满时长。
-2. 每个片段建一个 storyboard 节点，`data.shots[]` 只写一项（就是这一镜）：
-   - `subject`：画面里有谁、**各自在画面左侧/右侧/前景/后景、朝向谁、看谁**（多人在场时必须写站位与视线；
-     不写就会得到「两个对手并排蹲着」）
-   - `action`：一件连续动作，写明**起点与可见末态**（「下颌绷紧、手背青筋凸起」算末态，「他很愤怒」不算）
-   - `shot_size`：从 极特写/特写/近景/中景/全景/大远景 里挑一个
-   - `camera_move`：固定 / 推 / 拉 / 摇 / 跟 / 升降，人物动作与摄影机运动分开写
-   - `sound`：台词写进这里，格式 `林越「303 的，夜宵到了。」`，旁白写 `旁白「…」`，纯环境音写「仅环境音：…」
-   - `duration`：这一镜的秒数
+   **也不要在一段里写时间轴**（「0-3 秒…3-7 秒…」），那等于让它自己猜怎么填满时长。
+2. 每个片段建一个 storyboard 节点，`data.shots[]` 只写**一项**（就是这一镜），**只交结构化字段，不要写长正文**：
+   - `no` 镜号；`duration_s` 本镜秒数（3-8）
+   - `shot_size`：极特写/大特写/特写/近景/中景/全景/大全景/远景/大远景/空镜 之一
+   - `camera`：{{"height": "与胸口齐平", "angle": "左前侧 30°", "movement": "固定"}}，三个字段都写
+   - `subjects`：本镜出镜主体数组，每人
+     {{"id": "<资产 node id>", "screen_pos": "画面左三分之一", "gaze": "看向对方喉咙", "start_state": "…", "end_state": "…"}}；
+     **同框 ≥2 个主体时 gaze 与 screen_pos 必填**
+   - `props`：{{"id": "<资产 node id>", "state": "螺纹段贴住皮肤"}}
+   - `action`：一件连续动作，写明起点与可见末态（「下颌绷紧、手背青筋凸起」算末态，「他很愤怒」不算），资产用 `@资产名` 引用
+   - `focus` 焦点；`light`：{{"direction": "右后方", "color": "暖橙 2700K", "contrast": "高"}}
+   - `sound` 环境音/拟音；`dialogue`：{{"text": "原文台词", "duration_s": 0}}，没有台词就留空串
+   - `forbidden`：本镜禁止出现的具体东西（不能为空）
    另写 `data.episode_no` = {no}，`data.segment_no` 从 1 连续编号。
-3. 从剧本里提取角色 / 场景 / 道具资产（每类都要），各建一个 asset 节点：
-   - `data.name` 写资产名（角色名/场景名/道具名，**不要带「资产·」之类前缀**，提示词里要用 `@这个名字` 引用）
-   - `data.kind` 取 character/scene/prop
-   - `data.spec` 写外观锚点（角色：年龄/体型/发型/服装与材质/2-3 条可画出的识别特征；场景：空间构成与光源；道具：材质与磨损）
-   - `data.consistency_tags` 写顿号分隔、**能被画出来**的短语，3-6 个（`左虎口旧疤`✓、`有故事感`✗）
-   - `data.role` 角色填 protagonist/supporting/extra
-   - **每个角色按单角度拆图，不要三视图并排**：`data.looks` 里放两项独立的单图，
-     第一项 `正面全身`（锚点，平光、纯底、中性表情），第二项 `正脸特写`；
-     三视图并排会被视频模型读成三个不同的人，成片出现重复角色。
-4. 为每个片段建一个 prompt 节点：`data.episode_no`、`data.segment_no` 与对应分镜一致、
-   `data.duration_s` 写这一镜的时长。正文只写这一镜，形状固定：
-   第一行 `景别 + 机位/运镜`；第二行 `动作：起点 → 可见末态`；第三行 `光线：方向与色温`；第四行 `声音：…`；
-   最后两行写死「单镜头连续拍摄，不切镜、不换机位、不出现新角色」「画面中不出现任何文字、字幕、水印，不生成 BGM」。
-   资产用 `@资产名` 引用。
-   **引用之后禁止再用文字重描该角色或该场景的外貌（脸型/发型/服装/年龄）**——
-   参考图与文字是权重冲突，不是叠加；重描会让参考图失效，成片换脸、场景漂移。
+3. 从剧本里提取角色 / 场景 / 道具资产（每类都要），各建一个 asset 节点，**只交字段**：
+   - `data.kind`：character / scene / prop / style；`data.name` 资产名（**不要带「资产·」前缀**，正文里用 `@这个名字` 引用）
+   - `data.anchors`：2-4 条能被画出来的外观锚点（角色：脸型/发型/服装材质/识别特征；场景：空间构成与光源；道具：材质与磨损）
+   - `data.consistency_tags`：3-6 个顿号分隔、**能被画出来**的短语（`左虎口旧疤`✓、`有故事感`✗）
+   - `data.forbidden`：这类资产禁止出现的具体项
+   - `data.spec`：素材图要画成什么样——**单角度单图**，禁止「三视图」或拼图
+   - `data.role`：角色填 protagonist/supporting/extra
+   - **每个角色按单角度拆图**：`data.looks` 放两项独立单图，第一项「正面全身」（锚点，平光、纯底、中性表情），第二项「正脸特写」。
+4. 为每个片段建一个 prompt 节点：只写 `data.episode_no`、`data.segment_no`、`data.duration_s`（= 这一镜的 duration_s）。
+   **正文不要手写**——服务端会按第 2 步的字段渲染 `data.prompt` 并置 `rendered_by="server"`；
+   人改过的正文标 `rendered_by="human"`，服务端不再覆盖。
 5. 每个 prompt 节点连一个 video_gen 节点（prompt → video_gen，句柄都用 media），并按资产依赖连好边。
    **一条边只连本镜真正出镜的资产**：单人镜头不要连另一个角色的资产；同框两人的镜头最多连两个角色。
 6. **必须把每个分镜节点的输出接到对应 prompt 节点的上下文**：storyboard → prompt，
@@ -2126,6 +2280,33 @@ async def _run_produce(job_id: str, canvas_name: str, prompt: str, session_id: s
         job.update(status="failed", finished_at=time.time(), error=f"{type(exc).__name__}: {exc}")
 
 
+def _sync_rendered_prompts(graph: Canvas) -> int:
+    """把每个片段的正文按字段重渲染并落进 data.prompt（人改过的不动）。"""
+    written = 0
+    for node in list(graph.nodes.values()):
+        if node.type != "prompt" or str(node.data.get("rendered_by") or "") == "human":
+            continue
+        shots: list[dict[str, Any]] = []
+        for item in graph.text_inputs(node.id):
+            source = graph.nodes.get(item["node_id"])
+            if source is not None and source.type == "storyboard" and isinstance(source.data.get("shots"), list):
+                shots = list(source.data["shots"])
+                break
+        if not shots:
+            continue
+        refs = _reference_rows(graph, node)
+        name_by_id = {ref["asset_id"]: ref["name"] for ref in refs}
+        rendered = _render_segment_text(_first_shot(shots, _segment_no(node, 0)), name_by_id)
+        if not rendered:
+            continue
+        if node.data.get("prompt") == rendered and node.data.get("rendered_by") == "server":
+            continue
+        node.data["prompt"] = rendered
+        node.data["rendered_by"] = "server"
+        written += 1
+    return written
+
+
 def _repair_links(graph: Canvas) -> int:
     """补齐 Agent 漏掉的「分镜 → 提示词」连线，返回补了几条。
 
@@ -2152,6 +2333,7 @@ def _repair_links(graph: Canvas) -> int:
         except Exception:  # noqa: BLE001 - 端口/类型不合就是模型建错了，跳过即可
             continue
         added += 1
+    _sync_rendered_prompts(graph)
     return added
 
 

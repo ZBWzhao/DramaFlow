@@ -97,6 +97,18 @@ NODE_STATUS = ("draft", "ready", "generating", "done", "error")
 # 分镜的 6 个字段（对齐 Toonflow storyboard 技能：主体/动作/景别/运动/声音/时长）
 # 存成结构化数据（不是只有文本），"时长总和"才可能被代码判定。
 SHOT_FIELDS = ("subject", "action", "shot_size", "camera_move", "sound", "duration")
+def _shot_seconds(shot: dict[str, Any]) -> float:
+    """一镜时长：新字段 duration_s 优先，老画布退回 duration。"""
+    for key in ("duration_s", "duration"):
+        try:
+            value = float(shot.get(key) or 0)
+        except (TypeError, ValueError):
+            continue
+        if value > 0:
+            return value
+    return 0.0
+
+
 SHOT_LABELS = {
     "subject": "主体",
     "action": "动作",
@@ -761,15 +773,94 @@ class Canvas:
     # ------------------------------------------------------------------
     @staticmethod
     def total_duration(shots: list[dict[str, Any]]) -> float:
-        return round(sum(float(s.get("duration") or 0) for s in shots), 2)
+        return round(sum(_shot_seconds(s) for s in shots), 2)
 
     def segment_durations(self, shots: list[dict[str, Any]]) -> dict[int, float]:
         """每个片段占多少秒（片段的边界因此可计算，而不是靠模型写对时间范围）。"""
         out: dict[int, float] = {}
         for shot in shots:
             seg = int(shot.get("segment_no") or 1)
-            out[seg] = round(out.get(seg, 0.0) + float(shot.get("duration") or 0), 2)
+            out[seg] = round(out.get(seg, 0.0) + _shot_seconds(shot), 2)
         return dict(sorted(out.items()))
+
+    @staticmethod
+    def _shot_extra(shot: dict[str, Any], name_by_id: dict[str, str] | None = None) -> str:
+        """新字段（camera/subjects/props/light/dialogue/focus/forbidden）的补行。"""
+        names = name_by_id or {}
+
+        def _label(item: dict[str, Any]) -> str:
+            return str(item.get("name") or names.get(item.get("id") or "") or item.get("id") or "")
+
+        bits: list[str] = []
+        camera = shot.get("camera") if isinstance(shot.get("camera"), dict) else {}
+        cam = "，".join(
+            f"{label}{camera[key]}"
+            for key, label in (("height", "机位高"), ("angle", "角度"), ("movement", "运镜"))
+            if camera.get(key)
+        )
+        if cam:
+            bits.append("机位：" + cam)
+        subjects = shot.get("subjects")
+        if isinstance(subjects, list) and subjects:
+            rows = []
+            for item in subjects:
+                if not isinstance(item, dict):
+                    continue
+                attrs = [str(item[key]) for key in ("screen_pos", "start_state", "end_state") if item.get(key)]
+                gaze = str(item.get("gaze") or "").strip()
+                if gaze:
+                    # 字段本身可能已经写成「看向对方喉咙」，不要渲染成「看向看向…」
+                    prefix = "" if gaze.startswith(("看向", "望向", "盯着", "注视", "凝视")) else "看向"
+                    attrs.insert(1 if item.get("screen_pos") else 0, prefix + gaze)
+                label = _label(item)
+                rows.append(f"{label}（{'；'.join(attrs)}）" if attrs else str(label))
+            if rows:
+                bits.append("主体：" + "；".join(rows))
+        props = shot.get("props")
+        if isinstance(props, list) and props:
+            bits.append(
+                "道具："
+                + "；".join(
+                    f"{_label(item)}（{item.get('state')}）"
+                    for item in props
+                    if isinstance(item, dict)
+                )
+            )
+        light = shot.get("light") if isinstance(shot.get("light"), dict) else {}
+        rules = "，".join(
+            f"{label}{light[key]}"
+            for key, label in (("direction", "方向"), ("color", "色温"), ("contrast", "对比"))
+            if light.get(key)
+        )
+        if rules:
+            bits.append("光线：" + rules)
+        dialogue = shot.get("dialogue") if isinstance(shot.get("dialogue"), dict) else {}
+        if str(dialogue.get("text") or "").strip():
+            bits.append(f"台词：{dialogue['text']}")
+        if shot.get("focus"):
+            bits.append("焦点：" + str(shot["focus"]))
+        forbidden = shot.get("forbidden")
+        if isinstance(forbidden, list) and forbidden:
+            bits.append("禁止：" + "；".join(str(item) for item in forbidden))
+        return "／".join(bits)
+
+    def _render_shot_block(self, shot: dict[str, Any], name_by_id: dict[str, str] | None = None) -> str:
+        """一镜一行；新字段挂在第二行。老字段照旧渲染，历史画布不会变样。"""
+        parts: list[str] = []
+        for key, label in (
+            ("subject", "主体"),
+            ("action", "动作"),
+            ("shot_size", "景别"),
+            ("camera_move", "运动"),
+            ("sound", "声音"),
+        ):
+            value = shot.get(key)
+            if value:
+                parts.append(f"{label}：{value}")
+        parts.append(f"时长：{_shot_seconds(shot):g}s")
+        extra = self._shot_extra(shot, name_by_id)
+        line = f"镜{shot.get('no', '?')}｜" + "｜".join(parts)
+        return line + (f"\n  {extra}" if extra else "")
 
     def render_storyboard(self, node_id: str) -> str:
         """把结构化分镜渲染成可读文本（时间范围由时长累加算出来，不靠模型手写）。"""
@@ -777,6 +868,7 @@ class Canvas:
         shots = list(node.data.get("shots") or [])
         if not shots:
             return ""
+        name_by_id = {nid: str(n.label or "") for nid, n in self.nodes.items()}
         lines: list[str] = [f"# {node.label}"]
         if node.data.get("target_duration"):
             lines.append(f"目标总时长 {node.data['target_duration']}s｜实际 {self.total_duration(shots)}s")
@@ -786,15 +878,11 @@ class Canvas:
         for shot in shots:
             by_segment.setdefault(int(shot.get("segment_no") or 1), []).append(shot)
         for seg, seg_shots in sorted(by_segment.items()):
-            seg_seconds = round(sum(float(s.get("duration") or 0) for s in seg_shots), 2)
+            seg_seconds = round(sum(_shot_seconds(s) for s in seg_shots), 2)
             lines.append(f"## 片段{seg}（{cursor:g}-{cursor + seg_seconds:g}s）")
             lines.append("")
             for shot in seg_shots:
-                parts = "｜".join(
-                    f"{SHOT_LABELS[f]}：{shot.get(f, '')}" if f != "duration" else f"时长：{shot.get('duration')}s"
-                    for f in SHOT_FIELDS
-                )
-                lines.append(f"镜{shot.get('no', '?')}｜{parts}")
+                lines.append(self._render_shot_block(shot, name_by_id))
             lines.append("")
             cursor = round(cursor + seg_seconds, 2)
         return "\n".join(lines)
