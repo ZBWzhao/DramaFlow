@@ -94,9 +94,17 @@ NODE_SPEC: dict[str, dict[str, dict[str, str]]] = {
 
 NODE_STATUS = ("draft", "ready", "generating", "done", "error")
 
-# 分镜的 6 个字段（对齐 Toonflow storyboard 技能：主体/动作/景别/运动/声音/时长）
-# 存成结构化数据（不是只有文本），"时长总和"才可能被代码判定。
-SHOT_FIELDS = ("subject", "action", "shot_size", "camera_move", "sound", "duration")
+# 分镜字段（对齐「一镜一段」契约）：镜头结构存成数据，正文由服务端按字段渲染，
+# 所以「时长 / 景别 / 机位 / 主体」都能被代码判定，而不是靠模型把长文写对。
+SHOT_SIZES = ("极特写", "大特写", "特写", "近景", "中景", "全景", "大全景", "远景", "大远景", "空镜")
+SHOT_MIN_S = 3.0
+SHOT_MAX_S = 8.0
+SHOT_CAMERA_FIELDS = (("height", "机位高度"), ("angle", "机位角度"), ("movement", "运镜"))
+ASSET_KINDS = ("character", "scene", "prop", "style")
+# 分镜 action 里的 `@名字`；`@图片1…` 这种已物化写法不算。
+_SHOT_MENTION = re.compile(r"(?<!图片)(?<!\d)@([^\s@，,。；;：:、）)】\]\"'“”]{1,24})")
+
+
 def _shot_seconds(shot: dict[str, Any]) -> float:
     """一镜时长：新字段 duration_s 优先，老画布退回 duration。"""
     for key in ("duration_s", "duration"):
@@ -109,14 +117,84 @@ def _shot_seconds(shot: dict[str, Any]) -> float:
     return 0.0
 
 
-SHOT_LABELS = {
-    "subject": "主体",
-    "action": "动作",
-    "shot_size": "景别",
-    "camera_move": "运动",
-    "sound": "声音",
-    "duration": "时长",
-}
+def _shot_label(item: Any, name_by_id: dict[str, str] | None = None) -> str:
+    if not isinstance(item, dict):
+        return ""
+    return str(item.get("name") or (name_by_id or {}).get(str(item.get("id") or "")) or item.get("id") or "")
+
+
+def shot_problems(shot: dict[str, Any], name_by_id: dict[str, str] | None = None) -> list[str]:
+    """单个镜头的字段问题（纯函数，引擎层与业务校验共用一份口径）。
+
+    这里的每一条都直接决定服务端能不能渲染出可用正文，所以「缺」就是真问题。
+    """
+    out: list[str] = []
+    seconds = _shot_seconds(shot)
+    if seconds <= 0:
+        out.append("缺 duration_s（一镜一段，单镜 3–8 秒）")
+    elif not (SHOT_MIN_S - 1e-6 <= seconds <= SHOT_MAX_S + 1e-6):
+        out.append(f"时长 {seconds:g}s 不在 {SHOT_MIN_S:g}–{SHOT_MAX_S:g}s 区间（一镜一段，常规 4–6 秒）")
+
+    size = str(shot.get("shot_size") or "").strip()
+    if not size:
+        out.append("缺 shot_size")
+    elif size not in SHOT_SIZES:
+        out.append(f"景别「{size}」不在枚举内：{'、'.join(SHOT_SIZES)}")
+
+    camera = shot.get("camera") if isinstance(shot.get("camera"), dict) else {}
+    missing_camera = [label for key, label in SHOT_CAMERA_FIELDS if not str(camera.get(key) or "").strip()]
+    if missing_camera:
+        out.append("机位缺 " + "、".join(missing_camera))
+
+    subjects = shot.get("subjects") if isinstance(shot.get("subjects"), list) else []
+    subjects = [item for item in subjects if isinstance(item, dict)]
+    if not subjects:
+        out.append("subjects 为空：每镜至少写一个主体（空镜也要写画面无人）")
+    elif len(subjects) >= 2:
+        for index, item in enumerate(subjects, start=1):
+            missing = [field for field in ("gaze", "screen_pos") if not str(item.get(field) or "").strip()]
+            if missing:
+                out.append(f"第 {index} 个主体缺 {'、'.join(missing)}（同镜 ≥2 人时必须写清视线与画面位置）")
+
+    declared = {_shot_label(item, name_by_id) for item in subjects}
+    declared |= {
+        _shot_label(item, name_by_id)
+        for item in (shot.get("props") if isinstance(shot.get("props"), list) else [])
+        if isinstance(item, dict)
+    }
+    declared.discard("")
+    mentioned = {match.group(1).strip() for match in _SHOT_MENTION.finditer(str(shot.get("action") or ""))}
+    if declared:
+        dangling = sorted(mentioned - declared)
+        if dangling:
+            out.append(
+                "action 引用了本镜没声明的资产："
+                + "、".join("@" + name for name in dangling)
+                + "（引用闭包：@ 到的名字必须在 subjects/props 里）"
+            )
+    return out
+
+
+def asset_problems(data: dict[str, Any]) -> list[str]:
+    """资产节点的字段问题：字段缺失会让「一致性」无从写起。"""
+    out: list[str] = []
+    kind = str(data.get("kind") or "").strip()
+    if not kind:
+        out.append("缺 kind（character/scene/prop/style）")
+    elif kind not in ASSET_KINDS:
+        out.append(f"kind「{kind}」不在枚举内：{'、'.join(ASSET_KINDS)}")
+    for field, label in (("name", "资产名"), ("spec", "外观说明")):
+        if not str(data.get(field) or "").strip():
+            out.append(f"缺 {field}（{label}）")
+    for field, label in (("anchors", "外观锚点"), ("consistency_tags", "一致性标签")):
+        value = data.get(field)
+        items = [item for item in value if str(item).strip()] if isinstance(value, list) else []
+        if not items:
+            out.append(f"缺 {field}（{label}）")
+    spec = str(data.get("spec") or "")
+    if "三视图" in spec or "三面图" in spec:
+        out.append("spec 要求三视图：本项目一图一人，生成单角度参考图（不要三视图并排）")
+    return out
 
 
 def _compatible(source_type: str, target_type: str) -> bool:
@@ -742,12 +820,14 @@ class Canvas:
                 video_inputs = [edge for edge in self.incoming(node.id) if edge.target_handle == "video"]
                 if not video_inputs:
                     problems.append(f"时间线「{node.label}」没有连接任何视频片段")
-            if node.type == "asset" and node.data.get("kind") in ("character", "scene") and not node.data.get("consistency_tags"):
-                problems.append(f"资产「{node.label}」缺少 consistency_tags（拼进提示词的稳定特征）")
+            if node.type == "asset":
+                for problem in asset_problems(node.data):
+                    problems.append(f"资产「{node.label}」{problem}")
 
-        # 分镜：6 字段齐全 + 时长预算 + 片段覆盖率（这三条都是"可判定"的）
+        # 分镜：一镜一段的结构字段 + 时长预算 + 片段覆盖率（这三条都是"可判定"的）
         prompts = [n for n in self.nodes.values() if n.type == "prompt"]
         covered = {int(p.data.get("segment_no") or 0) for p in prompts}
+        name_by_id = {nid: str(n.label or "") for nid, n in self.nodes.items()}
         for node in self.nodes.values():
             if node.type != "storyboard":
                 continue
@@ -756,9 +836,8 @@ class Canvas:
                 problems.append(f"分镜「{node.label}」还没有结构化镜头数据（用 set_storyboard 写入）")
                 continue
             for shot in shots:
-                missing = [SHOT_LABELS[f] for f in SHOT_FIELDS if shot.get(f) in (None, "")]
-                if missing:
-                    problems.append(f"分镜「{node.label}」镜{shot.get('no', '?')} 缺字段：{'、'.join(missing)}")
+                for problem in shot_problems(shot, name_by_id):
+                    problems.append(f"分镜「{node.label}」镜{shot.get('no', '?')} {problem}")
             target = node.data.get("target_duration")
             total = self.total_duration(shots)
             if target and abs(total - float(target)) > 0.01:

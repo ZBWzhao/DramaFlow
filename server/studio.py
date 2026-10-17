@@ -447,7 +447,7 @@ def _segment_view(canvas: Canvas, node: Any, *, fallback_no: int = 0, with_detai
             shots=shots,
             prompt=prompt,
             references=[{"asset_id": ref["asset_id"], "ordinal": ref["ordinal"]} for ref in refs],
-            name_by_id={ref["name"]: ref["name"] for ref in refs},
+            name_by_id={ref["asset_id"]: ref["name"] for ref in refs},
         )
         view.update(
             {
