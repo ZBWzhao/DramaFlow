@@ -10,7 +10,7 @@ import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue"
 import { ElMessage, ElMessageBox } from "element-plus";
 import { actions, state } from "../store.js";
 import { assetUrl, mediaOf } from "../utils.js";
-import { CARD_W, cardHeight, clamp, edgePath, nodeAnchor } from "./geometry.js";
+import { CARD_W, cardHeight, clamp, edgePath, nodeAnchor, portOffset } from "./geometry.js";
 import { dragMoves } from "./positions.js";
 import { goHome, openStudioForCurrent, openStudioTab } from "../shell/shellStore.js";
 import NodeCard from "./NodeCard.vue";
@@ -255,6 +255,8 @@ const boardNodes = computed(() => (state.canvas.nodes || []).map((node) => {
     canUpload: ["asset", "image", "video", "audio"].includes(type),
     historyCount: (node.data?.takes || []).length,
     flash: node.id === flashId.value,
+    portsIn: portSpec(type).in,
+    portsOut: portSpec(type).out,
     raw: node,
   };
 }));
@@ -263,13 +265,32 @@ const byId = computed(() => Object.fromEntries(boardNodes.value.map((node) => [n
 
 /* 只给「两端都在视口里」的连线画路径：大画布上连线数量往往是节点数的 1.5 倍，
  * 全画会把 svg 撑爆，而且屏幕外的线本来也看不见。 */
+function portIndex(type, side, handle) {
+  const list = portSpec(type)[side];
+  const found = list.findIndex(([name]) => name === handle);
+  return found < 0 ? 0 : found;
+}
+
+/* 一条边落在哪个口：老数据没有 handle 时退回「垂直居中」，不会跳到别的位置 */
+function edgeAnchor(boardNode, side, handle) {
+  const key = side === "left" ? "in" : "out";
+  const list = portSpec(boardNode.type)[key];
+  const index = Math.max(0, list.findIndex(([name]) => name === handle));
+  return nodeAnchor(boardNode, side, index, list.length);
+}
+
 const edges = computed(() => visibleEdges.value
   .map((edge) => {
     const from = byId.value[edge.source ?? edge.from];
     const to = byId.value[edge.target ?? edge.to];
     if (!from || !to) return null;
+    const sourceHandle = edge.sourceHandle ?? edge.source_handle;
+    const targetHandle = edge.targetHandle ?? edge.target_handle;
     // 连线颜色跟随上游数据家族：人一眼能看出"这条线送的是什么"
-    return { d: edgePath(nodeAnchor(from, "right"), nodeAnchor(to, "left")), fam: from.fam || "mixed" };
+    return {
+      d: edgePath(edgeAnchor(from, "right", sourceHandle), edgeAnchor(to, "left", targetHandle)),
+      fam: from.fam || "mixed",
+    };
   })
   .filter(Boolean));
 
@@ -663,12 +684,16 @@ function onOpenVideo({ id, src, title, badge, duration }) {
 }
 
 /* ---------- 拖线建边：从卡片右侧 ⊕ 按住在画布上拖到另一张卡 ---------- */
-function onEdgeStart({ id, clientX, clientY }) {
+function onEdgeStart({ id, handle, ptype, clientX, clientY }) {
   const from = byId.value[id];
   if (!from) return;
+  const list = portsFor(from.type).out;
+  const index = Math.max(0, list.findIndex(([name]) => name === handle));
   edgeDraft.value = {
     sourceId: id,
-    from: nodeAnchor(from, "right"),
+    handle: handle || "",
+    ptype: ptype || "",
+    from: nodeAnchor(from, "right", index, list.length),
     to: toFlow(clientX, clientY),
   };
   window.addEventListener("pointermove", onEdgeMove);
@@ -688,7 +713,11 @@ async function onEdgeUp(event) {
   const el = document.elementFromPoint(event.clientX, event.clientY)?.closest?.(".node");
   const targetId = el?.getAttribute("data-id");
   if (!targetId || targetId === draft.sourceId) return;
-  await connectNodes(draft.sourceId, targetId);
+  await connectNodes(draft.sourceId, targetId, draft.handle);
+}
+
+function portsFor(type) {
+  return portSpec(type);
 }
 
 function portSpec(type) {
@@ -708,7 +737,7 @@ function matchPorts(sourceType, targetType) {
   return null;
 }
 
-async function connectNodes(sourceId, targetId) {
+async function connectNodes(sourceId, targetId, fromHandle) {
   const source = (state.canvas.nodes || []).find((node) => node.id === sourceId);
   const target = (state.canvas.nodes || []).find((node) => node.id === targetId);
   if (!source || !target) return;
@@ -722,7 +751,17 @@ async function connectNodes(sourceId, targetId) {
     showToast(`「${target.label || target.id}」没有输入口，接不上`);
     return;
   }
-  const ports = matchPorts(source.type, target.type);
+  // 从某个具体输出口拖出来的线：目标必须能收这个类型的口，否则明确告诉用户
+  const draggedType = fromHandle
+    ? (from.out.find(([name]) => name === fromHandle) || [])[1]
+    : "";
+  const exact = draggedType
+    ? (() => {
+        const hit = to.in.find(([, inType]) => inType === draggedType);
+        return hit ? { sourceHandle: fromHandle, targetHandle: hit[0] } : null;
+      })()
+    : null;
+  const ports = exact || matchPorts(source.type, target.type);
   if (!ports) {
     const types = from.out.map(([, type]) => type).join("/");
     showToast(`这条线接不上：目标没有能收 ${types} 的口`);
@@ -1017,6 +1056,8 @@ onMounted(() => {
             :node="node"
             :selected="selection.length === 1 && selection[0] === node.id"
             :in-selection="selectedIds.has(node.id)"
+            :in-ports="node.portsIn"
+            :out-ports="node.portsOut"
             :zoom="view.z"
             :preview="previewFor(node.id)"
             @select="onSelect"

@@ -4,7 +4,7 @@
  * 右边 ⊕ 可以按住往外拖出一条新连线（由 CanvasBoard 负责落点判定与写库）。
  */
 import { computed, onBeforeUnmount, ref } from "vue";
-import { CARD_W } from "./geometry.js";
+import { CARD_W, CAPTION_H, cardHeight, portOffset } from "./geometry.js";
 import NodeToolbar from "./NodeToolbar.vue";
 import PromptBox from "./PromptBox.vue";
 import VideoPlayer from "./VideoPlayer.vue";
@@ -16,11 +16,23 @@ const props = defineProps({
   zoom: { type: Number, default: 1 },
   // 多选拖动时，非主卡由画板下发"跟着主卡位移"的预览偏移（松手前不落库）
   preview: { type: Object, default: null },
+  // 服务端 node_spec 里的类型化端口：[[name, STRING|IMAGE|VIDEO|AUDIO], ...]
+  inPorts: { type: Array, default: () => [] },
+  outPorts: { type: Array, default: () => [] },
 });
 const emit = defineEmits([
   "select", "send", "change", "move", "drag", "generate", "upload", "history", "detail", "edge-start",
   "open-video", "retry",
 ]);
+
+/* 端口纵坐标：与 geometry.portOffset 同一公式，保证连线落点和圆点重合 */
+function portTop(index, count) {
+  return portOffset(props.node, index, count);
+}
+
+function onEdgeStartFrom(event, handle, portType) {
+  emit("edge-start", { id: props.node.id, handle, ptype: portType, clientX: event.clientX, clientY: event.clientY });
+}
 
 const drag = ref(null);
 const offset = ref({ x: 0, y: 0 });
@@ -201,8 +213,23 @@ function onOpenVideo() {
           </button>
         </div>
 
-        <span class="handle left" title="输入" />
-        <span class="handle right" title="按住拖出一条线" @pointerdown="onEdgeStart" />
+        <span
+          v-for="([portName, portType], index) in inPorts"
+          :key="'in-' + portName"
+          class="handle left"
+          :class="'port-' + portType"
+          :style="{ top: portTop(index, inPorts.length) + 'px' }"
+          :title="`输入 · ${portName} (${portType})`"
+        />
+        <span
+          v-for="([portName, portType], index) in outPorts"
+          :key="'out-' + portName"
+          class="handle right"
+          :class="'port-' + portType"
+          :style="{ top: portTop(index, outPorts.length) + 'px' }"
+          :title="`拖出连线 · ${portName} (${portType})`"
+          @pointerdown.stop="onEdgeStartFrom($event, portName, portType)"
+        />
         <span class="node-menu" title="更多" @click.stop="emit('detail', node)">⋯</span>
       </template>
     </div>

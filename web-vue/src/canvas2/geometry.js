@@ -9,10 +9,19 @@ export function cardHeight(node) {
   return CAPTION_H + Math.round(CARD_W * (9 / 16));
 }
 
-export function nodeAnchor(node, side) {
+/* 端口纵向分布：卡片标题栏以下、卡底以上，按端口数量均分。
+ * 只有 1 个口时保持原来的「垂直居中」，老连线的落点不变。 */
+export function portOffset(node, index = 0, count = 1) {
   const h = cardHeight(node);
+  if (!(count > 1)) return h / 2;
+  const top = CAPTION_H + 16;
+  const bottom = h - 16;
+  return top + ((bottom - top) * (index + 0.5)) / count;
+}
+
+export function nodeAnchor(node, side, index = 0, count = 1) {
   const x = side === "left" ? node.x : node.x + CARD_W;
-  return { x, y: node.y + h / 2 };
+  return { x, y: node.y + portOffset(node, index, count) };
 }
 
 export function edgePath(from, to) {
