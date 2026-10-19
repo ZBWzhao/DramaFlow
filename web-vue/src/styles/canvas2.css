@@ -221,10 +221,9 @@ textarea {
   grid-area: side;
   display: flex;
   flex-direction: column;
-  gap: 8px;
-  padding: 10px 10px 8px;
-  border-right: 1px solid var(--line);
-  background: rgba(11, 13, 16, 0.9);
+  gap: var(--sp-3);
+  padding: var(--sp-4) var(--sp-3) var(--sp-2);
+  background: transparent;
   z-index: 10;
 }
 
@@ -232,40 +231,42 @@ textarea {
   display: flex;
   gap: 2px;
   padding: 2px;
-  border-radius: 9px;
-  background: rgba(255, 255, 255, 0.045);
+  border-radius: var(--r-btn);
+  background: var(--card);
+  box-shadow: 0 0 0 1px var(--line) inset;
 }
 
 .cv2 .seg button {
   flex: 1;
   height: 26px;
   border: 0;
-  border-radius: 7px;
+  border-radius: 6px;
   background: transparent;
-  color: var(--text-3);
-  font-size: 11.5px;
+  color: var(--text-3-strong);
+  font-size: var(--fs-11);
 }
 
 .cv2 .seg button.on {
-  background: rgba(255, 255, 255, 0.09);
+  background: var(--card-2);
   color: var(--text);
-  box-shadow: 0 1px 0 rgba(0, 0, 0, 0.25);
+  box-shadow: 0 0 0 1px var(--line-2) inset;
 }
 
 .cv2 .side-search {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: var(--sp-2);
   height: 30px;
-  padding: 0 9px;
-  border-radius: 8px;
-  background: rgba(255, 255, 255, 0.04);
-  border: 1px solid transparent;
+  padding: 0 var(--sp-2);
+  border-radius: var(--r-btn);
+  background: var(--card);
+  border: 1px solid var(--line);
   color: var(--text-3);
+  transition: border-color var(--dur-fast) var(--ease);
 }
 
 .cv2 .side-search:focus-within {
-  border-color: rgba(110, 168, 255, 0.4);
+  border-color: var(--accent-line);
 }
 
 .cv2 .side-search input {
@@ -274,7 +275,7 @@ textarea {
   border: 0;
   outline: none;
   background: transparent;
-  font-size: 11.5px;
+  font-size: var(--fs-12);
 }
 
 .cv2 .side-search input::placeholder {
@@ -312,23 +313,25 @@ textarea {
 .cv2 .side-item {
   display: flex;
   align-items: center;
-  gap: 7px;
+  gap: var(--sp-2);
   height: 30px;
-  padding: 0 8px;
+  padding: 0 var(--sp-2);
   border: 0;
-  border-radius: 7px;
+  border-radius: 6px;
   background: transparent;
   color: var(--text-2);
-  font-size: 11.5px;
+  font-size: var(--fs-12);
   text-align: left;
+  transition: background var(--dur-fast) var(--ease), color var(--dur-fast) var(--ease);
 }
 
 .cv2 .side-item:hover {
-  background: rgba(255, 255, 255, 0.05);
+  background: var(--card);
+  color: var(--text);
 }
 
 .cv2 .side-item.on {
-  background: rgba(255, 255, 255, 0.09);
+  background: var(--accent-soft);
   color: var(--text);
 }
 
@@ -1180,26 +1183,33 @@ textarea {
 }
 
 /* ---------- B 版画布布局（demo 引擎接入真实数据） ---------- */
+/* 三行网格：顶栏 / 左栏+画布 / 状态栏。悬浮 dock 只留给 ?legacy=1 的旧画布。 */
 .cv2.board {
   position: absolute;
   inset: 0;
   display: grid;
-  grid-template-columns: 216px 1fr;
-  background: #08090b;
+  grid-template-columns: var(--w-rail) minmax(0, 1fr);
+  grid-template-rows: var(--h-topbar) minmax(0, 1fr) var(--h-statusbar);
+  grid-template-areas:
+    "top top"
+    "side stage"
+    "status status";
+  background: var(--bg);
 }
 
 .cv2 .board-side {
+  grid-area: side;
   position: relative;
-  border-right: 1px solid rgba(255, 255, 255, 0.06);
-  background: #0b0d10;
+  border-right: 1px solid var(--line);
+  background: var(--bg-2);
   overflow: hidden;
-  padding-top: 56px;
 }
 
 .cv2 .board-stage {
+  grid-area: stage;
   position: relative;
   overflow: hidden;
-  padding: 56px 10px 70px 10px;
+  padding: 0 10px;
 }
 
 /* demo 的 stage 撑满自己的格子 */

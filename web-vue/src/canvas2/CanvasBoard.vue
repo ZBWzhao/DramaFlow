@@ -12,15 +12,21 @@ import { actions, state } from "../store.js";
 import { assetUrl, mediaOf } from "../utils.js";
 import { CARD_W, cardHeight, clamp, edgePath, nodeAnchor } from "./geometry.js";
 import { dragMoves } from "./positions.js";
+import { goHome, openStudioForCurrent, openStudioTab } from "../shell/shellStore.js";
 import NodeCard from "./NodeCard.vue";
 import HeroPage from "./HeroPage.vue";
 import DockBar from "./DockBar.vue";
 import SidebarPanel from "./SidebarPanel.vue";
+import TopBar from "./TopBar.vue";
+import StatusBar from "./StatusBar.vue";
 import NodeStudio from "../components/NodeStudio.vue";
 import GenerationHistoryDrawer from "../components/GenerationHistoryDrawer.vue";
 import ContextMenu from "./ContextMenu.vue";
 import NodeSearch from "./NodeSearch.vue";
 import VideoLightbox from "./VideoLightbox.vue";
+
+/* 顶栏的项目管理入口由工作台外壳（CanvasWorkspace）负责，这里只转发 */
+const emit = defineEmits(["open-project"]);
 
 const TYPE_LABEL = {
   asset: "资产", image: "图片", image_gen: "图片生成",
@@ -113,6 +119,43 @@ const visibleEdges = computed(() => (state.canvas.edges || []).filter((edge) => 
   return visibleIds.value.has(source) && visibleIds.value.has(target);
 }));
 const selectedIds = computed(() => new Set(selection.value));
+
+/* ---------- 顶栏 / 状态栏（阶段 1）：只读投影 + 动作转发 ---------- */
+const savedAt = ref(0);
+watch(
+  () => state.canvasServerRevision,
+  () => { savedAt.value = Date.now(); },
+);
+const saveState = computed(() => (state.canvasBusy || state.mediaUploading ? "syncing" : "saved"));
+const projectTitle = computed(() => (
+  state.canvasMeta[state.canvasName]?.story_title
+  || state.canvas.meta?.story_title
+  || state.canvasName
+  || "未命名项目"
+));
+
+function onBack() {
+  goHome();
+}
+function onSwitchView(id) {
+  if (id === "canvas") return;
+  if (id === "studio") {
+    openStudioForCurrent();
+    return;
+  }
+  if (id === "assets" && !openStudioTab("assets")) showToast("先在项目里打开一集，再看素材库");
+}
+function onChangeModel({ provider, model }) {
+  if (provider && provider !== state.mediaProvider) actions.setMediaProvider(provider);
+  if (model && model !== state.mediaModel) actions.setMediaModel(model);
+}
+async function onExportPrompts() {
+  try {
+    await actions.exportPrompts();
+  } catch (err) {
+    ElMessage.error({ message: `导出失败：${err.message || err}`, duration: 5000 });
+  }
+}
 let toastTimer = 0;
 let fitTimer = 0;
 
@@ -856,6 +899,26 @@ onMounted(() => {
 
 <template>
   <div class="cv2 board">
+    <TopBar
+      :title="projectTitle"
+      :save-state="saveState"
+      :saved-at="savedAt"
+      view="canvas"
+      :selected-count="selection.length"
+      :providers="state.mediaProviders"
+      :provider="state.mediaProvider"
+      :model="state.mediaModel"
+      :problems="state.canvas.problems || []"
+      :busy="state.canvasBusy"
+      @back="onBack"
+      @open-project="emit('open-project')"
+      @switch-view="onSwitchView"
+      @change-model="onChangeModel"
+      @generate-selected="batchGenerate"
+      @export="onExportPrompts"
+      @open-info="state.drawerOpen = !state.drawerOpen"
+    />
+
     <aside class="board-side">
       <SidebarPanel
         v-model:tab="tab"
@@ -980,6 +1043,14 @@ onMounted(() => {
 
       <input ref="uploadInput" type="file" accept="image/*,video/*,audio/*" class="hidden-upload" @change="onUploadPicked" />
     </main>
+
+    <StatusBar
+      :count="boardNodes.length"
+      :selected-count="selection.length"
+      :zoom="view.z"
+      :synced-at="savedAt"
+      :empty="!boardNodes.length"
+    />
 
     <div v-if="toast" class="toast">{{ toast }}</div>
   </div>

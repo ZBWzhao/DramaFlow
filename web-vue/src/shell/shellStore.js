@@ -64,3 +64,11 @@ export function openStudioForCurrent() {
   if (!studio.canvas) return;
   shell.view = "studio";
 }
+
+/** 切到制片台并指定页签（素材库等入口用）。返回是否成功。 */
+export function openStudioTab(tab) {
+  if (!studio.canvas) return false;
+  studio.tab = tab;
+  shell.view = "studio";
+  return true;
+}
