@@ -4,7 +4,7 @@
  * 右边 ⊕ 可以按住往外拖出一条新连线（由 CanvasBoard 负责落点判定与写库）。
  */
 import { computed, onBeforeUnmount, ref } from "vue";
-import { CARD_W, CAPTION_H, cardHeight, portOffset } from "./geometry.js";
+import { CAPTION_GAP, CAPTION_H, CARD_W, portOffset } from "./geometry.js";
 import NodeToolbar from "./NodeToolbar.vue";
 import PromptBox from "./PromptBox.vue";
 import VideoPlayer from "./VideoPlayer.vue";
@@ -28,10 +28,15 @@ const emit = defineEmits([
   "open-video", "retry",
 ]);
 
-/* 端口纵坐标：与 geometry.portOffset 同一公式，保证连线落点和圆点重合 */
+/* 端口纵坐标：与 geometry.portOffset 同一公式，保证连线落点和圆点重合。
+ * 锚点现在挂在 `.node` 根上（不再放在 overflow:hidden 的卡体里），
+ * 所以直接用「节点左上角为原点」的 portOffset，不再扣标签行。 */
 function portTop(index, count) {
   return portOffset(props.node, index, count);
 }
+
+/* 卡外锚点与 geometry.nodeAnchor 同源：连线端点 = 圆点中心 = x/y + portOffset */
+const portOffsetFor = portOffset;
 
 function onEdgeStartFrom(event, handle, portType) {
   emit("edge-start", { id: props.node.id, handle, ptype: portType, clientX: event.clientX, clientY: event.clientY });
@@ -58,6 +63,7 @@ const left = computed(() => props.node.x + (shownOffset.value.x || 0));
 const top = computed(() => props.node.y + (shownOffset.value.y || 0));
 
 function isInteractive(target) {
+  if (target?.closest?.(".handle.move")) return false; // 上下抓手就是用来拖卡的
   return Boolean(
     target?.closest?.("textarea, input, button, .node-menu, .handle, .prompt-box, .node-toolbar"),
   );
@@ -164,12 +170,10 @@ function onOpenVideo() {
     </div>
 
     <div class="node-body" :class="{ 'is-text': node.plain, 'is-video': node.video }">
-      <span class="type-strip" aria-hidden="true"></span>
       <span
-        v-if="statusKind"
+        v-if="statusKind === 'done'"
         class="status-mark"
-        aria-hidden="true"
-      >{{ statusKind === "done" ? "✓" : statusKind === "unknown" ? "?" : "!" }}</span>
+      >已生成</span>
       <template v-if="node.plain">
         <p class="node-text">{{ node.prompt }}</p>
       </template>
@@ -186,11 +190,10 @@ function onOpenVideo() {
         <span v-else class="node-empty-icon">{{ node.glyph || "▣" }}</span>
         <span v-if="node.badge" class="ai-tag">{{ node.badge }}</span>
 
-        <!-- 生成状态遮罩：服务端状态 + 本地"已提交"共同驱动；失败给一键重试 -->
+        <!-- 生成状态：服务端状态 + 本地"已提交"共同驱动；失败给一键重试 -->
         <div v-if="node.busy" class="gen-overlay" aria-live="polite">
-          <span class="gen-bar" aria-hidden="true"></span>
           <span class="gen-ring" aria-hidden="true"></span>
-          <span class="gen-text">{{ node.busyLabel || "生成中…" }}</span>
+          <span class="gen-text">{{ node.busyLabel || "生成中" }}</span>
         </div>
         <div v-else-if="node.failed" class="gen-overlay is-error">
           <span class="gen-fail-icon" aria-hidden="true">!</span>
@@ -219,26 +222,39 @@ function onOpenVideo() {
           </button>
         </div>
 
-        <span
-          v-for="([portName, portType], index) in inPorts"
-          :key="'in-' + portName"
-          class="handle left"
-          :class="'port-' + portType"
-          :style="{ top: portTop(index, inPorts.length) + 'px' }"
-          :title="`输入 · ${portName} (${portType})`"
-        />
-        <span
-          v-for="([portName, portType], index) in outPorts"
-          :key="'out-' + portName"
-          class="handle right"
-          :class="'port-' + portType"
-          :style="{ top: portTop(index, outPorts.length) + 'px' }"
-          :title="`点击选择起点，或按住拖到目标卡 · ${portName} (${portType})`"
-          @pointerdown.stop="onEdgeStartFrom($event, portName, portType)"
-        />
         <span class="node-menu" title="更多" @click.stop="emit('detail', node)">⋯</span>
       </template>
     </div>
+
+    <!-- 四向锚点放在卡体外：卡体 overflow:hidden 会把卡外的把手裁掉，
+         而且 hover 时它们要能压在邻卡之上。左右是真实类型化端口，上下是「拖动整卡」的抓手。 -->
+    <span
+      v-for="([portName, portType], index) in inPorts"
+      :key="'in-' + portName"
+      class="handle left"
+      :style="{ top: portOffsetFor(index, inPorts.length) + 'px' }"
+      :title="`输入 · ${portName} (${portType})`"
+    />
+    <span
+      v-for="([portName, portType], index) in outPorts"
+      :key="'out-' + portName"
+      class="handle right"
+      :style="{ top: portOffsetFor(index, outPorts.length) + 'px' }"
+      :title="`点击选择起点，或按住拖到目标卡 · ${portName} (${portType})`"
+      @pointerdown.stop="onEdgeStartFrom($event, portName, portType)"
+    />
+    <span
+      v-if="selected"
+      class="handle move top"
+      title="拖动卡片"
+      aria-hidden="true"
+    />
+    <span
+      v-if="selected"
+      class="handle move bottom"
+      title="拖动卡片"
+      aria-hidden="true"
+    />
 
     <PromptBox
       v-if="selected"

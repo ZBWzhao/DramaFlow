@@ -84,7 +84,8 @@
   --h-statusbar: 28px;
   --w-rail: 260px;
   --card-w: 248px;
-  --card-caption: 24px;
+  --card-caption: 22px;
+  --caption-gap: 6px;
   --card-h: 164px;
   --port: 8px;
   --grid: 22px;
@@ -242,3 +243,4 @@
     scroll-behavior: auto !important;
   }
 }
+

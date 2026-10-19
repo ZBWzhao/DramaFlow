@@ -244,7 +244,7 @@ const boardNodes = computed(() => (state.canvas.nodes || []).map((node) => {
     fam: TYPE_FAMILY[type] || "mixed",
     glyph: TYPE_GLYPH[type] || "▣",
     tag: TYPE_LABEL[type] || type,
-    dims: node.data?.width && node.data?.height ? `${node.data.width} × ${node.data.height}` : (TYPE_LABEL[type] || type),
+    dims: node.data?.width && node.data?.height ? `${node.data.width} × ${node.data.height}` : "",
     img: media && !isVideo ? assetUrl(media.path) : "",
     src: media ? assetUrl(media.path) : "",
     video: isVideo,
@@ -296,11 +296,13 @@ const edges = computed(() => visibleEdges.value
     if (!from || !to) return null;
     const sourceHandle = edge.sourceHandle ?? edge.source_handle;
     const targetHandle = edge.targetHandle ?? edge.target_handle;
-    // 连线颜色跟随上游数据家族：人一眼能看出"这条线送的是什么"
+    // 选中节点时，与它直接相连的线算「链路」：提亮但不抢被点中那条的注意力
+    const chain = Boolean(state.selectedId)
+      && ((edge.source ?? edge.from) === state.selectedId || (edge.target ?? edge.to) === state.selectedId);
     return {
       id: edge.id,
       d: edgePath(edgeAnchor(from, "right", sourceHandle), edgeAnchor(to, "left", targetHandle)),
-      fam: from.fam || "mixed",
+      chain,
     };
   })
   .filter(Boolean));
@@ -698,6 +700,17 @@ function onToolbar(key, node) {
   else if (key === "upload") requestUpload(node);
   else if (key === "history") historyOpen.value = true;
   else if (key === "detail") studioOpen.value = true;
+}
+
+/* 底栏「历史」：只在恰好选中一张卡时有意义；没选中就告诉人去选，不弹空抽屉 */
+function openHistory() {
+  const id = selection.value.length === 1 ? selection.value[0] : state.selectedId;
+  const node = id ? byId.value[id] : null;
+  if (!node) {
+    showToast("先选中一张卡，再看它的历史版本");
+    return;
+  }
+  onToolbar("history", node);
 }
 
 /* 选中一张卡时只出「卡上工具条 + 卡下提示词框」，右侧详情面板要显式点「详情」才打开，
@@ -1240,7 +1253,7 @@ onMounted(() => {
         <div
           class="grid-bg"
           :style="{
-            backgroundSize: `${22 * view.z}px ${22 * view.z}px`,
+            backgroundSize: `${24 * view.z}px ${24 * view.z}px`,
             backgroundPosition: `${view.x}px ${view.y}px`,
           }"
         ></div>
@@ -1262,7 +1275,7 @@ onMounted(() => {
                 @pointerdown.stop="pickEdge(edge.id)"
                 @dblclick.stop="removeEdge(edge.id)"
               />
-              <path class="line" :class="{ on: selectedEdgeId === edge.id }" :d="edge.d" :data-fam="edge.fam" />
+              <path class="line" :class="{ on: selectedEdgeId === edge.id, 'on-chain': edge.chain && selectedEdgeId !== edge.id }" :d="edge.d" />
             </g>
             <path
               v-if="connectLine"
@@ -1320,8 +1333,8 @@ onMounted(() => {
           <button class="fit" type="button" title="适应窗口" @click="fit">⤢</button>
         </div>
 
-        <DockBar :empty="!boardNodes.length" @add="addNode()" />
-        <div class="count-pill">共 {{ boardNodes.length }} 节点</div>
+        <DockBar :empty="!boardNodes.length" @add="addNode()" @fit="fit()" @search="searchOpen = true" @history="openHistory()" />
+        <div class="count-pill">← 共 {{ boardNodes.length }} 节点</div>
       </div>
 
       <ContextMenu
@@ -1372,3 +1385,4 @@ onMounted(() => {
 <style scoped>
 .hidden-upload { display: none; }
 </style>
+

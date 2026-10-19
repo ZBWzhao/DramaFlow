@@ -22,6 +22,7 @@ const TOOLS = [
       v-for="tool in TOOLS.filter((item) => item.show(props.node))"
       :key="tool.key"
       class="tool-btn"
+      :class="{ primary: tool.key === 'generate' }"
       :disabled="props.node.busy && tool.key === 'generate'"
       :title="props.node.busy && tool.key === 'generate' ? '正在生成，等它完成' : ''"
       @click.stop="emit(tool.key, props.node)"

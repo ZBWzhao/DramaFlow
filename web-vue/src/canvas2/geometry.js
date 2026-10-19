@@ -1,20 +1,23 @@
-// 和 React 版完全一致的几何计算，保证两个 demo 长得一模一样。
+// 和 React 版一致的几何计算（阶段 D 按 spec 调整：标签行 22 高 + 6 间距）。
 export const CARD_W = 248;
-export const CAPTION_H = 24;
+export const CAPTION_H = 22;
+export const CAPTION_GAP = 6;
 
 export const clamp = (v, min, max) => Math.min(max, Math.max(min, v));
 
 export function cardHeight(node) {
-  if (node.plain) return 132;
-  return CAPTION_H + Math.round(CARD_W * (9 / 16));
+  if (node.plain) return CAPTION_H + CAPTION_GAP + 132;
+  return CAPTION_H + CAPTION_GAP + Math.round(CARD_W * (9 / 16));
 }
 
 /* 端口纵向分布：卡片标题栏以下、卡底以上，按端口数量均分。
- * 只有 1 个口时保持原来的「垂直居中」，老连线的落点不变。 */
+ * 只有 1 个口时保持「垂直居中」，老连线的落点不变。
+ * 返回值以「节点左上角」为原点；NodeCard 里画圆点时再减去卡体偏移。 */
 export function portOffset(node, index = 0, count = 1) {
   const h = cardHeight(node);
-  if (!(count > 1)) return h / 2;
-  const top = CAPTION_H + 16;
+  const bodyTop = CAPTION_H + CAPTION_GAP;
+  if (!(count > 1)) return bodyTop + (h - bodyTop) / 2;
+  const top = bodyTop + 16;
   const bottom = h - 16;
   return top + ((bottom - top) * (index + 0.5)) / count;
 }
