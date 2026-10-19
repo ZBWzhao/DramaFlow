@@ -115,8 +115,12 @@ class LLM:
             "messages": messages,
             "stream": True,
             "stream_options": {"include_usage": True},
-            "max_tokens": self.settings.max_output_tokens,
         }
+        # max_output_tokens<=0 表示「不传这个参数」：交还给服务端默认值。
+        # 注意默认值并不等于无限（DeepSeek 非思考模式默认 8K，比 32K 更小），
+        # 想真正放宽要显式给一个大数。总预算仍是「输入 + 输出 ≤ 上下文窗口」。
+        if self.settings.max_output_tokens > 0:
+            kwargs["max_tokens"] = self.settings.max_output_tokens
         if tools:
             kwargs["tools"] = tools
             kwargs["tool_choice"] = "auto"

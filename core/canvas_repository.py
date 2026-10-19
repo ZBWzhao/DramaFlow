@@ -6,11 +6,12 @@ import asyncio
 import hashlib
 import json
 import os
+import random
 import re
 import time
 from contextlib import asynccontextmanager
 from pathlib import Path
-from typing import Any, AsyncIterator, Protocol, runtime_checkable
+from typing import Any, AsyncIterator, Callable, Protocol, runtime_checkable
 
 from .canvas import Canvas
 from .postgres import PostgresDatabase
@@ -33,6 +34,37 @@ def validate_canvas_name(name: str) -> str:
     if not CANVAS_NAME.fullmatch(value):
         raise ValueError("画布名称无效：只允许中英文、数字、下划线和连字符，长度 1-120")
     return value
+
+
+async def mutate_canvas_with_retry(
+    repository: Any,
+    canvas_name: str,
+    mutate: "Callable[[Canvas], bool]",
+    *,
+    attempts: int = 5,
+) -> bool:
+    """对画布做一次"读 → 改 → 写"，冲突时重读重放增量。
+
+    ``mutate`` 必须只依赖它在最新画布上看到的内容（返回 False 表示前提已失效，
+    例如"节点已经属于更新一代任务"），这样重试才是安全的。所有写回路径——
+    Worker 的状态回写、Agent 工具、合成——都走这一份逻辑，避免"一部分代码
+    会重试、另一部分冲突即失败"。``attempts`` 用尽时抛出最后一个冲突。
+    """
+    attempt = 0
+    while True:
+        canvas = await repository.load(canvas_name)
+        if not mutate(canvas):
+            return False
+        try:
+            await repository.save(canvas)
+            return True
+        except CanvasConflictError:
+            attempt += 1
+            if attempt >= attempts:
+                raise
+            # 退避而不是死循环抢锁：多个写者（Worker、用户拖拽、Agent）同时冲突时，
+            # 立刻重试只会再次撞车，还可能把画布文件锁抢成"活锁"。
+            await asyncio.sleep(min(0.3, 0.02 * attempt) * (0.5 + random.random()))
 
 
 async def _replace_atomic(tmp: Path, path: Path, *, attempts: int = 12) -> None:

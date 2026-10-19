@@ -108,6 +108,9 @@ class GenerateRequest(BaseModel):
     shot_no: int = 1
     # 显式关闭首帧模式（默认有首帧就用）。关掉会退回「参考图 + 整段提示词」。
     use_keyframe: bool | None = None
+    # 用户手改/前端显式传入的正文。非空时优先于服务端渲染——首帧模式也生效。
+    # 不传时，若片段已被人改过（rendered_by=human），同样用已保存的人改正文。
+    prompt: str | None = None
 
 
 class KeyframeRequest(BaseModel):
@@ -205,17 +208,15 @@ def _parse_duration(value: Any) -> float | None:
 
 
 def _node_text(canvas: Canvas, node: Any) -> str:
-    """读节点正文：优先 content.md，其次 outputs 里的内联文本。"""
-    relative = node.data.get("content_path")
-    if relative:
-        path = canvas.root() / str(relative)
-        if path.is_file():
-            return path.read_text(encoding="utf-8")
-    for key in ("text", "prompt", "shots"):
-        value = (node.outputs.get(key) or {}).get("value")
-        if isinstance(value, str) and value.strip():
-            return value
-    return ""
+    """读节点正文：**委托给 Canvas.read_text**，不再维护第二套读取顺序。
+
+    这里以前自己实现了一份（text → prompt，且不认 data.prompt），和画布侧
+    read_text（文件 → prompt → text → data.prompt）不一致：同一节点在画布能读到
+    正文、在制片台的片段列表里却是空的。正文读取只能有一个来源。
+    """
+    if node is None:
+        return ""
+    return canvas.read_text(node.id)
 
 
 def _first_media(canvas: Canvas, node: Any, data_type: str) -> dict[str, Any]:
@@ -700,10 +701,13 @@ async def save_prompt(node_id: str, canvas: str, body: PromptPatch) -> dict[str,
         path.write_text(body.prompt, encoding="utf-8")
     else:
         outputs = dict(target.outputs)
+        # 与画布路由 server/app.py:save_canvas_node_text 保持同一契约：只留一个
+        # STRING 槽位。read_text() 先读 outputs.prompt，另一槽位的旧值会盖住新值。
         slot = dict(outputs.get("prompt") or outputs.get("text") or {})
         slot.setdefault("data_type", "STRING")
         slot["value"] = body.prompt
         outputs["prompt"] = slot
+        outputs.pop("text", None)
         target.outputs = outputs
 
     # 人改过的正文优先，服务端之后不再覆盖（渲染只在 rendered_by != "human" 时进行）
@@ -1125,6 +1129,30 @@ def _materialize_prompt(prompt: str, refs: list[dict[str, Any]]) -> str:
     return "\n".join(lines) + "\n\n" + body
 
 
+# 与 `_materialize_prompt` 里替换用的正则保持同一套边界，避免「能渲染」但「查不到」。
+_MENTION_SCAN_RE = re.compile(r"(?<!图片)(?<!\d)@([^\s@，,。；;：:、（）()【】\[\]\"'“”]{1,24})")
+_REF_SLOT_SCAN_RE = re.compile(r"\{\{\s*ref\s*(\d+)\s*\}\}", re.IGNORECASE)
+
+
+def _dangling_references(prompt: str, refs: list[dict[str, Any]]) -> list[str]:
+    """正文里引用了、但不在本片段引用入边里的名字/序号。
+
+    判据是**入边集合**，不是 request["references"]：首帧模式入边存在但只发首帧，
+    按发出参数判会把每一镜都误报成悬空引用。真正的「首帧模式正文宣称有参考图」
+    问题在渲染侧修（首帧模式不再写那句），不靠这个断言兜。
+    """
+    known = {str(ref.get("name") or "").strip() for ref in refs if ref.get("name")}
+    known |= {_clean_asset_name(str(ref.get("name") or "")) for ref in refs if ref.get("name")}
+    dangling: list[str] = []
+    for name in _MENTION_SCAN_RE.findall(prompt):
+        if name not in known and _clean_asset_name(name) not in known:
+            dangling.append(f"@{name}")
+    for raw in _REF_SLOT_SCAN_RE.findall(prompt):
+        if not 1 <= int(raw) <= len(refs):
+            dangling.append(f"{{{{ref {raw}}}}}")
+    return dangling
+
+
 def _default_image_model() -> str:
     if _media is None:
         return "mock-image-v1"
@@ -1237,7 +1265,6 @@ async def generate_segment(node_id: str, canvas: str, body: GenerateRequest) -> 
             )
 
         refs = view["references"]
-        ref_names = [str(ref.get("name") or "") for ref in refs if ref.get("name")]
         project = _project_meta(graph)
         model = body.model or project.get("video_model") or _default_video_model()
         if model and str(model).lower().startswith("mock"):
@@ -1251,9 +1278,18 @@ async def generate_segment(node_id: str, canvas: str, body: GenerateRequest) -> 
         # 没有首帧才退回参考图 + 整段提示词（老画布、纯文本镜头的兜底）。
         use_keyframe = bool(keyframe.get("path")) and body.use_keyframe is not False
 
+        # 人改正文优先：显式传参 > 已保存的人改正文（rendered_by=human）> 服务端渲染。
+        # 以前首帧分支完全忽略 data.prompt，用户在制作页改完再点生成 = 白改白花钱。
+        human_prompt = (body.prompt or "").strip()
+        if not human_prompt and str(prompt_node.data.get("rendered_by") or "") == "human":
+            human_prompt = str(view.get("prompt") or "").strip()
+
         if use_keyframe:
             shot_names = {ref["asset_id"]: ref["name"] for ref in refs}
-            prompt_text = _shot_prompt(shot, ref_names, name_by_id=shot_names)
+            # 首帧模式只发 first_frame，request 里没有 references；正文里就不该再写
+            # 「身份与外观完全按参考素材（@A、@B）」——没有图支撑，模型只会自己编。
+            # 身份由首帧图承担；这里只渲染字段，不再宣称参考素材。
+            prompt_text = human_prompt or _render_segment_text(shot, shot_names)
             shot_duration = _shot_seconds(shot) or float(view["duration_s"] or 5)
             duration = float(body.duration or shot_duration)
             request = {
@@ -1270,7 +1306,7 @@ async def generate_segment(node_id: str, canvas: str, body: GenerateRequest) -> 
                 "resolution": str(project.get("quality") or "480P").lower(),
             }
         else:
-            prompt_text = _materialize_prompt(view["prompt"], refs)
+            prompt_text = _materialize_prompt(human_prompt or view["prompt"], refs)
             duration = float(body.duration or view["duration_s"] or 8)
             request = {
                 "prompt": prompt_text,
@@ -1287,6 +1323,22 @@ async def generate_segment(node_id: str, canvas: str, body: GenerateRequest) -> 
 
         request["shot_no"] = int(shot.get("no") or body.shot_no or 1)
         request["mode"] = "first_frame" if use_keyframe else "references"
+
+        # 引用闭包：正文引用的名字必须来自本片段的引用入边，否则宁可报错也不静默发出去。
+        dangling = _dangling_references(prompt_text, refs)
+        if dangling:
+            raise HTTPException(
+                status_code=422,
+                detail={
+                    "message": (
+                        "提示词引用了不在本片段引用入边里的素材："
+                        + "、".join(dangling)
+                        + "。请连上「资产 → 片段」的引用边，或删掉正文里的这句引用后再生成。"
+                    ),
+                    "dangling": dangling,
+                    "mode": request["mode"],
+                },
+            )
 
         job_id = f"sjob_{uuid.uuid4().hex[:12]}"
         _jobs[job_id] = {

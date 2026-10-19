@@ -163,6 +163,18 @@ class Agent:
 
             message = await self._request_model(turn)
             self.last_finish_reason = message.finish_reason
+            if message.finish_reason == "length" and message.tool_calls:
+                # 输出被 max_tokens 截断时，模型往往正停在半个 tool_call 上。这些调用不会执行，
+                # 若照原样写进历史，下一轮请求就带着悬空的 tool_calls —— provider 可能直接 400，
+                # 也可能只回一条空消息（线上症状：点「继续」0.5s 空回复再报错）。
+                dropped = len(message.tool_calls)
+                message.tool_calls = []
+                limit = getattr(getattr(self.llm, "settings", None), "max_output_tokens", 8192)
+                note = (
+                    f"（上一轮输出达到 {limit} token 上限被截断，"
+                    f"{dropped} 个未执行的工具调用已丢弃。请把这一步拆成更小的批次再试。）"
+                )
+                message.content = f"{message.content}\n\n{note}".strip() if message.content else note
             if message.content:
                 final = message.content
             assistant_parent_id = self.session.current_id
@@ -171,10 +183,14 @@ class Agent:
 
             if message.finish_reason == "length":
                 self.last_status = "limited"
+                limit = getattr(getattr(self.llm, "settings", None), "max_output_tokens", 8192)
                 self._emit(
                     "limited",
                     reason="length",
-                    message="模型输出达到长度限制，当前结果可能不完整，请继续生成或缩小任务范围。",
+                    message=(
+                        f"模型这一轮写到了 {limit} token 的输出上限被截断，当前结果不完整。"
+                        "把这一步拆成更小的批次（例如一次只写几个分镜）再继续，比直接续跑更稳。"
+                    ),
                 )
                 self._emit("turn_end", turn=turn)
                 await asyncio.sleep(0)
@@ -197,7 +213,15 @@ class Agent:
                 else:
                     self.last_status = "error"
                     self.last_finish_reason = "empty_response"
-                    self._emit("error", message="模型未返回可交付正文，任务没有完成。")
+                    reason = message.finish_reason or "unknown"
+                    self._emit(
+                        "error",
+                        message=(
+                            f"模型这次返回了空内容（finish_reason={reason}），任务没有完成。"
+                            "常见原因：上一条输出被截断后留下的半截工具调用、或单轮请求过大；"
+                            "直接再发一次「继续」即可，若仍是空回复就新建会话。"
+                        ),
+                    )
                 break
 
             calls, errors = await self._run_tools(message, turn)

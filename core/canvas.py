@@ -21,6 +21,7 @@ import json
 import hashlib
 import os
 import re
+import time
 import uuid
 from collections import deque
 from dataclasses import dataclass, field
@@ -103,6 +104,83 @@ SHOT_CAMERA_FIELDS = (("height", "机位高度"), ("angle", "机位角度"), ("m
 ASSET_KINDS = ("character", "scene", "prop", "style")
 # 分镜 action 里的 `@名字`；`@图片1…` 这种已物化写法不算。
 _SHOT_MENTION = re.compile(r"(?<!图片)(?<!\d)@([^\s@，,。；;：:、）)】\]\"'“”]{1,24})")
+
+# 项目画幅 → 分辨率高度（与 server/studio.py 的历史口径保持一致）。
+_QUALITY_HEIGHTS = {"480P": 854, "720P": 1280, "1080P": 1920}
+_RESOLUTIONS = {"480p", "720p", "1080p"}
+
+
+def normalize_resolution(value: Any) -> str | None:
+    """把 ``720P`` / ``720p`` / ``quality=720P`` 归一成 provider 认识的 ``720p``。"""
+    text = str(value or "").strip().lower()
+    return text if text in _RESOLUTIONS else None
+
+
+def media_size(aspect_ratio: Any, quality: Any) -> str | None:
+    """按画幅与画质算一个偶数边长的 ``WxH``（供图片节点直接传给 provider）。
+
+    与 ``server/studio.py`` 的 ``_default_size`` 同口径；算不出来时返回 None，
+    交给调用方退回请求参数，而不是悄悄用一个默认值覆盖用户设置。
+    """
+    ratio = str(aspect_ratio or "").strip()
+    match = re.fullmatch(r"\s*(\d+(?:\.\d+)?)\s*[:xX×/]\s*(\d+(?:\.\d+)?)\s*", ratio)
+    if not match:
+        return None
+    width_ratio, height_ratio = float(match.group(1)), float(match.group(2))
+    if width_ratio <= 0 or height_ratio <= 0:
+        return None
+    height = _QUALITY_HEIGHTS.get(str(quality or "").strip().upper())
+    if height is None:
+        return None
+    width = int(round(height * width_ratio / height_ratio))
+    return f"{width - width % 2}x{height - height % 2}"
+
+
+def build_media_request(
+    job: dict[str, Any],
+    *,
+    provider: str = "",
+    model: str = "",
+    generate_audio: bool = False,
+) -> dict[str, Any]:
+    """把一条生成任务翻译成 Provider 请求（画布 Worker 与 Agent 工具共用）。
+
+    为什么必须共用：Provider 只认 ``prompt/size/duration/resolution/ratio``，
+    「横竖屏、几秒」这类业务口径已经在 ``Canvas.generation_params`` 里解析过。
+    如果每个调用方自己拼请求，就会出现「Worker 用 9:16、Agent 用硬编码 16:9」
+    这种用户看得见、代码里却很难发现的双轨。
+
+    ``job`` 支持两种形状：画布 ``generation_jobs()`` 的 ``params`` 嵌套结构，
+    以及审批后冻结的 flat 字段。缺失的 key 不猜默认值（除 size 的兼容值）。
+    """
+    kind = str(job.get("kind") or "image")
+    params = dict(job.get("params") or {})
+    for key in ("duration", "ratio", "resolution", "size"):
+        if params.get(key) in (None, "") and job.get(key) not in (None, ""):
+            params[key] = job.get(key)
+    size = params.get("size") or ("1024x576" if kind == "image" else "1280x720")
+    references = [
+        {
+            "path": str(ref["path"]),
+            "type": str(ref.get("type") or ""),
+            "mime_type": str(ref.get("mime_type") or ""),
+        }
+        for ref in (job.get("references") or job.get("refs") or [])
+        if isinstance(ref, dict) and ref.get("path")
+    ]
+    request: dict[str, Any] = {
+        "prompt": str(job.get("prompt") or ""),
+        "model": str(model or ""),
+        "size": size,
+        "generate_audio": bool(generate_audio),
+        "references": references,
+    }
+    for key in ("duration", "resolution", "ratio"):
+        if params.get(key) not in (None, ""):
+            request[key] = params[key]
+    if provider:
+        request["provider"] = provider
+    return request
 
 
 def _shot_seconds(shot: dict[str, Any]) -> float:
@@ -637,16 +715,33 @@ class Canvas:
         return self.path.parent if self.path else Path.cwd()
 
     def read_text(self, node_id: str) -> str:
-        """读节点正文（存在 assets/<node_id>/content.md，画布 JSON 里只有路径）。"""
+        """读节点正文。
+
+        正文有多个存放位置（历史原因）：``assets/<id>/content.md`` 大文件、
+        ``outputs.prompt/text`` 单行正文、``data.prompt`` 卡片内联提示词。
+        S5 之后新写的正文多落在 ``data.prompt`` / ``outputs["prompt"]``，
+        所以这里按「文件 → outputs.prompt → outputs.text → outputs.shots → data.prompt」
+        依次回退；生成、体检、导出、制片台必须共用这一个入口，
+        否则会出现「界面看得到、生成读不到」。
+        """
         node = self.nodes.get(node_id)
         if node is None:
             return ""
         relative = node.data.get("content_path")
-        if not relative:
-            value = (node.outputs.get("text") or {}).get("value")
-            return str(value or "")
-        path = self.root() / relative
-        return path.read_text(encoding="utf-8") if path.exists() else ""
+        if relative:
+            path = self.root() / relative
+            if path.exists():
+                text = path.read_text(encoding="utf-8")
+                if text.strip():
+                    return text
+        for key in ("prompt", "text", "shots"):
+            value = (node.outputs.get(key) or {}).get("value")
+            if isinstance(value, str) and value.strip():
+                return value
+        prompt = node.data.get("prompt")
+        if isinstance(prompt, str) and prompt.strip():
+            return prompt
+        return ""
 
     def asset_desc(self, node_id: str) -> str:
         """资产的"一句话描述"：标签已经带了类型，后面接稳定特征。
@@ -666,6 +761,151 @@ class Canvas:
         if desc:
             bits.append(str(desc))
         return f"{'，'.join(bits)}"
+
+    def project_meta(self) -> dict[str, Any]:
+        """项目级默认参数（画幅 / 画质 / 视频模型），由前端项目设置写进 meta.project。
+
+        画布层只读、不猜默认值：缺失就返回 None，让调用方退回请求参数，
+        避免用一个隐藏默认值悄悄覆盖用户设置。
+        """
+        project = self.meta.get("project")
+        return dict(project) if isinstance(project, dict) else {}
+
+    def _segment_seconds(self, node: Node) -> float | None:
+        """节点所属片段在分镜里的总时长（node.data.segment_no 对上 shots 的 segment_no）。"""
+        if not node.data.get("segment_no"):
+            return None
+        try:
+            segment_no = int(node.data.get("segment_no"))
+        except (TypeError, ValueError):
+            return None
+        total = 0.0
+        found = False
+        for other in self.nodes.values():
+            if other.type != "storyboard":
+                continue
+            for shot in other.data.get("shots") or []:
+                try:
+                    if int(shot.get("segment_no") or 1) != segment_no:
+                        continue
+                except (TypeError, ValueError):
+                    continue
+                total += _shot_seconds(shot)
+                found = True
+        return round(total, 2) if found and total > 0 else None
+
+    def generation_params(self, node: Node) -> dict[str, Any]:
+        """单次生成的媒体参数：节点自身 > 分镜镜头时长 > 项目 defaults > None（交给请求参数）。
+
+        Provider 只拿 ``size/duration/resolution/ratio``，所以「横竖屏、几秒」这类
+        业务口径必须在这一层决定，不能散落在前端常量或 Worker 里的硬编码。
+        """
+        data = node.data or {}
+        project = self.project_meta()
+
+        duration = data.get("duration", data.get("duration_s"))
+        if duration in (None, ""):
+            duration = self._segment_seconds(node)
+        if duration in (None, ""):
+            duration = project.get("duration")
+        try:
+            duration = min(30, max(1, int(round(float(duration))))) if duration not in (None, "") else None
+        except (TypeError, ValueError):
+            duration = None
+
+        ratio = data.get("ratio") or data.get("aspect_ratio") or project.get("aspect_ratio")
+        ratio = str(ratio).strip() if ratio not in (None, "") else None
+        quality = data.get("quality") or data.get("resolution") or project.get("quality")
+        resolution = normalize_resolution(quality)
+        size = data.get("size") or (media_size(ratio, quality or "720P") if ratio else None)
+        return {
+            "duration": duration,
+            "ratio": ratio,
+            "resolution": resolution,
+            "size": size,
+        }
+
+    def resolve_prompt(self, node_id: str) -> dict[str, Any]:
+        """生成节点的提示词来源（显式 prompt 节点 > 其他文本输入 > 卡片自身提示词）。
+
+        用户手动连了提示词节点就说明他想以连接为准；卡片里的文字此时作为
+        「被覆盖」记录（``prompt_overridden``），而不是被悄悄丢掉。
+        """
+        node = self.require(node_id)
+        own = str((node.data or {}).get("prompt") or "").strip()
+        for edge in self.incoming(node_id):
+            if edge.target_handle != "prompt" or edge.source not in self.nodes:
+                continue
+            text = self.read_text(edge.source).strip()
+            if not text:
+                continue
+            source = "prompt_node" if self.nodes[edge.source].type == "prompt" else "text_input"
+            return {
+                "prompt": text,
+                "prompt_source": source,
+                "prompt_overridden": bool(own) and own != text,
+            }
+        for item in self.text_inputs(node_id):
+            text = str(item.get("text") or "").strip()
+            if not text:
+                continue
+            return {
+                "prompt": text,
+                "prompt_source": "text_input",
+                "prompt_overridden": bool(own) and own != text,
+            }
+        if own:
+            return {"prompt": own, "prompt_source": "node", "prompt_overridden": False}
+        return {"prompt": "", "prompt_source": None, "prompt_overridden": False}
+
+    def record_generated_media(
+        self,
+        node_id: str,
+        *,
+        kind: str,
+        path: str,
+        mime: str,
+        provider: str = "",
+        mock: bool = False,
+        model: str = "",
+        duration_s: float | None = None,
+        take_id: str | None = None,
+        shot_no: int = 1,
+        mode: str = "canvas",
+    ) -> dict[str, Any]:
+        """把一次生成结果写进节点：outputs + takes 历史 + current_take_id + status=done。
+
+        画布 Worker 与 Agent 工具共用这一份写法。以前 Agent 只覆盖 outputs，
+        「重新生成」等于把上一版抹掉，制作者没法对比、也没法回退；两边各写一份
+        还会让 take 字段（duration_s/mode/rating）慢慢长歪。
+        """
+        node = self.require(node_id)
+        port = "image" if kind == "image" else "video"
+        node.outputs[port] = {
+            "data_type": port.upper(),
+            "value": {"path": path, "mime": mime, "mock": bool(mock), "provider": provider},
+        }
+        take = {
+            "take_id": take_id or _new_id("take"),
+            "path": path,
+            "mime": mime,
+            "provider": provider,
+            "mock": bool(mock),
+            "model": model,
+            "duration_s": float(duration_s) if duration_s not in (None, "") else None,
+            "shot_no": int(shot_no),
+            "mode": mode,
+            "created_at": time.time(),
+            "rating": "",
+            "note": "",
+        }
+        takes = list(node.data.get("takes") or [])
+        takes.append(take)
+        # 只保留最近 30 版：历史是给"对比/回退"用的，不是无限增长的存储负担。
+        node.data["takes"] = takes[-30:]
+        node.data["current_take_id"] = take["take_id"]
+        self.update_node(node_id, status="done")
+        return take
 
     def find_path(self, start: str, goal: str) -> list[str] | None:
         """start 能否走到 goal；能就返回路径（给"为什么会成环"做解释用）。
@@ -796,22 +1036,15 @@ class Canvas:
                 problems.append(f"提示词节点「{node.label}」没有任何输入（至少连一个资产或分镜）")
             elif node.type == "prompt" and not self.refs_for(node.id):
                 problems.append(f"提示词节点「{node.label}」没有连任何资产 → 展开后没有参考图，角色会不一致")
-            # 有节点、连了线，但正文还没写 —— 导出时这一段会是空的（之前体检漏了这条）
-            if node.type == "prompt" and not node.data.get("content_path"):
-                problems.append(f"提示词节点「{node.label}」还没有正文（用 set_text 写入），导出会是空片段")
+            # 正文可能落在 content.md / outputs.prompt / data.prompt —— 统一用 read_text 判断，别只看文件。
+            if node.type == "prompt" and not self.read_text(node.id).strip():
+                problems.append(f"提示词节点「{node.label}」还没有正文（卡片内填写，或用 set_text 写入），导出会是空片段")
             if node.type == "prompt" and not node.data.get("segment_no"):
                 problems.append(f"提示词节点「{node.label}」缺少 segment_no，无法和分镜片段稳定对应")
-            if node.type == "prompt" and node.data.get("content_path"):
-                prompt_chars = len(self.read_text(node.id).strip())
-                if prompt_chars < 500:
-                    problems.append(
-                        f"提示词节点「{node.label}」正文仅 {prompt_chars} 字，可能只是摘要；"
-                        "正式视频提示词应包含时间轴、站位、动作、运镜、灯光、声音、物理和约束"
-                    )
             if node.type in ("image_gen", "video_gen"):
-                prompt_inputs = [edge for edge in self.incoming(node.id) if edge.target_handle == "prompt"]
-                if not prompt_inputs:
-                    problems.append(f"生成节点「{node.label}」没有连接 prompt 输入，无法执行")
+                resolved = self.resolve_prompt(node.id)
+                if not resolved["prompt"]:
+                    problems.append(f"生成节点「{node.label}」没有可用提示词（卡片内填写，或连接提示词/文本节点）")
             if node.type == "tts_gen":
                 text_inputs = [edge for edge in self.incoming(node.id) if edge.target_handle == "text"]
                 if not text_inputs and not str(node.data.get("text") or "").strip():
@@ -1081,20 +1314,20 @@ class Canvas:
     # 生成任务：按拓扑序把「提示词 → 生成节点」串起来
     # ------------------------------------------------------------------
     def generation_jobs(self) -> list[dict[str, Any]]:
-        """按**拓扑序**列出生成节点，并解析每个节点的输入提示词。
+        """按**拓扑序**列出生成节点，并解析每个节点的提示词与媒体参数。
 
         顺序很重要：上游没跑完就跑下游，产物会缺参考图 —— 这正是拓扑排序在业务上的意义。
+
+        提示词遵循 ``resolve_prompt`` 的来源优先级（显式 prompt 节点 > 文本输入 > 卡片自身），
+        参数遵循 ``generation_params`` 的解析链。两个字段都随 job 下发，前端与 Worker 不再各自猜。
         """
         jobs: list[dict[str, Any]] = []
         for node_id in self.topo_order():
             node = self.nodes[node_id]
             if node.type not in ("image_gen", "video_gen"):
                 continue
-            prompt_text = ""
-            for ctx in self.text_inputs(node_id):
-                if ctx["text"]:
-                    prompt_text = ctx["text"]  # 上游 prompt 节点的正文
-                    break
+            resolved = self.resolve_prompt(node_id)
+            prompt_text = resolved["prompt"]
             jobs.append(
                 {
                     "node_id": node.id,
@@ -1102,9 +1335,13 @@ class Canvas:
                     "kind": "image" if node.type == "image_gen" else "video",
                     "prompt": prompt_text,
                     "prompt_chars": len(prompt_text),
+                    "prompt_source": resolved["prompt_source"],
+                    "prompt_overridden": resolved["prompt_overridden"],
+                    "ready": bool(prompt_text.strip()),
+                    "ready_reason": "" if prompt_text.strip() else "没有可用提示词（卡片内填写，或连接提示词/文本节点）",
+                    "params": self.generation_params(node),
                     "refs": self.generation_refs(node_id),
                     "status": node.status,
-                    "ready": bool(prompt_text.strip()),
                 }
             )
         return jobs

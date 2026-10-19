@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import os
 import re
 import sys
@@ -22,7 +23,7 @@ import time
 import uuid
 from contextlib import asynccontextmanager
 from pathlib import Path
-from typing import Any, AsyncIterator, Literal
+from typing import Any, AsyncIterator, Callable, Literal
 
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse, StreamingResponse
@@ -39,8 +40,8 @@ from core.config import Settings  # noqa: E402
 from core.agent import AgentAborted, build_system_prompt  # noqa: E402
 from core.llm import LLM  # noqa: E402
 from core.loader import list_tools  # noqa: E402
-from core.canvas import NODE_SPEC, Canvas, CanvasError  # noqa: E402
-from core.canvas_repository import CanvasConflictError  # noqa: E402
+from core.canvas import NODE_SPEC, Canvas, CanvasError, build_media_request  # noqa: E402
+from core.canvas_repository import CanvasConflictError, mutate_canvas_with_retry  # noqa: E402
 from core.media import default_registry  # noqa: E402
 from core.composition import (  # noqa: E402
     CompositionError,
@@ -65,6 +66,7 @@ media_jobs = create_media_job_store()
 media_worker: MediaJobWorker | None = None
 composition_service = CompositionService(WORKSPACE)
 tts_registry = TTSRegistry(WORKSPACE)
+logger = logging.getLogger("toonflow.api")
 
 
 async def _register_media_asset(
@@ -117,6 +119,19 @@ async def lifespan(_: FastAPI) -> AsyncIterator[None]:
 app = FastAPI(title="toonflow-py-lab", lifespan=lifespan)
 
 
+@app.middleware("http")
+async def _no_store_frontend_shell(request: Request, call_next):
+    """前端入口页不缓存。
+
+    静态资源文件名带 hash，可以长缓存；但 index.html 里的 hash 会随每次构建变化，
+    浏览器一旦缓存了旧 index.html，就会一直加载旧 JS/CSS ——「你改了没生效」的经典症状。
+    """
+    response = await call_next(request)
+    if request.url.path in {"/", "/index.html", "/legacy", "/legacy/", "/legacy/index.html"}:
+        response.headers["Cache-Control"] = "no-store, must-revalidate"
+    return response
+
+
 @app.exception_handler(CanvasConflictError)
 async def canvas_conflict_handler(_: Request, exc: CanvasConflictError) -> JSONResponse:
     return JSONResponse(
@@ -137,6 +152,8 @@ class ChatRequest(BaseModel):
     canvas: str = "main"
     use_sub_agent: bool = True
     media_policy: Literal["plan_only", "ask", "auto_review"] = "ask"
+    # 单卡工作台：带上节点 id 表示「本轮只改这一张卡」，服务端据此收窄工具与系统提示。
+    focus_node: str = ""
 
 
 class CancelRequest(BaseModel):
@@ -262,6 +279,99 @@ def _line(payload: dict[str, Any]) -> bytes:
 def _require_revision(canvas: Canvas, expected: int | None) -> None:
     if expected is not None and canvas.revision != expected:
         raise CanvasConflictError(canvas.name, expected, canvas.revision)
+
+
+def _require_write_revision(canvas: Canvas, expected: int | None) -> None:
+    """内容写入必须带 revision：缺了不是"最后一个赢"，而是"调用方拿的是旧快照"。
+
+    与 ``_require_revision`` 的区别：None 不再放行。画布内容（正文、takes、
+    节点集合）的写回一旦允许缺 rev，任何一条迟到的 debounce 保存都能把别人
+    刚写的内容静默盖掉 —— 这正是 P0-2 要堵的口子。
+    """
+    if expected is None:
+        raise HTTPException(
+            status_code=400,
+            detail="缺少画布版本号 revision：请先 GET /api/canvas 取当前 revision 再写入",
+        )
+    if canvas.revision != expected:
+        raise CanvasConflictError(canvas.name, expected, canvas.revision)
+
+
+CANVAS_WRITE_RETRIES = 5
+
+
+async def _mutate_canvas_with_retry(
+    canvas_name: str,
+    mutate: Callable[[Canvas], bool],
+    *,
+    attempts: int = CANVAS_WRITE_RETRIES,
+) -> bool:
+    """读-改-写重试：并发写不是"任务失败"，而是"重读最新版，再把本任务的增量贴一次"。
+
+    Worker 写回的是**增量**（本节点的 status / outputs / takes / current_take_id），
+    不是整份旧快照，所以重放不会把别人并发写进来的坐标、正文盖掉 —— 这是 P0-1 的
+    修复点：以前 ``load → 改 → save`` 一旦撞上别人刚保存，整份写回就被 CAS 打回，
+    而模型调用（钱）已经发生，产物却丢了、节点卡在 generating 且不会重试。
+
+    ``mutate`` 每次都在**最新画布**上重新执行；返回 False 表示前提已不成立
+    （例如该节点已有更新一代任务），调用方按"过期丢弃"处理，不再重试。
+    冲突重试用尽后抛出最后一个 ``CanvasConflictError``，让调用方决定是记录还是上抛。
+
+    实现委托给 ``core.canvas_repository.mutate_canvas_with_retry``：Agent 工具与
+    合成路径也要用同一套重试，否则"一部分写回会重试、另一部分冲突即失败"。
+    """
+    return await mutate_canvas_with_retry(
+        registry.canvas_repository,
+        canvas_name,
+        mutate,
+        attempts=attempts,
+    )
+
+
+def _approval_hash(payload: dict[str, Any]) -> str:
+    """审批哈希只绑定"要执行什么"，不绑定画布 revision。
+
+    revision 会因为无关写入（拖节点、改标题、别的写者）前进；把它算进哈希，
+    会让"一次可重试的失败"变成"审批永久作废"——这是 P0-8 的第二个症状。
+    真正花钱的部分（提示词、参考素材、模型、时长、比例）仍在哈希里，计划
+    一旦变化，审批照样失效。
+    """
+    return canonical_hash({key: value for key, value in payload.items() if key != "canvas_revision"})
+
+
+async def _release_approval_quietly(approval_id: str) -> None:
+    """补偿动作不能反过来把原始错误盖掉，所以这里永远不抛。"""
+    try:
+        await registry.approvals.release(approval_id)
+    except Exception:  # noqa: BLE001 - 补偿失败时保留原始异常给调用方
+        pass
+
+
+# 这些模块抛出的异常是"后端暂时不可用"（连接、超时、服务端错误），可以安全地让用户重试；
+# 其余异常是编程错误/数据损坏，伪装成 503 只会让人反复点按钮而看不到 traceback。
+_TRANSIENT_ERROR_MODULES = ("redis", "asyncpg", "psycopg", "psycopg2", "hiredis", "aiosqlite")
+
+
+def _is_transient_storage_error(exc: BaseException) -> bool:
+    """判断提交点异常是否属于"重试可能成功"的临时故障。
+
+    ``RuntimeError`` 也算：存储层（内存/Redis/Postgres 的封装）在租约、队列、
+    连接池不可用时统一用 ``RuntimeError`` 表达"现在做不了，过会儿再试"；
+    真正的编程错误是 ``TypeError``/``AttributeError``/``KeyError`` 这类，
+    让它们走 500 + traceback，而不是诱导用户反复点重试。
+    """
+    if isinstance(exc, (asyncio.TimeoutError, TimeoutError, ConnectionError, OSError, RuntimeError)):
+        return True
+    module = (type(exc).__module__ or "").split(".")[0]
+    return module in _TRANSIENT_ERROR_MODULES
+
+
+async def _revert_activation_quietly(canvas_name: str, revert: Callable[[Canvas], bool]) -> None:
+    """提交失败时回滚激活标记；回滚失败只记日志，不盖掉原始错误。"""
+    try:
+        await _mutate_canvas_with_retry(canvas_name, revert)
+    except Exception:  # noqa: BLE001 - 回滚是补偿动作，不能顶替原始异常
+        logger.exception("回滚画布激活标记失败（canvas=%s）", canvas_name)
 
 
 async def _update_production_stage(
@@ -469,6 +579,53 @@ async def _execute_team_run(live: Any, req: TeamRequest, run_id: str) -> None:
                     live.bus.run_id = None
 
 
+# 单卡工作台（画布上点开一张卡后的对话框）只能动这一张卡：
+# 读写画布的工具留 get_canvas / update_node / set_text / export_prompt，
+# 新建、删除、连线、改整张故事板一律不给——那些是整图画布 Agent 的活。
+NODE_SCOPE_TOOLS = {"get_canvas", "update_node", "set_text", "export_prompt", "word_count"}
+
+
+async def _node_focus_block(canvas_name: str, node_id: str) -> str:
+    """把「本轮只服务这一张卡」的上下文压成一段系统提示。
+
+    为什么放在服务端拼：前端只传 node_id，节点当下的正文/状态/上游由服务端读，
+    免得前端拿一份可能过期的快照来指挥模型。
+    """
+    try:
+        canvas = await registry.canvas_repository.load(canvas_name)
+        node = canvas.require(node_id)
+    except Exception:  # noqa: BLE001 - 节点不存在就不加范围，退化成普通对话
+        return ""
+    text = (canvas.read_text(node_id) or "").strip()
+    if len(text) > 600:
+        text = text[:600] + "…"
+    upstream = [canvas.nodes[e.source].label for e in canvas.incoming(node_id) if e.source in canvas.nodes]
+    data_keys = "、".join(sorted(node.data.keys())) or "（无）"
+    lines = [
+        "<node-scope>",
+        "你现在在「单卡工作台」里，本轮只服务下面这一张卡，不要处理画布上其它事情。",
+        f"- 节点 id：{node.id}",
+        f"- 标题：{node.label}",
+        f"- 类型：{node.type}／状态：{node.status}",
+    ]
+    if text:
+        lines.append(f"- 这张卡现在的正文：\n{text}")
+    else:
+        lines.append("- 这张卡现在没有正文。")
+    lines.append(f"- 已有数据字段：{data_keys}")
+    if upstream:
+        lines.append("- 上游依赖：" + "、".join(upstream[:8]))
+    lines += [
+        "规则：",
+        "1. 所有写操作都指向这个节点 id，不要改其它节点。",
+        "2. 本轮没有新建、删除、移动、连线节点的工具，需要动结构就告诉用户回整图画布去做。",
+        "3. 不要声称已经生成图片或视频；要重跑生成请让用户点工作台上的「生成」。",
+        "4. 改完用一两句话说明改了什么（改前→改后），不要长篇复述全文。",
+        "</node-scope>",
+    ]
+    return "\n".join(lines)
+
+
 @app.post("/api/agent")
 async def chat(req: ChatRequest) -> StreamingResponse:
     try:
@@ -481,6 +638,13 @@ async def chat(req: ChatRequest) -> StreamingResponse:
     # Agent 只负责把方案做到可生成。真实生成始终走独立审批接口，防止模型自己
     # 调用外部付费 Provider。list_media_models 仍保留，便于它按可用模型写提示词。
     live.agent.tools = live.tools_for(req.use_sub_agent, allow_media_generation=False)
+    # 单卡工作台：只留能读写这一张卡的工具，其它结构类工具本轮不给，
+    # 这样「只服务这张卡」不只是嘴上说，模型手里也没有改别处的工具。
+    focus_block = ""
+    if req.focus_node:
+        focus_block = await _node_focus_block(req.canvas, req.focus_node)
+        if focus_block:
+            live.agent.tools = [tool for tool in live.agent.tools if tool.name in NODE_SCOPE_TOOLS]
     policy_rules = {
         "plan_only": "用户选择了仅策划：只完成剧本、分镜、资产和正式提示词，不建议立即生成媒体。",
         "ask": "用户选择了逐步询问：遇到会显著改变作品的缺失信息时，集中提出 1-3 个短问题并等待回答；方案完成后提醒用户审阅，不得自行生成。",
@@ -492,6 +656,7 @@ async def chat(req: ChatRequest) -> StreamingResponse:
         + policy_rules[req.media_policy]
         + "\n任何图片或视频生成都必须经过前端审批卡的本次明确确认；不要声称已生成尚未生成的媒体。"
         + "\n需要询问时直接在对话正文中提出清晰、可回答的问题，然后结束本轮等待用户。\n</media-approval>"
+        + ("\n" + focus_block if focus_block else "")
     )
 
     try:
@@ -889,6 +1054,34 @@ async def delete_canvas_edge(req: DeleteEdgeRequest) -> dict[str, Any]:
     }
 
 
+@app.delete("/api/canvas/nodes/{node_id}")
+async def delete_canvas_node(node_id: str, canvas: str = "main", revision: int | None = None) -> dict[str, Any]:
+    """删除节点，并级联删除它的全部入边/出边。
+
+    与正文/切版一样走严格 revision：画布被别人改过就必须刷新重试，避免"基于旧视图删节点"
+    把别人刚加的连线一起删掉。节点若正在生成，Worker 发现节点不见了会把它当过期结果丢弃
+    （``stale_discarded``），不会把产物写到一个已删除的节点上。
+    """
+    board = await registry.canvas_repository.load(canvas)
+    _require_write_revision(board, revision)
+    target = board.nodes.get(node_id)
+    if target is None:
+        raise HTTPException(status_code=404, detail="节点不存在或已被删除")
+    label = target.label
+    removed, removed_edges = board.remove_nodes([node_id])
+    await registry.canvas_repository.save(board)
+    return {
+        "ok": True,
+        "canvas": board.name,
+        "node_id": node_id,
+        "label": label,
+        "removed": removed,
+        "removed_edges": removed_edges,
+        "revision": board.revision,
+        "canvas_changed": board.name,
+    }
+
+
 @app.post("/api/canvas/arrange")
 async def arrange_canvas(req: RunCanvasRequest) -> dict[str, Any]:
     """按拓扑分层重排节点（排列逻辑在服务端，前端只是视图）。"""
@@ -900,6 +1093,21 @@ async def arrange_canvas(req: RunCanvasRequest) -> dict[str, Any]:
         raise HTTPException(status_code=400, detail=str(exc))
     await registry.canvas_repository.save(canvas)
     return {"ok": True, "canvas": canvas.name, "moved": moved, "nodes": len(canvas.nodes), "revision": canvas.revision}
+
+
+def _resolved_media_params(req: RunCanvasRequest, params: dict[str, Any] | None) -> dict[str, Any]:
+    """把画布解析出的媒体参数与本次请求参数合并：画布为准，缺失才退回请求默认值。
+
+    审批哈希覆盖这些字段，所以「审批时看到的 9:16、6 秒」就是 Worker 实际执行的参数。
+    """
+    resolved = params or {}
+    duration = resolved.get("duration")
+    return {
+        "duration": int(duration) if duration else int(req.duration),
+        "ratio": resolved.get("ratio") or req.ratio,
+        "resolution": resolved.get("resolution") or req.resolution,
+        "size": resolved.get("size") or "",
+    }
 
 
 def _generation_execution_plan(req: RunCanvasRequest, canvas: Canvas) -> tuple[list[dict[str, Any]], dict[str, Any]]:
@@ -915,12 +1123,20 @@ def _generation_execution_plan(req: RunCanvasRequest, canvas: Canvas) -> tuple[l
         selected_model = req.model if any(item.get("id") == req.model for item in available) else (
             str(available[0]["id"]) if available else ""
         )
+        params = _resolved_media_params(req, job.get("params"))
         planned.append(
             {
                 "node_id": job["node_id"],
                 "kind": job["kind"],
                 "ready": bool(job["ready"]),
+                "ready_reason": job.get("ready_reason") or "",
                 "prompt_hash": canonical_hash(job.get("prompt") or ""),
+                "prompt_source": job.get("prompt_source"),
+                "prompt_overridden": bool(job.get("prompt_overridden")),
+                "duration": params["duration"],
+                "ratio": params["ratio"],
+                "resolution": params["resolution"],
+                "size": params["size"],
                 "references": [
                     {"path": ref.get("path", ""), "type": ref.get("type", ""), "mime_type": ref.get("mime_type", "")}
                     for ref in job.get("refs", []) if ref.get("path")
@@ -955,6 +1171,8 @@ async def create_canvas_approval(req: RunCanvasRequest) -> dict[str, Any]:
     if missing_model:
         raise HTTPException(status_code=400, detail=f"Provider {req.provider} 缺少节点需要的模型")
     approval = new_approval(f"canvas.run:{canvas.name}", payload)
+    # 哈希绑定执行计划，不绑定 revision：revision 因无关写入前进时审批仍可重试。
+    approval.args_hash = _approval_hash(payload)
     await registry.approvals.create(approval)
     return {
         "ok": True,
@@ -984,14 +1202,16 @@ async def run_canvas(req: RunCanvasRequest) -> dict[str, Any]:
         await registry.approvals.consume(
             req.approval_id,
             f"canvas.run:{canvas.name}",
-            canonical_hash(execution_payload),
+            _approval_hash(execution_payload),
         )
     except KeyError as exc:
         raise HTTPException(status_code=404, detail=str(exc))
     except (RuntimeError, ValueError) as exc:
         raise HTTPException(status_code=409, detail=str(exc))
 
-    job_key = canonical_hash({"approval_id": req.approval_id, "execution": execution_payload})
+    # job_id 只由"审批 + 执行计划"决定（显式排除 canvas_revision）：
+    # 失败后重试必须复用同一个任务，而不是新开一单（避免重复计费）。
+    job_key = canonical_hash({"approval_id": req.approval_id, "plan": _approval_hash(execution_payload)})
     job_id = f"media_{job_key[:32]}"
     plan_by_node = {item["node_id"]: item for item in execution_payload["jobs"]}
     frozen_jobs = [
@@ -1000,12 +1220,19 @@ async def run_canvas(req: RunCanvasRequest) -> dict[str, Any]:
             "label": job["label"],
             "kind": job["kind"],
             "ready": bool(job["ready"]),
+            "ready_reason": job.get("ready_reason") or "",
             "prompt": job.get("prompt") or "",
+            "prompt_source": job.get("prompt_source"),
             "references": [
                 {"path": ref["path"], "type": ref["type"], "mime_type": ref.get("mime_type", "")}
                 for ref in job.get("refs", []) if ref.get("path")
             ],
             "model": plan_by_node[job["node_id"]]["model"],
+            # 审批时解析好的媒体参数一并冻结：Worker 执行期间用户改节点设置也不影响本单。
+            "duration": plan_by_node[job["node_id"]]["duration"],
+            "ratio": plan_by_node[job["node_id"]]["ratio"],
+            "resolution": plan_by_node[job["node_id"]]["resolution"],
+            "size": plan_by_node[job["node_id"]]["size"],
             "args_hash": canonical_hash(plan_by_node[job["node_id"]]),
             "generation_id": f"{job_id}:{job['node_id']}",
         }
@@ -1025,22 +1252,67 @@ async def run_canvas(req: RunCanvasRequest) -> dict[str, Any]:
     }
     # generation_id 在入队前写入节点；旧 Worker 返回时必须再次校验它。
     # 已存在的幂等任务不能重写该值，否则用户重放旧 HTTP 请求会让旧任务重新成为“当前代”。
-    if await media_jobs.get(job_id) is None:
-        canvas = await registry.canvas_repository.load(req.canvas)
-        _require_revision(canvas, int(execution_payload["canvas_revision"]))
+    previous_activation: dict[str, Any] = {}
+
+    def activate(canvas: Canvas) -> bool:
+        previous_activation.clear()
         for item in frozen_jobs:
-            if item["ready"]:
-                canvas.update_node(item["node_id"], data={"active_generation_id": item["generation_id"]})
-        await registry.canvas_repository.save(canvas)
-    queued, created = await media_jobs.enqueue(
-        MediaJob(
-            job_id=job_id,
-            idempotency_key=job_key,
-            approval_id=req.approval_id,
-            canvas=canvas.name,
-            payload_json=canonical_json(queued_payload),
+            if not item["ready"]:
+                continue
+            node = canvas.require(item["node_id"])
+            previous_activation[item["node_id"]] = node.data.get("active_generation_id")
+            canvas.update_node(item["node_id"], data={"active_generation_id": item["generation_id"]})
+        return True
+
+    def revert_activation(canvas: Canvas) -> bool:
+        for node_id, previous in previous_activation.items():
+            if node_id not in canvas.nodes:
+                continue
+            canvas.update_node(node_id, data={"active_generation_id": previous})
+        return True
+
+    # P0-8：审批作废（consume）与任务入队（enqueue）不在同一事务里。
+    # 这里把两步包成一个"提交点"：任一步失败就把审批退回 pending、把激活标记还原，
+    # 让用户刷新后能用同一份审批重试，而不是"审批没了、任务也没下、画布还挂着幽灵任务"。
+    activated = False
+    try:
+        # 幂等查询也算“提交点”的一部分：任务存储不可用时不能先消费审批。
+        job_already_queued = await media_jobs.get(job_id) is not None
+        if not job_already_queued:
+            activated = await _mutate_canvas_with_retry(canvas.name, activate)
+        queued, created = await media_jobs.enqueue(
+            MediaJob(
+                job_id=job_id,
+                idempotency_key=job_key,
+                approval_id=req.approval_id,
+                canvas=canvas.name,
+                payload_json=canonical_json(queued_payload),
+            )
         )
-    )
+    except CanvasConflictError:
+        # 激活标记没有落盘（CAS 冲突），画布本身无需回滚；审批退回后刷新可重试。
+        await _release_approval_quietly(req.approval_id)
+        raise
+    except HTTPException:
+        raise
+    except Exception as exc:
+        if activated:
+            await _revert_activation_quietly(canvas.name, revert_activation)
+        await _release_approval_quietly(req.approval_id)
+        if _is_transient_storage_error(exc):
+            logger.warning(
+                "任务提交暂时失败（canvas=%s job=%s）：%s: %s",
+                canvas.name, job_id, type(exc).__name__, exc,
+            )
+            raise HTTPException(
+                status_code=503,
+                detail="本次生成没有提交成功（任务存储暂时不可用），审批已退回，请重试",
+            ) from exc
+        logger.exception("任务提交点出现非预期错误（canvas=%s job=%s），已退回审批", canvas.name, job_id)
+        raise HTTPException(
+            status_code=500,
+            detail="服务端处理本次提交时发生内部错误，审批已退回；请联系维护者查看服务端日志",
+        ) from exc
     await _update_production_stage(
         req.production_run_id,
         canvas.name,
@@ -1114,6 +1386,7 @@ async def create_composition_approval(req: ComposeCanvasRequest) -> dict[str, An
     if not any(job["ready"] for job in jobs):
         raise HTTPException(status_code=400, detail="时间线还没有全部就绪：请连接已经生成或上传的视频")
     approval = new_approval(f"canvas.compose:{canvas.name}", payload)
+    approval.args_hash = _approval_hash(payload)
     await registry.approvals.create(approval)
     return {
         "ok": True,
@@ -1141,14 +1414,16 @@ async def compose_canvas(req: ComposeCanvasRequest) -> dict[str, Any]:
         await registry.approvals.consume(
             req.approval_id,
             f"canvas.compose:{canvas.name}",
-            canonical_hash(execution_payload),
+            _approval_hash(execution_payload),
         )
     except KeyError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except (RuntimeError, ValueError) as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
 
-    job_key = canonical_hash({"approval_id": req.approval_id, "execution": execution_payload})
+    # job_id 只由「审批 + 执行计划」决定（显式排除 canvas_revision），与生成路径同口径：
+    # 失败后重试必须复用同一个任务，而不是新开一单（避免重复计费）。
+    job_key = canonical_hash({"approval_id": req.approval_id, "plan": _approval_hash(execution_payload)})
     job_id = f"media_{job_key[:32]}"
     frozen_jobs = []
     for item in execution_payload["jobs"]:
@@ -1166,24 +1441,72 @@ async def compose_canvas(req: ComposeCanvasRequest) -> dict[str, Any]:
         "production_run_id": req.production_run_id,
         "jobs": frozen_jobs,
     }
-    if await media_jobs.get(job_id) is None:
-        canvas = await registry.canvas_repository.load(req.canvas)
-        _require_revision(canvas, int(execution_payload["canvas_revision"]))
+    # 合成与生成共用同一套「提交点」语义：激活标记、入队、审批退回必须一起成功
+    # 或一起回滚，否则会出现「审批没了、任务没下、画布还挂着幽灵任务」。
+    previous_activation: dict[str, Any] = {}
+
+    def activate(canvas: Canvas) -> bool:
+        previous_activation.clear()
         for item in frozen_jobs:
-            if item["ready"]:
-                canvas.update_node(item["node_id"], data={"active_generation_id": item["generation_id"]})
-                if item.get("tts"):
-                    canvas.update_node(item["tts"]["node_id"], data={"active_generation_id": item["generation_id"]})
-        await registry.canvas_repository.save(canvas)
-    queued, created = await media_jobs.enqueue(
-        MediaJob(
-            job_id=job_id,
-            idempotency_key=job_key,
-            approval_id=req.approval_id,
-            canvas=canvas.name,
-            payload_json=canonical_json(queued_payload),
+            if not item["ready"]:
+                continue
+            node = canvas.require(item["node_id"])
+            previous_activation[item["node_id"]] = node.data.get("active_generation_id")
+            canvas.update_node(item["node_id"], data={"active_generation_id": item["generation_id"]})
+            tts = item.get("tts")
+            if tts:
+                tts_id = str(tts["node_id"])
+                tts_node = canvas.require(tts_id)
+                previous_activation[tts_id] = tts_node.data.get("active_generation_id")
+                canvas.update_node(tts_id, data={"active_generation_id": item["generation_id"]})
+        return True
+
+    def revert_activation(canvas: Canvas) -> bool:
+        for node_id, previous in previous_activation.items():
+            if node_id not in canvas.nodes:
+                continue
+            canvas.update_node(node_id, data={"active_generation_id": previous})
+        return True
+
+    activated = False
+    try:
+        # 幂等查询也算“提交点”的一部分：任务存储不可用时不能先消费审批。
+        job_already_queued = await media_jobs.get(job_id) is not None
+        if not job_already_queued:
+            activated = await _mutate_canvas_with_retry(canvas.name, activate)
+        queued, created = await media_jobs.enqueue(
+            MediaJob(
+                job_id=job_id,
+                idempotency_key=job_key,
+                approval_id=req.approval_id,
+                canvas=canvas.name,
+                payload_json=canonical_json(queued_payload),
+            )
         )
-    )
+    except CanvasConflictError:
+        # 激活标记没有落盘（CAS 冲突），画布本身无需回滚；审批退回后刷新可重试。
+        await _release_approval_quietly(req.approval_id)
+        raise
+    except HTTPException:
+        raise
+    except Exception as exc:
+        if activated:
+            await _revert_activation_quietly(canvas.name, revert_activation)
+        await _release_approval_quietly(req.approval_id)
+        if _is_transient_storage_error(exc):
+            logger.warning(
+                "合成提交暂时失败（canvas=%s job=%s）：%s: %s",
+                canvas.name, job_id, type(exc).__name__, exc,
+            )
+            raise HTTPException(
+                status_code=503,
+                detail="本次合成没有提交成功（任务存储暂时不可用），审批已退回，请重试",
+            ) from exc
+        logger.exception("合成提交点出现非预期错误（canvas=%s job=%s），已退回审批", canvas.name, job_id)
+        raise HTTPException(
+            status_code=500,
+            detail="服务端处理本次合成提交时发生内部错误，审批已退回；请联系维护者查看服务端日志",
+        ) from exc
     await _update_production_stage(
         req.production_run_id,
         canvas.name,
@@ -1215,7 +1538,10 @@ async def _save_composition_state(
     """CAS retry for Worker writes; never overwrites a newer generation."""
     for _ in range(4):
         canvas = await registry.canvas_repository.load(canvas_name)
-        node = canvas.require(node_id)
+        node = canvas.nodes.get(node_id)
+        if node is None:
+            # 节点在合成期间被删除：结果已无归属，按过期处理，不把节点"复活"。
+            return False
         if node.data.get("active_generation_id") != generation_id:
             return False
         if output is not None:
@@ -1400,7 +1726,15 @@ async def _execute_media_job(task: MediaJob) -> dict[str, Any]:
             results.append({"node_id": job["node_id"], "label": job["label"], "ok": False, "error": "没有输入提示词"})
             continue
         canvas = await latest_canvas()
-        current_node = canvas.require(job["node_id"])
+        current_node = canvas.nodes.get(job["node_id"])
+        if current_node is None:
+            # 节点在执行前被删除：结果已没有归属，按过期处理（不创建 invocation、不调 Provider）。
+            results.append({
+                "node_id": job["node_id"], "label": job["label"], "ok": False,
+                "error": "节点已被删除，本任务已停止", "stale_discarded": True,
+                "generation_id": job["generation_id"],
+            })
+            continue
         if current_node.data.get("active_generation_id") != job["generation_id"]:
             results.append({
                 "node_id": job["node_id"], "label": job["label"], "ok": False,
@@ -1408,6 +1742,13 @@ async def _execute_media_job(task: MediaJob) -> dict[str, Any]:
                 "generation_id": job["generation_id"],
             })
             continue
+        def owned_node(board: Canvas):
+            """节点还在、且仍属于本任务时才返回它；节点被删或被新一代取代都返回 None。"""
+            node = board.nodes.get(job["node_id"])
+            if node is None or node.data.get("active_generation_id") != job["generation_id"]:
+                return None
+            return node
+
         idempotency_key = canonical_hash({"approval_id": task.approval_id, "node_id": job["node_id"]})
         invocation, created = await registry.invocations.prepare(
             InvocationState(
@@ -1430,10 +1771,18 @@ async def _execute_media_job(task: MediaJob) -> dict[str, Any]:
                 continue
             if invocation.status in {"succeeded", "failed"} and invocation.result_json:
                 restored = json.loads(invocation.result_json)
-                canvas = await latest_canvas()
-                if canvas.require(job["node_id"]).data.get("active_generation_id") == job["generation_id"]:
-                    canvas.update_node(job["node_id"], status="done" if restored.get("ok") else "error")
-                    await registry.canvas_repository.save(canvas)
+                replay_status = "done" if restored.get("ok") else "error"
+
+                def apply_replay(board: Canvas) -> bool:
+                    if owned_node(board) is None:
+                        return False
+                    board.update_node(job["node_id"], status=replay_status)
+                    return True
+
+                try:
+                    await _mutate_canvas_with_retry(canvas_name, apply_replay)
+                except CanvasConflictError:
+                    pass  # 重放结果已存在 invocation 里，画布状态标记写不进去也不影响结论
                 results.append({**restored, "idempotent_replay": True, "invocation_id": invocation.invocation_id})
                 if restored.get("ok"):
                     done += 1
@@ -1442,34 +1791,51 @@ async def _execute_media_job(task: MediaJob) -> dict[str, Any]:
                 if invocation.remote_operation_id:
                     resume_operation_id = invocation.remote_operation_id
                 else:
-                    canvas = await latest_canvas()
-                    if canvas.require(job["node_id"]).data.get("active_generation_id") == job["generation_id"]:
-                        canvas.update_node(job["node_id"], status="error")
-                        await registry.canvas_repository.save(canvas)
+
+                    def apply_unknown(board: Canvas) -> bool:
+                        if owned_node(board) is None:
+                            return False
+                        board.update_node(job["node_id"], status="error")
+                        return True
+
+                    try:
+                        await _mutate_canvas_with_retry(canvas_name, apply_unknown)
+                    except CanvasConflictError:
+                        pass
                     results.append({
                         "node_id": job["node_id"], "label": job["label"], "ok": False,
                         "error": "上次生成结果不确定且没有 operation_id，已禁止自动重试",
                         "invocation_id": invocation.invocation_id,
                     })
                     continue
-        canvas = await latest_canvas()
-        if canvas.require(job["node_id"]).data.get("active_generation_id") != job["generation_id"]:
+        def apply_generating(board: Canvas) -> bool:
+            if owned_node(board) is None:
+                return False
+            board.update_node(job["node_id"], status="generating")
+            return True
+
+        if not await _mutate_canvas_with_retry(canvas_name, apply_generating):
             results.append({
                 "node_id": job["node_id"], "label": job["label"], "ok": False,
                 "error": "开始执行前发现节点已有更新一代任务", "stale_discarded": True,
             })
             continue
-        canvas.update_node(job["node_id"], status="generating")
-        await registry.canvas_repository.save(canvas)
         if not resume_operation_id:
             try:
                 await registry.invocations.mark_executing(invocation.invocation_id)
             except RuntimeError:
                 current = await registry.invocations.get(invocation.invocation_id)
-                canvas = await latest_canvas()
-                if canvas.require(job["node_id"]).data.get("active_generation_id") == job["generation_id"]:
-                    canvas.update_node(job["node_id"], status="error")
-                    await registry.canvas_repository.save(canvas)
+
+                def apply_not_executing(board: Canvas) -> bool:
+                    if owned_node(board) is None:
+                        return False
+                    board.update_node(job["node_id"], status="error")
+                    return True
+
+                try:
+                    await _mutate_canvas_with_retry(canvas_name, apply_not_executing)
+                except CanvasConflictError:
+                    pass
                 results.append({
                     "node_id": job["node_id"], "label": job["label"], "ok": False,
                     "error": "相同生成调用正在执行或状态不确定，已禁止并发重复执行",
@@ -1491,18 +1857,16 @@ async def _execute_media_job(task: MediaJob) -> dict[str, Any]:
                 )
                 future.result(timeout=10)
 
-            media_request = {
-                "prompt": job["prompt"],
-                "provider": payload["provider"],
-                "model": selected_model,
-                "size": "1024x576" if job["kind"] == "image" else "1280x720",
-                "duration": payload["duration"],
-                "resolution": payload["resolution"],
-                "ratio": payload["ratio"],
-                "generate_audio": payload["generate_audio"],
-                "references": job["references"],
-                "operation_callback": remember_operation,
-            }
+            # 参数在审批时已按「节点 > 分镜 > 项目 defaults > 请求」解析并冻结，
+            # Worker 不再按 kind 硬编码 size，也不再看可能已变化的画布设置。
+            # 请求形状由 core.canvas.build_media_request 统一，Agent 工具用的是同一份。
+            media_request = build_media_request(
+                job,
+                provider=payload["provider"],
+                model=selected_model,
+                generate_audio=payload["generate_audio"],
+            )
+            media_request["operation_callback"] = remember_operation
             if resume_operation_id:
                 media = await asyncio.to_thread(
                     default_registry.resume, job["kind"], resume_operation_id, media_request, WORKSPACE
@@ -1513,10 +1877,16 @@ async def _execute_media_job(task: MediaJob) -> dict[str, Any]:
             await registry.invocations.mark_unknown(invocation.invocation_id, "媒体 Worker 关闭时调用仍在执行")
             raise
         except Exception as exc:  # noqa: BLE001
-            canvas = await latest_canvas()
-            if canvas.require(job["node_id"]).data.get("active_generation_id") == job["generation_id"]:
-                canvas.update_node(job["node_id"], status="error")
-                await registry.canvas_repository.save(canvas)
+            def apply_failed(board: Canvas) -> bool:
+                if owned_node(board) is None:
+                    return False
+                board.update_node(job["node_id"], status="error")
+                return True
+
+            try:
+                await _mutate_canvas_with_retry(canvas_name, apply_failed)
+            except CanvasConflictError:
+                pass  # 原始失败原因优先，不能因为标记失败状态的写回冲突把真正的错误吞掉
             failed = {"node_id": job["node_id"], "label": job["label"], "ok": False, "error": f"{type(exc).__name__}: {exc}"}
             if operation_seen or resume_operation_id:
                 await registry.invocations.mark_unknown(invocation.invocation_id, failed["error"])
@@ -1528,8 +1898,33 @@ async def _execute_media_job(task: MediaJob) -> dict[str, Any]:
                 await registry.invocations.complete(invocation.invocation_id, failed, failed=True)
             results.append({**failed, "invocation_id": invocation.invocation_id})
             continue
-        canvas = await latest_canvas()
-        if canvas.require(job["node_id"]).data.get("active_generation_id") != job["generation_id"]:
+        port = "image" if job["kind"] == "image" else "video"
+        # take_id 在重试之外只生成一次：重试是"把同一笔增量再贴一遍"，不是"再生成一版"。
+        take_id = f"take_{uuid.uuid4().hex[:12]}"
+
+        def apply_success(board: Canvas) -> bool:
+            if owned_node(board) is None:
+                return False
+            # 每生成一次就多一版：takes 存历史（末尾追加，只留最近 30 版），current_take_id 指当前版。
+            # 画布「历史版本」抽屉、制片台的版本条读的都是这份数据；切版走
+            # POST /api/canvas/nodes/{id}/take（画布）或 /api/studio/segments/{id}/take（制片台）。
+            # 写法与 Agent 工具共用 Canvas.record_generated_media，避免两边 take 字段慢慢长歪。
+            board.record_generated_media(
+                job["node_id"],
+                kind=job["kind"],
+                path=media.path,
+                mime=media.mime,
+                provider=media.provider,
+                mock=media.mock,
+                model=selected_model,
+                duration_s=float(job.get("duration") or payload.get("duration") or 0) or None,
+                take_id=take_id,
+                shot_no=1,
+                mode="canvas",
+            )
+            return True
+
+        if not await _mutate_canvas_with_retry(canvas_name, apply_success):
             stale = {
                 "node_id": job["node_id"], "label": job["label"], "ok": False,
                 "error": "生成已完成，但节点已有更新一代任务，旧结果未写入画布",
@@ -1539,16 +1934,8 @@ async def _execute_media_job(task: MediaJob) -> dict[str, Any]:
             await registry.invocations.complete(invocation.invocation_id, stale)
             results.append({**stale, "invocation_id": invocation.invocation_id})
             continue
-        node = canvas.require(job["node_id"])
-        port = "image" if job["kind"] == "image" else "video"
-        node.outputs[port] = {
-            "data_type": port.upper(),
-            "value": {"path": media.path, "mime": media.mime, "mock": media.mock, "provider": media.provider},
-        }
-        canvas.update_node(job["node_id"], status="done")
-        await registry.canvas_repository.save(canvas)
         await _register_media_asset(
-            canvas=canvas.name,
+            canvas=canvas_name,
             node_id=job["node_id"],
             media_type=port,
             path=media.path,
@@ -1733,13 +2120,18 @@ async def rename_canvas(name: str, req: RenameCanvasRequest) -> dict[str, Any]:
 
 
 @app.delete("/api/canvases/{name}")
-async def delete_canvas(name: str) -> dict[str, Any]:
-    """删除项目画布；会话历史保留为可审计记录，但不再出现在项目列表中。"""
+async def delete_canvas(name: str, revision: int | None = None) -> dict[str, Any]:
+    """删除项目画布；会话历史保留为可审计记录，但不再出现在项目列表中。
+
+    删除也是写：带 revision 才能保证"我刚看到的那份画布"才允许被删，
+    否则别人刚写进去的内容会被一条迟到的删除请求一起带走。
+    """
     if name == "main":
         raise HTTPException(status_code=400, detail="默认项目不能删除")
     canvas = await registry.canvas_repository.load(name)
     if not canvas.persisted:
         raise HTTPException(status_code=404, detail="项目不存在")
+    _require_write_revision(canvas, revision)
     await registry.canvas_repository.delete(name)
     return {"ok": True, "name": name}
 
@@ -1760,7 +2152,9 @@ async def get_canvas(name: str = "main") -> dict[str, Any]:
         payload = node.to_dict()
         # 卡片和详情面板需要能阅读/滚动完整正文；JSON 文件仍只保存 content_path，
         # API 展示时再读取，避免画布文件重复存一份长文本。
-        payload["content"] = canvas.read_text(node.id) if node.data.get("content_path") else ""
+        # 正文也可能落在 data.prompt / outputs.prompt（S5 之后的新式写法），
+        # 所以统一走 read_text 的回退链，而不是只看 content_path。
+        payload["content"] = canvas.read_text(node.id)
         node_payloads.append(payload)
     return {
         "name": canvas.name,
@@ -1800,6 +2194,120 @@ async def update_canvas_node(node_id: str, req: UpdateCanvasNodeRequest) -> dict
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     await registry.canvas_repository.save(canvas)
     return {"ok": True, "canvas": canvas.name, "node": node.to_dict(), "revision": canvas.revision}
+
+
+class SaveNodeTextRequest(BaseModel):
+    canvas: str = "main"
+    text: str = ""
+    revision: int | None = None
+
+
+@app.post("/api/canvas/nodes/{node_id}/text")
+async def save_canvas_node_text(node_id: str, req: SaveNodeTextRequest) -> dict[str, Any]:
+    """人写正文：写回 content.md（有 content_path）或 outputs 内联值。
+
+    给画布上「卡片下方提示词框」用：提示词 / 文本 / 分镜卡都能直接改。
+    改完打 rendered_by=human —— 服务端之后的渲染不再覆盖人写的内容，
+    这也是「自己编写内容是第一等选项，不是兜底」的最小落点。
+    """
+    canvas = await registry.canvas_repository.load(req.canvas)
+    _require_write_revision(canvas, req.revision)
+    try:
+        node = canvas.require(node_id)
+    except (CanvasError, KeyError) as exc:
+        raise HTTPException(status_code=404, detail=f"节点不存在：{node_id}") from exc
+    # 卡片下方的提示词框是全局的：文字类卡写正文，生成/素材类卡写这一张的要求。
+    # 生成类（image_gen/video_gen/tts_gen）的 data.prompt 会参与下一次单卡生成，
+    # 素材类（asset/image/video/audio）的 data.prompt 只是这张卡自己的备注，不影响产物。
+    TEXT_NODE_TYPES = {"prompt", "text", "storyboard"}
+    PROMPT_NODE_TYPES = {"image_gen", "video_gen", "tts_gen", "asset", "image", "video", "audio", "timeline"}
+    if node.type not in TEXT_NODE_TYPES | PROMPT_NODE_TYPES:
+        raise HTTPException(status_code=400, detail=f"这张卡不接受文字输入：{node.type}")
+
+    text = req.text or ""
+    if node.type not in TEXT_NODE_TYPES:
+        # 非文字卡：只更新这一张的要求（data.prompt），不动产物、不动状态
+        node.data["prompt"] = text
+        node.data["rendered_by"] = "human" if text.strip() else node.data.get("rendered_by", "")
+        revision = await registry.canvas_repository.save(canvas)
+        return {"ok": True, "canvas": canvas.name, "node_id": node_id, "revision": revision, "scope": "prompt"}
+
+    relative = node.data.get("content_path")
+    if relative:
+        path = canvas.root() / str(relative)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(text, encoding="utf-8")
+    else:
+        outputs = dict(node.outputs)
+        # 写回「这张卡自己的槽位」，并删掉另一个槽位的旧副本。
+        # 原因：读侧 core/canvas.py read_text() 的固定顺序是
+        # content.md → outputs.prompt → outputs.text → data.prompt；而历史上
+        # 画布走 outputs.text、制片台走 outputs.prompt，各写一个槽位。若两边都保留，
+        # 旧值会永远盖住新值（改完正文却按旧正文生成）。同一节点只留一个 STRING 槽位。
+        slot_name = "prompt" if node.type == "prompt" else "text"
+        stale_name = "text" if slot_name == "prompt" else "prompt"
+        slot = dict(outputs.get(slot_name) or outputs.get(stale_name) or {})
+        slot.setdefault("data_type", "STRING")
+        slot["value"] = text
+        outputs[slot_name] = slot
+        outputs.pop(stale_name, None)
+        node.outputs = outputs
+
+    node.data["rendered_by"] = "human"
+    node.data["prompt"] = text
+    node.status = "ready"
+    await registry.canvas_repository.save(canvas)
+    return {
+        "ok": True,
+        "canvas": canvas.name,
+        "node_id": node_id,
+        "revision": canvas.revision,
+    }
+
+
+class SelectTakeRequest(BaseModel):
+    canvas: str = "main"
+    take_id: str
+    revision: int | None = None
+
+
+@app.post("/api/canvas/nodes/{node_id}/take")
+async def select_canvas_take(node_id: str, req: SelectTakeRequest) -> dict[str, Any]:
+    """把某一版设为当前版：takes 存历史，outputs 存当前指针（和制片台的版本条同一份数据）。
+
+    画布的生成节点（image_gen / video_gen）走这个接口；制片台里由 prompt 节点定位生成节点的
+    场景仍用 /api/studio/segments/{node_id}/take，两边改的是同一份 takes。
+    """
+    canvas = await registry.canvas_repository.load(req.canvas)
+    _require_write_revision(canvas, req.revision)
+    try:
+        node = canvas.require(node_id)
+    except CanvasError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    takes = list(node.data.get("takes") or [])
+    chosen = next((item for item in takes if item.get("take_id") == req.take_id), None)
+    if chosen is None:
+        raise HTTPException(status_code=404, detail=f"版本不存在：{req.take_id}")
+    port = "video" if node.type == "video_gen" else "image"
+    node.data["current_take_id"] = req.take_id
+    node.outputs[port] = {
+        "data_type": port.upper(),
+        "value": {
+            "path": chosen.get("path", ""),
+            "mime": chosen.get("mime") or ("video/mp4" if port == "video" else "image/png"),
+            "provider": chosen.get("provider") or "",
+            "mock": bool(chosen.get("mock")),
+        },
+    }
+    node.status = "done"
+    await registry.canvas_repository.save(canvas)
+    return {
+        "ok": True,
+        "canvas": canvas.name,
+        "node_id": node_id,
+        "current_take_id": req.take_id,
+        "revision": canvas.revision,
+    }
 
 
 @app.post("/api/canvas/nodes")
