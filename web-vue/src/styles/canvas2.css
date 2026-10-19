@@ -2008,6 +2008,55 @@ textarea {
   color: var(--tx-3);
 }
 
+/* 思考块：暗色下重写主题的浅色/紫色规则，保留「点击折叠」不变 */
+.cv2-agent .part-thinking {
+  border-color: var(--bd-subtle);
+  background: transparent;
+}
+
+.cv2-agent .part-thinking .part-head {
+  padding: 6px 8px;
+  border-radius: 8px;
+}
+
+.cv2-agent .part-thinking .part-head:hover {
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.cv2-agent .part-thinking .part-head .title {
+  color: var(--tx-2);
+  font-weight: 500;
+}
+
+.cv2-agent .part-thinking .part-head .chev,
+.cv2-agent .part-thinking .part-head .icon,
+.cv2-agent .part-thinking .part-head .dim {
+  color: var(--tx-3);
+}
+
+.cv2-agent .part-thinking .part-body {
+  padding: 0 10px 10px 30px;
+  color: var(--tx-3);
+  font-size: 12px;
+}
+
+.cv2-agent .part-thinking .part-body .md {
+  color: var(--tx-3);
+  font-size: 12px;
+}
+
+.cv2-agent .part-head .status.success {
+  color: var(--accent-solid);
+}
+
+.cv2-agent .part-head .status.error {
+  color: var(--danger);
+}
+
+.cv2-agent .part-head .status.running {
+  color: var(--warning);
+}
+
 .cv2-agent .md {
   color: var(--tx-1);
   font-size: 14px;
