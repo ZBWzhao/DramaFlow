@@ -406,64 +406,125 @@ textarea {
 
 .cv2 .edges path {
   fill: none;
-  stroke: rgba(163, 180, 208, 0.5);
-  stroke-width: 1.4;
+  stroke: var(--fam-mixed);
+  stroke-width: 1.25;
+  opacity: 0.55;
+  vector-effect: non-scaling-stroke;
+  transition: opacity var(--dur-fast) var(--ease);
 }
 
-/* ---------- 卡片 ---------- */
+/* 连线颜色 = 上游数据类型；只有纯度差异，不发光、不加辉光 */
+.cv2 .edges path[data-fam="string"] { stroke: var(--fam-string); }
+.cv2 .edges path[data-fam="image"] { stroke: var(--fam-image); }
+.cv2 .edges path[data-fam="video"] { stroke: var(--fam-video); }
+.cv2 .edges path[data-fam="audio"] { stroke: var(--fam-audio); }
+
+.cv2 .edges path.temp {
+  stroke: var(--accent);
+  stroke-dasharray: 4 3;
+  opacity: 0.9;
+}
+
+.cv2 .lod-far .edges path { stroke-width: 1; opacity: 0.38; }
+
+/* ---------- 卡片（阶段 2）：2px 类型条 + 卡外标题 + 卡体 + 状态角标 ---------- */
 .cv2 .node {
   position: absolute;
   cursor: default;
+  /* 类型色只出现在：2px 顶部条、卡外 glyph、连线。
+   * 不进入正文、不进入边框、不做按钮底色 —— 否则一眼就是「彩色贴纸墙」。 */
+  --type-color: var(--fam-mixed);
 }
+
+.cv2 .node[data-type="text"],
+.cv2 .node[data-type="prompt"],
+.cv2 .node[data-type="storyboard"] { --type-color: var(--fam-string); }
+
+.cv2 .node[data-type="image"],
+.cv2 .node[data-type="image_gen"],
+.cv2 .node[data-type="asset"] { --type-color: var(--fam-image); }
+
+.cv2 .node[data-type="video"],
+.cv2 .node[data-type="video_gen"] { --type-color: var(--fam-video); }
+
+.cv2 .node[data-type="audio"],
+.cv2 .node[data-type="tts_gen"] { --type-color: var(--fam-audio); }
 
 .cv2 .node-caption {
   display: flex;
   align-items: center;
-  gap: 5px;
-  height: 24px;
-  color: #c2cbd9;
-  font-size: 12px;
+  gap: var(--sp-2);
+  height: var(--card-caption);
+  padding: 0 2px;
+  color: var(--text-2);
+  font-size: var(--fs-12);
 }
 
 .cv2 .cap-glyph {
-  color: var(--text-3);
-  font-size: 10px;
+  flex: none;
+  width: 14px;
+  color: var(--type-color);
+  font-size: 12px;
+  line-height: 1;
+  text-align: center;
 }
 
 .cv2 .cap-title {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  max-width: 170px;
+  max-width: 176px;
+  color: var(--text-2);
 }
+
+.cv2 .node:hover .cap-title,
+.cv2 .node.selected .cap-title { color: var(--text); }
 
 .cv2 .cap-dims {
   margin-left: auto;
-  color: var(--text-3);
-  font-size: 10.5px;
+  color: var(--text-3-strong);
+  font-size: var(--fs-11);
+  font-variant-numeric: tabular-nums;
 }
 
 .cv2 .node-body {
   position: relative;
   width: 100%;
   aspect-ratio: 16 / 9;
-  border-radius: 10px;
+  border-radius: var(--r-card);
   overflow: hidden;
   background: var(--card);
-  border: 1px solid var(--line);
-  box-shadow: 0 10px 26px rgba(0, 0, 0, 0.36);
-  transition: border-color 0.15s ease, box-shadow 0.15s ease, transform 0.15s ease;
+  box-shadow: 0 0 0 1px var(--line), var(--elev-1);
+  transition: box-shadow var(--dur-fast) var(--ease), transform var(--dur-fast) var(--ease);
 }
 
 .cv2 .node:hover .node-body {
-  border-color: rgba(255, 255, 255, 0.14);
+  box-shadow: 0 0 0 1px var(--line-2), 0 6px 18px -10px rgba(0, 0, 0, 0.7);
   transform: translateY(-1px);
 }
 
 .cv2 .node.selected .node-body {
-  border-color: rgba(110, 168, 255, 0.75);
-  box-shadow: 0 0 0 1px rgba(110, 168, 255, 0.28), 0 14px 34px rgba(0, 0, 0, 0.5);
+  box-shadow: 0 0 0 2px var(--accent), 0 10px 26px -12px rgba(0, 0, 0, 0.75);
 }
+
+.cv2 .node.in-selection .node-body {
+  box-shadow: 0 0 0 1px var(--accent-line), var(--elev-1);
+}
+
+/* 类型条：2px，贴在卡体上沿；卡体圆角裁切，视觉上是卡的一部分 */
+.cv2 .type-strip {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 0;
+  height: 2px;
+  z-index: 3;
+  background: var(--type-color);
+  opacity: 0.9;
+  pointer-events: none;
+}
+
+.cv2 .node.selected .type-strip { opacity: 1; }
 
 .cv2 .node-body img {
   display: block;
@@ -476,17 +537,18 @@ textarea {
 .cv2 .node-body.is-text {
   aspect-ratio: auto;
   min-height: 132px;
-  padding: 12px 13px;
-  background: linear-gradient(180deg, #171b22, #12151a);
+  padding: 10px 12px;
+  background: var(--card);
 }
 
 .cv2 .node-text {
   margin: 0;
+  padding-top: 2px;
   color: var(--text-2);
-  font-size: 11px;
-  line-height: 1.7;
+  font-size: var(--fs-12);
+  line-height: 1.65;
   display: -webkit-box;
-  -webkit-line-clamp: 6;
+  -webkit-line-clamp: 5;
   -webkit-box-orient: vertical;
   overflow: hidden;
 }
@@ -496,13 +558,54 @@ textarea {
   left: 50%;
   top: 50%;
   transform: translate(-50%, -50%);
-  color: #3b4657;
-  font-size: 26px;
+  color: var(--text-3);
+  font-size: 22px;
+  opacity: 0.7;
 }
 
-/* ── 生成状态（M1/M2）：遮罩 + 转圈 + 失败重试 + 完成高亮 ─────────────
- * 生成可能要几十秒，卡片上必须一直有"在做什么"；失败要能就地重试，
- * 不能让人去猜是不是卡住了。遮罩本身不吃指针，只有重试按钮可点。 */
+/* ── 状态角标 / 生成态（阶段 2）
+ * 规则：形状先于颜色。灰度下也必须区分——
+ *   done 实心对勾 · error 实心三角 · queued 虚线环 · generating 圆弧环 + 不定量横条
+ * 颜色只是第二通道。 */
+.cv2 .status-mark {
+  display: none;
+  position: absolute;
+  right: var(--sp-2);
+  top: var(--sp-2);
+  z-index: 8;
+  width: 16px;
+  height: 16px;
+  align-items: center;
+  justify-content: center;
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 1;
+}
+
+.cv2 .node.status-done .status-mark {
+  display: flex;
+  border-radius: 50%;
+  background: var(--ok);
+  color: #04120b;
+}
+
+.cv2 .node.status-error .status-mark,
+.cv2 .node.status-discarded .status-mark {
+  display: flex;
+  clip-path: polygon(50% 4%, 98% 94%, 2% 94%);
+  background: var(--bad);
+  color: #1b0407;
+  padding-top: 4px;
+  font-size: 9px;
+}
+
+.cv2 .node.status-unknown .status-mark {
+  display: flex;
+  border-radius: 50%;
+  box-shadow: inset 0 0 0 1.5px var(--warn);
+  color: var(--warn);
+}
+
 .cv2 .gen-overlay {
   position: absolute;
   inset: 0;
@@ -511,35 +614,84 @@ textarea {
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 9px;
+  gap: var(--sp-2);
   border-radius: inherit;
-  background: rgba(8, 10, 14, 0.58);
-  backdrop-filter: blur(2px);
-  color: #dfe6f2;
-  font-size: 11.5px;
-  letter-spacing: 0.3px;
+  background: color-mix(in srgb, var(--bg) 64%, transparent);
+  backdrop-filter: blur(1.5px);
+  color: var(--text);
+  font-size: var(--fs-11);
+  letter-spacing: 0.2px;
   pointer-events: none;
 }
 
-.cv2 .gen-spinner {
-  width: 18px;
-  height: 18px;
+/* 生成中：3/4 圆弧（conic + 径向遮罩成环），不是旋转的「loading」图标 */
+.cv2 .gen-ring {
+  width: 20px;
+  height: 20px;
   border-radius: 50%;
-  border: 2px solid rgba(255, 255, 255, 0.16);
-  border-top-color: rgba(122, 162, 255, 0.95);
-  animation: cv2-gen-spin 0.85s linear infinite;
+  background: conic-gradient(var(--accent) 0 76%, transparent 76%);
+  -webkit-mask: radial-gradient(farthest-side, transparent calc(100% - 3px), #000 calc(100% - 2.5px));
+  mask: radial-gradient(farthest-side, transparent calc(100% - 3px), #000 calc(100% - 2.5px));
+  animation: cv2-gen-spin 1.1s linear infinite;
+}
+
+/* 排队中：虚线环（静态）。与生成中的实线圆弧在灰度下也完全不同 */
+.cv2 .node.status-queued .gen-ring {
+  background: none;
+  border: 2px dashed var(--accent-line);
+  border-radius: 50%;
+  -webkit-mask: none;
+  mask: none;
+  animation: none;
+}
+
+.cv2 .gen-bar {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 0;
+  height: 2px;
+  overflow: hidden;
+  background: var(--accent-soft);
+}
+
+.cv2 .gen-bar::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 38%;
+  background: var(--accent);
+  animation: cv2-gen-bar 1.5s var(--ease) infinite;
 }
 
 @keyframes cv2-gen-spin {
   to { transform: rotate(360deg); }
 }
 
+@keyframes cv2-gen-bar {
+  0% { left: -38%; }
+  100% { left: 100%; }
+}
+
 .cv2 .gen-overlay .gen-text {
-  opacity: 0.86;
+  color: var(--text-2);
+}
+
+/* 失败 / 已作废：45° 斜纹是第三通道，灰度下仍可辨 */
+.cv2 .node.status-error .node-body::after,
+.cv2 .node.status-discarded .node-body::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: 5;
+  border-radius: inherit;
+  pointer-events: none;
+  background: repeating-linear-gradient(135deg, transparent 0 12px, var(--bad-soft) 12px 13px);
 }
 
 .cv2 .gen-overlay.is-error {
-  background: rgba(38, 12, 12, 0.66);
+  background: color-mix(in srgb, var(--bg) 58%, transparent);
 }
 
 .cv2 .gen-fail-icon {
@@ -548,64 +700,69 @@ textarea {
   justify-content: center;
   width: 20px;
   height: 20px;
+  clip-path: polygon(50% 4%, 98% 94%, 2% 94%);
+  background: var(--bad);
+  color: #1b0407;
+  padding-top: 4px;
+  font-size: 10px;
+  font-weight: 700;
+}
+
+.cv2 .gen-unknown-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
   border-radius: 50%;
-  background: rgba(255, 96, 96, 0.16);
-  border: 1px solid rgba(255, 110, 110, 0.55);
-  color: #ff9d9d;
-  font-size: 12px;
-  font-weight: 600;
+  box-shadow: inset 0 0 0 1.5px var(--warn);
+  color: var(--warn);
+  font-size: 11px;
+  font-weight: 700;
 }
 
 .cv2 .gen-retry {
   pointer-events: auto;
   margin-top: 2px;
   padding: 4px 12px;
-  border-radius: 999px;
-  border: 1px solid rgba(255, 120, 120, 0.55);
-  background: rgba(255, 90, 90, 0.14);
-  color: #ffd9d9;
-  font-size: 11px;
+  border-radius: var(--r-pill);
+  border: 1px solid var(--bad);
+  background: var(--bad-soft);
+  color: var(--text);
+  font-size: var(--fs-11);
   cursor: pointer;
-  transition: background 0.15s ease, border-color 0.15s ease;
+  transition: background var(--dur-fast) var(--ease);
 }
 
-.cv2 .gen-retry:hover {
-  background: rgba(255, 90, 90, 0.26);
-  border-color: rgba(255, 140, 140, 0.8);
-}
+.cv2 .gen-retry:hover { background: color-mix(in srgb, var(--bad) 26%, transparent); }
 
-.cv2 .node.gen-busy .node-body {
-  border-color: rgba(122, 162, 255, 0.55);
-  box-shadow: 0 0 0 1px rgba(122, 162, 255, 0.18), 0 14px 34px rgba(0, 0, 0, 0.5);
-}
+.cv2 .node.gen-busy .node-body { box-shadow: 0 0 0 1px var(--accent-line), var(--elev-1); }
+.cv2 .node.gen-failed .node-body { box-shadow: 0 0 0 1px var(--bad), var(--elev-1); }
 
-.cv2 .node.gen-failed .node-body {
-  border-color: rgba(255, 96, 96, 0.5);
-}
-
-.cv2 .node.gen-done .node-body {
-  animation: cv2-gen-done 1.4s ease-out;
-}
+.cv2 .node.gen-done .node-body { animation: cv2-gen-done 1.2s var(--ease); }
 
 @keyframes cv2-gen-done {
-  0% { box-shadow: 0 0 0 2px rgba(96, 226, 164, 0.85), 0 14px 34px rgba(0, 0, 0, 0.5); }
-  100% { box-shadow: 0 0 0 1px rgba(96, 226, 164, 0), 0 14px 34px rgba(0, 0, 0, 0.5); }
+  0% { box-shadow: 0 0 0 2px var(--ok), var(--elev-1); }
+  100% { box-shadow: 0 0 0 1px var(--line), var(--elev-1); }
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .cv2 .gen-spinner { animation-duration: 2.4s; }
+  .cv2 .gen-ring { animation: none; }
+  .cv2 .gen-bar::after { animation: none; left: 0; width: 100%; opacity: 0.6; }
   .cv2 .node.gen-done .node-body { animation: none; }
+  .cv2 .node:hover .node-body { transform: none; }
 }
 
 .cv2 .ai-tag {
   position: absolute;
-  left: 8px;
-  top: 8px;
+  left: var(--sp-2);
+  top: var(--sp-2);
+  z-index: 4;
   padding: 1px 6px;
-  border-radius: 999px;
-  background: rgba(8, 10, 14, 0.55);
-  border: 1px solid rgba(255, 255, 255, 0.1);
-  color: #cfd7e4;
+  border-radius: var(--r-pill);
+  background: color-mix(in srgb, var(--bg) 62%, transparent);
+  box-shadow: inset 0 0 0 1px var(--line-2);
+  color: var(--text-2);
   font-size: 10px;
   backdrop-filter: blur(6px);
 }
@@ -767,32 +924,46 @@ textarea {
   background: rgba(255, 255, 255, 0.1);
 }
 
+/* 端口：16px 命中区 + 8px 视觉点；颜色跟随上游数据家族，不做发光 */
 .cv2 .handle {
   position: absolute;
   top: 50%;
-  width: 20px;
-  height: 20px;
+  width: 16px;
+  height: 16px;
   display: grid;
   place-items: center;
   transform: translateY(-50%);
-  border-radius: 50%;
-  border: 1px dashed rgba(255, 255, 255, 0.4);
-  background: rgba(8, 10, 14, 0.6);
-  color: #dfe5ef;
-  font-size: 11px;
+  border: 0;
+  background: transparent;
   opacity: 0;
-  transition: opacity 0.15s ease;
+  transition: opacity var(--dur-fast) var(--ease);
+  z-index: 7;
+}
+
+.cv2 .handle::after {
+  content: "";
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--card-2);
+  box-shadow: inset 0 0 0 1.5px var(--type-color), 0 0 0 2px var(--bg);
+}
+
+.cv2 .handle:hover::after {
+  background: var(--type-color);
 }
 
 .cv2 .handle.left {
-  left: -10px;
+  left: -8px;
 }
 
 .cv2 .handle.right {
-  right: -10px;
+  right: -8px;
+  cursor: crosshair;
 }
 
-.cv2 .node:hover .handle {
+.cv2 .node:hover .handle,
+.cv2 .node.selected .handle {
   opacity: 1;
 }
 
@@ -881,117 +1052,85 @@ textarea {
   background: rgba(255, 255, 255, 0.1);
 }
 
-/* ---------- 卡下提示词框 ---------- */
+/* ---------- 卡下提示词框（阶段 2）：默认 32px 单行，聚焦展开 132px ---------- */
 .cv2 .prompt-box {
   position: absolute;
-  left: 50%;
-  transform: translateX(-50%);
-  top: calc(100% + 10px);
-  width: 470px;
+  left: 0;
+  right: 0;
+  top: calc(100% + var(--sp-2));
   display: flex;
   flex-direction: column;
-  gap: 6px;
-  padding: 8px 9px 7px;
-  border-radius: 12px;
-  border: 1px solid var(--line-2);
-  background: rgba(20, 23, 29, 0.97);
-  box-shadow: 0 16px 36px rgba(0, 0, 0, 0.5);
-  z-index: 5;
+  gap: var(--sp-2);
+  padding: var(--sp-2) var(--sp-2) var(--sp-2) var(--sp-3);
+  border-radius: var(--r-nest);
+  background: color-mix(in srgb, var(--panel) 97%, transparent);
+  box-shadow: 0 0 0 1px var(--line-2), var(--elev-2);
+  z-index: 6;
   cursor: default;
+  transition: box-shadow var(--dur-fast) var(--ease);
 }
 
-.cv2 .prompt-chips {
+.cv2 .prompt-box.open {
+  box-shadow: 0 0 0 1px var(--accent-line), var(--elev-2);
+}
+
+.cv2 .pb-line {
   display: flex;
-  align-items: center;
-  gap: 6px;
-}
-
-.cv2 .chip {
-  border: 0;
-  border-radius: 999px;
-  background: rgba(255, 255, 255, 0.055);
-  color: var(--text-2);
-  font-size: 10.5px;
-  padding: 2px 7px;
-}
-
-.cv2 .chip:hover {
-  background: rgba(255, 255, 255, 0.1);
-  color: var(--text);
-}
-
-.cv2 .chip.ghost {
-  background: transparent;
-  color: var(--text-3);
+  align-items: flex-start;
+  gap: var(--sp-2);
 }
 
 .cv2 .prompt-box textarea {
-  width: 100%;
-  min-height: 52px;
-  max-height: 110px;
+  flex: 1;
+  min-width: 0;
+  height: 20px;
+  max-height: 96px;
+  padding: 0;
   resize: none;
   border: 0;
   outline: none;
   background: transparent;
-  color: #dfe6f1;
-  font-size: 11.5px;
+  color: var(--text);
+  font-family: var(--font-sans);
+  font-size: var(--fs-12);
   line-height: 1.65;
 }
 
-.cv2 .prompt-box textarea::placeholder {
-  color: var(--text-3);
-}
+.cv2 .prompt-box.open textarea { height: 72px; }
 
-.cv2 .prompt-foot {
-  display: flex;
-  align-items: center;
-  gap: 7px;
-  padding-top: 2px;
-}
-
-.model-chip,
-.cv2 .size-chip {
-  color: var(--text-2);
-  font-size: 10.5px;
-  white-space: nowrap;
-}
-
-.cv2 .model-chip {
-  color: #b9c6da;
-}
-
-.cv2 .sep {
-  width: 1px;
-  height: 11px;
-  background: rgba(255, 255, 255, 0.1);
-}
-
-.cv2 .prompt-icons {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  color: var(--text-3);
-  font-size: 10.5px;
-}
-
-.cv2 .prompt-icons b {
-  font-weight: 500;
-}
+.cv2 .prompt-box textarea::placeholder { color: var(--text-3); }
 
 .cv2 .send {
-  width: 24px;
-  height: 24px;
+  flex: none;
+  width: 20px;
+  height: 20px;
+  margin-top: 1px;
   border: 0;
   border-radius: 50%;
-  background: #e8edf6;
-  color: #0b0d10;
+  background: var(--card-2);
+  color: var(--text);
   font-size: 12px;
   line-height: 1;
+  cursor: pointer;
+  transition: background var(--dur-fast) var(--ease);
 }
 
-.cv2 .send:hover {
-  background: #fff;
+.cv2 .send:hover:not(:disabled) { background: var(--accent); color: var(--text-on-accent); }
+.cv2 .send:disabled { color: var(--text-3); cursor: default; }
+
+.cv2 .pb-foot {
+  display: none;
+  align-items: center;
+  gap: var(--sp-2);
+  color: var(--text-3-strong);
+  font-size: var(--fs-11);
 }
+
+.cv2 .prompt-box.open .pb-foot { display: flex; }
+
+.cv2 .pb-hint { color: var(--text-3); }
+
+.cv2 .pb-count { margin-left: auto; font-variant-numeric: tabular-nums; }
 
 /* ---------- 缩放 / 计数 ---------- */
 .cv2 .zoom-pill {
@@ -1403,7 +1542,7 @@ textarea {
 .cv2 .lod-far .node .node-text,
 .cv2 .lod-far .node .handle,
 .cv2 .lod-far .node .node-menu { display: none; }
-.cv2 .lod-far .node-caption { font-size: 10px; }
+.cv2 .lod-far .node-caption { font-size: var(--fs-11); color: var(--text-3-strong); }
 .cv2 .lod-far .edges path { stroke-width: 0.8; opacity: 0.7; }
 .cv2 .lod-mid .node .node-text { -webkit-line-clamp: 3; }
 

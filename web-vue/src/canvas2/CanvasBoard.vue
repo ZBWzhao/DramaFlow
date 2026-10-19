@@ -34,9 +34,21 @@ const TYPE_LABEL = {
   audio: "音频", tts_gen: "旁白生成",
   text: "文本", prompt: "片段提示词", storyboard: "分镜", timeline: "时间线 / 成片",
 };
+/* 11 种节点 → 5 个数据家族 + 一个 glyph。形状不变，只用「2px 类型条 + 卡外 glyph」区分，
+ * 不靠给每种类型换形状/换底色（那会变成彩色贴纸墙）。 */
 const TYPE_GLYPH = {
-  asset: "◈", image: "▣", image_gen: "▣", video: "▷", video_gen: "▷",
-  audio: "♪", tts_gen: "♪", text: "¶", prompt: "✎", storyboard: "▤", timeline: "⧗",
+  asset: "⬡", image: "▣", image_gen: "◈",
+  video: "▷", video_gen: "◉",
+  audio: "♪", tts_gen: "♫",
+  text: "¶", prompt: "✎", storyboard: "▤",
+  timeline: "▥",
+};
+const TYPE_FAMILY = {
+  text: "string", prompt: "string", storyboard: "string",
+  image: "image", image_gen: "image", asset: "image",
+  video: "video", video_gen: "video",
+  audio: "audio", tts_gen: "audio",
+  timeline: "mixed",
 };
 const ATTEMPTS = {
   image_gen: ["生成"], video_gen: ["生成"], tts_gen: ["生成"],
@@ -187,6 +199,8 @@ const boardNodes = computed(() => (state.canvas.nodes || []).map((node) => {
     y: node.position?.y ?? 0,
     title: node.label || node.id,
     plain: TEXT_TYPES.has(type) && !media,
+    type,
+    fam: TYPE_FAMILY[type] || "mixed",
     glyph: TYPE_GLYPH[type] || "▣",
     tag: TYPE_LABEL[type] || type,
     dims: node.data?.width && node.data?.height ? `${node.data.width} × ${node.data.height}` : (TYPE_LABEL[type] || type),
@@ -223,7 +237,8 @@ const edges = computed(() => visibleEdges.value
     const from = byId.value[edge.source ?? edge.from];
     const to = byId.value[edge.target ?? edge.to];
     if (!from || !to) return null;
-    return edgePath(nodeAnchor(from, "right"), nodeAnchor(to, "left"));
+    // 连线颜色跟随上游数据家族：人一眼能看出"这条线送的是什么"
+    return { d: edgePath(nodeAnchor(from, "right"), nodeAnchor(to, "left")), fam: from.fam || "mixed" };
   })
   .filter(Boolean));
 
@@ -959,7 +974,7 @@ onMounted(() => {
           :style="{ transform: `translate(${view.x}px, ${view.y}px) scale(${view.z})` }"
         >
           <svg class="edges" width="6000" height="4000">
-            <path v-for="(d, index) in edges" :key="index" :d="d" />
+            <path v-for="(edge, index) in edges" :key="index" :d="edge.d" :data-fam="edge.fam" />
             <path
               v-if="edgeDraft"
               class="temp"

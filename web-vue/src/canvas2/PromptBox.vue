@@ -1,11 +1,15 @@
 <script setup>
-/* 卡下提示词框（B 版）。
+/* 卡下提示词框（阶段 2 重构）。
  *
- * 与 demo 的差别：这里的输入是**能真的打字、真的保存**的。
- * demo 版只是好看的壳；现在：
- *   · 文字类卡（提示词/文本/分镜）→ 保存进 assets/<id>/content.md
- *   · 生成类卡（图片/视频/旁白生成）→ 保存成 data.prompt，点 ↑ 只跑这一张
- *   · 素材类卡（资产/图片/视频/音频）→ 保存成 data.prompt（这张卡要什么），上传走工具条
+ * 交互：默认收起成 32px 单行摘要（只露出「这张卡要什么」），
+ * 聚焦后向下展开到 ~132px，露出字符数与发送提示；失焦收回。
+ *
+ * 为什么展开是「向下」而不是「盖住卡片」：
+ *   连线锚点只在卡片左右两侧的中点（geometry.js: nodeAnchor = node.y + h/2），
+ *   卡片下方是空白带，展开不会遮挡任何连线路径。
+ *
+ * 这里不做任何智能能力：没有「参考 / 标记 / 风格」按钮（后端没有对应契约），
+ * 也不显示假的模型/尺寸 chip（真实参数在审批面板里，来自 generation-plan）。
  */
 import { computed, nextTick, ref, watch } from "vue";
 
@@ -13,34 +17,34 @@ const props = defineProps({ node: { type: Object, required: true } });
 const emit = defineEmits(["send", "change"]);
 
 const text = ref(props.node.prompt || "");
-const editing = ref(false);
+const open = ref(false);
 const box = ref(null);
 
 watch(
   () => [props.node.id, props.node.prompt],
   () => {
-    if (!editing.value) text.value = props.node.prompt || "";
+    if (!open.value) text.value = props.node.prompt || "";
   },
 );
 
-const canSend = computed(() => text.value.trim().length > 0 || Boolean(props.node.generator));
+const canSend = computed(() => text.value.trim().length > 0);
 const placeholder = computed(() => {
-  if (props.node.plain) return "写下这张卡要什么；也可以写 {{node:x}} 引用其它卡";
-  if (props.node.generator) return "这一张要什么？写完点 ↑ 只跑这一张";
+  if (props.node.plain) return "写下这张卡要什么；{{node:x}} 可引用其它卡";
+  if (props.node.canGenerate) return "这一张要什么？写完点 ↑";
   return "可以直接上传，或在这里写一句要求";
 });
 
 function onInput() {
-  editing.value = true;
   emit("change", { node: props.node, text: text.value });
 }
 
 function send() {
-  editing.value = false;
+  open.value = false;
   emit("send", { node: props.node, text: text.value.trim() });
 }
 
 function focusBox() {
+  open.value = true;
   nextTick(() => box.value?.querySelector("textarea")?.focus());
 }
 
@@ -48,31 +52,24 @@ defineExpose({ focusBox });
 </script>
 
 <template>
-  <div ref="box" class="prompt-box nodrag" @click.stop @pointerdown.stop>
-    <div class="prompt-chips">
-      <button class="chip" type="button">＋ 参考</button>
-      <button class="chip" type="button">◷ 标记</button>
-      <button class="chip" type="button">❖ 风格</button>
-      <span class="grow"></span>
-      <button class="chip ghost" type="button" title="展开">⤢</button>
-    </div>
-
-    <textarea
-      v-model="text"
-      rows="3"
-      :placeholder="placeholder"
-      spellcheck="false"
-      @input="onInput"
-      @keydown.enter.exact.prevent="send"
-    ></textarea>
-
-    <div class="prompt-foot">
-      <span class="model-chip">❖ {{ node.model || "默认模型" }}</span>
-      <span class="sep"></span>
-      <span class="size-chip">{{ node.size || "—" }}</span>
-      <span class="grow"></span>
-      <span class="prompt-icons"><b>{{ node.textCount || 0 }}</b></span>
+  <div ref="box" class="prompt-box nodrag" :class="{ open }" @click.stop @pointerdown.stop>
+    <div class="pb-line">
+      <textarea
+        v-model="text"
+        rows="1"
+        :placeholder="placeholder"
+        spellcheck="false"
+        @input="onInput"
+        @focus="open = true"
+        @blur="open = false"
+        @keydown.enter.exact.prevent="send"
+        @keydown.esc="open = false"
+      ></textarea>
       <button class="send" :disabled="!canSend" title="发送（Enter）" @click="send">↑</button>
+    </div>
+    <div class="pb-foot">
+      <span class="pb-hint">Enter 发送</span>
+      <span class="pb-count">{{ text.length }} 字</span>
     </div>
   </div>
 </template>

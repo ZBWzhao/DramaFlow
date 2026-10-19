@@ -25,6 +25,19 @@ const emit = defineEmits([
 const drag = ref(null);
 const offset = ref({ x: 0, y: 0 });
 
+/* 状态机（只读投影）：形状先于颜色，灰度下也要能认出「排队 / 生成中 / 成功 / 失败」 */
+const statusKind = computed(() => {
+  const node = props.node;
+  if (node.failed || node.status === "error") return "error";
+  if (node.status === "discarded") return "discarded";
+  if (node.status === "unknown") return "unknown";
+  if (node.busy) return node.status === "generating" ? "generating" : "queued";
+  if (node.status === "done") return "done";
+  if (node.status === "draft") return "draft";
+  if (node.status === "ready") return "ready";
+  return "";
+});
+
 const shownOffset = computed(() => (drag.value ? offset.value : props.preview || { x: 0, y: 0 }));
 const left = computed(() => props.node.x + (shownOffset.value.x || 0));
 const top = computed(() => props.node.y + (shownOffset.value.y || 0));
@@ -99,6 +112,7 @@ function onOpenVideo() {
   <div
     class="node"
     :data-id="node.id"
+    :data-type="node.type"
     :class="{
       selected,
       'in-selection': inSelection && !selected,
@@ -107,6 +121,7 @@ function onOpenVideo() {
       'gen-busy': node.busy,
       'gen-failed': node.failed,
       'gen-done': node.justDone,
+      ['status-' + statusKind]: !!statusKind,
     }"
     :style="{ left: left + 'px', top: top + 'px', width: CARD_W + 'px' }"
     @pointerdown="onPointerDown"
@@ -131,6 +146,12 @@ function onOpenVideo() {
     </div>
 
     <div class="node-body" :class="{ 'is-text': node.plain, 'is-video': node.video }">
+      <span class="type-strip" aria-hidden="true"></span>
+      <span
+        v-if="statusKind"
+        class="status-mark"
+        aria-hidden="true"
+      >{{ statusKind === "done" ? "✓" : statusKind === "unknown" ? "?" : "!" }}</span>
       <template v-if="node.plain">
         <p class="node-text">{{ node.prompt }}</p>
       </template>
@@ -149,13 +170,22 @@ function onOpenVideo() {
 
         <!-- 生成状态遮罩：服务端状态 + 本地"已提交"共同驱动；失败给一键重试 -->
         <div v-if="node.busy" class="gen-overlay" aria-live="polite">
-          <span class="gen-spinner" aria-hidden="true"></span>
+          <span class="gen-bar" aria-hidden="true"></span>
+          <span class="gen-ring" aria-hidden="true"></span>
           <span class="gen-text">{{ node.busyLabel || "生成中…" }}</span>
         </div>
         <div v-else-if="node.failed" class="gen-overlay is-error">
           <span class="gen-fail-icon" aria-hidden="true">!</span>
           <span class="gen-text">生成失败</span>
           <button type="button" class="gen-retry" @click.stop="emit('retry', node)">重试</button>
+        </div>
+        <div v-else-if="statusKind === 'discarded'" class="gen-overlay">
+          <span class="gen-fail-icon" aria-hidden="true">!</span>
+          <span class="gen-text">结果已过期，未写入</span>
+        </div>
+        <div v-else-if="statusKind === 'unknown'" class="gen-overlay">
+          <span class="gen-unknown-icon" aria-hidden="true">?</span>
+          <span class="gen-text">结果不确定，待核对</span>
         </div>
 
         <div v-if="!node.video && node.attempts" class="attempts">
