@@ -452,4 +452,137 @@ onBeforeUnmount(() => {
   color: var(--text-3);
   cursor: not-allowed;
 }
+/* ---------- 阶段 C：壳层对齐 01-visual-spec（56 高 / 无分隔线 / 28 高 chip / 主按钮反白） ---------- */
+.cv2-topbar {
+  gap: 12px;
+  padding: 0 16px;
+  border-bottom: 0;
+  background: var(--bg-canvas);
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+  box-shadow: none;
+}
+.tb-icon {
+  width: 28px;
+  height: 28px;
+  border-radius: 8px;
+  color: var(--tx-2);
+  font-size: 13px;
+}
+.tb-icon:hover {
+  background: rgba(255, 255, 255, 0.06);
+  color: var(--tx-1);
+}
+.tb-project {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--tx-1);
+}
+.tb-project:hover {
+  background: rgba(255, 255, 255, 0.05);
+  border-color: transparent;
+}
+.tb-save {
+  color: var(--tx-3);
+  font-size: 11px;
+}
+.tb-save-dot {
+  width: 4px;
+  height: 4px;
+}
+.tb-views {
+  padding: 2px;
+  border: 0;
+  border-radius: 10px;
+  background: var(--bg-s1);
+  gap: 2px;
+}
+.tb-views button {
+  height: 24px;
+  padding: 0 10px;
+  border-radius: 8px;
+  color: var(--tx-2);
+  font-size: 12px;
+  line-height: 24px;
+}
+.tb-views button:hover {
+  color: var(--tx-1);
+}
+.tb-views button.active {
+  background: #3a3a3a;
+  color: var(--tx-1);
+  box-shadow: none;
+}
+.tb-model,
+.tb-problems {
+  height: 28px;
+  padding: 0 10px;
+  border: 1px solid var(--bd-subtle);
+  border-radius: 8px;
+  background: var(--bg-s1);
+  color: var(--tx-2);
+  font-size: 12px;
+}
+.tb-model:hover,
+.tb-problems:hover {
+  border-color: var(--bd-default);
+  color: var(--tx-1);
+}
+.tb-model-provider {
+  color: var(--tx-3);
+}
+.tb-model-name {
+  color: var(--tx-1);
+}
+/* 待处理 = 中性 chip + 一个 warning 状态点（warning 不再铺满整块底） */
+.tb-problems {
+  border-color: var(--bd-subtle);
+  color: var(--tx-2);
+}
+.tb-problems::before {
+  content: "";
+  width: 6px;
+  height: 6px;
+  margin-right: 2px;
+  border-radius: 50%;
+  background: var(--warning);
+}
+.tb-menu {
+  border: 1px solid var(--bd-default);
+  border-radius: 12px;
+  background: var(--bg-s1);
+  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.5);
+}
+.tb-menu-row.current {
+  background: #2e2e2e;
+  color: var(--tx-1);
+}
+.tb-btn {
+  height: 28px;
+  padding: 0 12px;
+  border: 1px solid var(--bd-subtle);
+  border-radius: 8px;
+  background: var(--bg-s1);
+  color: var(--tx-1);
+  font-size: 12px;
+}
+.tb-btn:hover {
+  border-color: var(--bd-default);
+  background: #262626;
+}
+/* 主按钮 = 反白（spec §2：主操作是唯一的"亮块"） */
+.tb-btn.primary {
+  border-color: transparent;
+  background: #f0f0f0;
+  color: #141414;
+  font-weight: 500;
+}
+.tb-btn.primary:hover {
+  background: #ffffff;
+}
+.tb-btn:disabled {
+  border-color: var(--bd-subtle);
+  background: var(--bg-s1);
+  color: var(--tx-3);
+}
 </style>

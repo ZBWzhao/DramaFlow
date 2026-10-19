@@ -18,7 +18,6 @@ import HeroPage from "./HeroPage.vue";
 import DockBar from "./DockBar.vue";
 import SidebarPanel from "./SidebarPanel.vue";
 import TopBar from "./TopBar.vue";
-import StatusBar from "./StatusBar.vue";
 import NodeStudio from "../components/NodeStudio.vue";
 import GenerationHistoryDrawer from "../components/GenerationHistoryDrawer.vue";
 import ContextMenu from "./ContextMenu.vue";
@@ -1136,14 +1135,6 @@ onMounted(() => {
 
       <input ref="uploadInput" type="file" accept="image/*,video/*,audio/*" class="hidden-upload" @change="onUploadPicked" />
     </main>
-
-    <StatusBar
-      :count="boardNodes.length"
-      :selected-count="selection.length"
-      :zoom="view.z"
-      :synced-at="savedAt"
-      :empty="!boardNodes.length"
-    />
 
     <div v-if="toast" class="toast">{{ toast }}</div>
   </div>
