@@ -35,7 +35,7 @@
             controls
             @ended="onEnded"
           ></video>
-          <div v-else class="empty" style="color: #6b7280">
+          <div v-else class="empty" style="color: var(--text-3)">
             选一段有片子的片段<br />或点「连播这一集」
           </div>
         </div>

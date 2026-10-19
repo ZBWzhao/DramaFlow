@@ -117,7 +117,7 @@
 
       <!-- 右主体 -->
       <div class="studio-main">
-        <div v-if="studio.error" class="empty" style="color: #a3243b">
+        <div v-if="studio.error" class="empty" style="color: var(--bad)">
           {{ studio.error }}
           <button class="btn sm" @click="reloadAll">重试</button>
         </div>

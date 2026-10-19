@@ -109,6 +109,33 @@
   --dur-slow: 300ms;
   --ease: cubic-bezier(0.2, 0.8, 0.2, 1);
 
+  /* ---------- 旧变量兼容层 ----------
+   * theme.css 的浅色变量名仍被 home/studio/legacy 画布消费；
+   * 这里统一映射到新 token，保证「画布 / 侧栏 / 首页」只有一套明暗。
+   * 不删除旧名 = 不动任何组件逻辑，只是让旧名解析到新值。 */
+  --bg-overlay: var(--panel);
+  --bg-elevated: var(--card);
+  --card-strong: var(--card-3);
+  --line-strong: var(--line-2);
+  --primary: var(--accent);
+  --success: var(--ok);
+  --warning: var(--warn);
+  --danger: var(--bad);
+  --violet: var(--accent); /* 去紫：全局只保留一个强调色 */
+  --grid-dot: rgba(255, 255, 255, 0.09);
+  --edge: rgba(150, 165, 190, 0.28);
+  --node-w: var(--card-w);
+  --ui-radius: var(--r-btn);
+  --ui-radius-small: 6px;
+  --ui-radius-large: var(--r-card);
+  --ui-radius-l: var(--r-card);
+  --ui-radius-m: var(--r-btn);
+  --ui-radius-medium: var(--r-btn);
+  --radius-pill: var(--r-pill);
+  --ctl-sm: 28px;
+  --ctl-md: 32px;
+  --ctl-lg: 40px;
+
   /* ---------- Element Plus 表现层对齐（只改观感，不动组件行为） ---------- */
   --el-border-radius-base: var(--r-btn);
   --el-border-radius-small: 6px;
@@ -117,6 +144,15 @@
   --el-box-shadow-light: var(--elev-2);
   --el-box-shadow-lighter: var(--elev-1);
   --el-color-primary: var(--accent);
+  --el-color-primary-light-3: color-mix(in srgb, var(--accent) 72%, var(--bg));
+  --el-color-primary-light-5: color-mix(in srgb, var(--accent) 52%, var(--bg));
+  --el-color-primary-light-7: color-mix(in srgb, var(--accent) 34%, var(--bg));
+  --el-color-primary-light-8: color-mix(in srgb, var(--accent) 24%, var(--bg));
+  --el-color-primary-light-9: color-mix(in srgb, var(--accent) 14%, var(--bg));
+  --el-color-success-light-9: color-mix(in srgb, var(--ok) 14%, var(--bg));
+  --el-color-warning-light-9: color-mix(in srgb, var(--warn) 14%, var(--bg));
+  --el-color-danger-light-9: color-mix(in srgb, var(--bad) 14%, var(--bg));
+  --el-color-info-light-9: color-mix(in srgb, var(--text-2) 12%, var(--bg));
   --el-color-success: var(--ok);
   --el-color-warning: var(--warn);
   --el-color-danger: var(--bad);

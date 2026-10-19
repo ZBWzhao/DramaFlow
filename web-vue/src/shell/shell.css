@@ -43,8 +43,8 @@
   font-size: 12px;
   font-weight: 700;
   letter-spacing: 0.5px;
-  color: #fff;
-  background: linear-gradient(135deg, var(--primary), var(--violet));
+  color: var(--text-on-accent);
+  background: var(--accent);
 }
 .home-name {
   display: flex;
@@ -130,9 +130,9 @@
   align-items: center;
   gap: 10px;
   padding: 12px 14px;
-  border: 1px solid #f0c6c6;
-  background: #fdf4f4;
-  color: #a3243b;
+  border: 1px solid var(--line-2);
+  background: var(--bad-soft);
+  color: var(--bad);
   border-radius: var(--ui-radius);
 }
 .home-loading {
@@ -196,8 +196,8 @@
   bottom: 8px;
   padding: 2px 7px;
   border-radius: var(--radius-pill);
-  background: rgba(12, 16, 22, 0.62);
-  color: #fff;
+  background: rgba(12, 16, 22, 0.66);
+  color: var(--text);
   font-size: 10px;
   letter-spacing: 0.2px;
 }
@@ -257,8 +257,8 @@
   height: 20px;
   border: 0;
   border-radius: 50%;
-  background: rgba(12, 16, 22, 0.5);
-  color: #fff;
+  background: rgba(12, 16, 22, 0.62);
+  color: var(--text);
   font-size: 13px;
   line-height: 1;
   cursor: pointer;
@@ -370,7 +370,7 @@
   color: var(--text-2);
 }
 .np-field > span i {
-  color: #d1435b;
+  color: var(--bad);
   font-style: normal;
 }
 .np-script-hint {
@@ -489,7 +489,7 @@
 }
 .np-error {
   font-size: 12px;
-  color: #a3243b;
+  color: var(--bad);
 }
 
 @media (max-width: 820px) {

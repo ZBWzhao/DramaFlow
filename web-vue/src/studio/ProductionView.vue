@@ -720,8 +720,8 @@ onMounted(async () => {
 .q-kf {
   padding: 0 5px;
   border-radius: var(--radius-pill);
-  background: #e9f7f0;
-  color: #116c4c;
+  background: var(--ok-soft);
+  color: var(--ok);
 }
 .q-st {
   flex: none;
@@ -733,16 +733,16 @@ onMounted(async () => {
   color: var(--text-3);
 }
 .q-st.done {
-  background: #e9f7f0;
-  color: #116c4c;
+  background: var(--ok-soft);
+  color: var(--ok);
 }
 .q-st.generating {
-  background: #eef4ff;
-  color: #2559b8;
+  background: var(--accent-soft);
+  color: var(--accent);
 }
 .q-st.error {
-  background: #fdeef1;
-  color: #a3243b;
+  background: var(--bad-soft);
+  color: var(--bad);
 }
 
 /* ── 卡片 ── */
@@ -871,8 +871,8 @@ onMounted(async () => {
   height: 104px;
   object-fit: cover;
   display: block;
-  background: #0d1117;
-  color: #6b7280;
+  background: var(--bg);
+  color: var(--text-3);
 }
 .take-card .cur {
   position: absolute;
@@ -881,7 +881,7 @@ onMounted(async () => {
   padding: 1px 6px;
   border-radius: var(--radius-pill);
   background: var(--primary);
-  color: #fff;
+  color: var(--text-on-accent);
   font-size: 9px;
 }
 .take-card .cap {
@@ -907,12 +907,12 @@ onMounted(async () => {
   line-height: 1.55;
 }
 .lint-item.error {
-  background: #fdeef1;
-  color: #8d1f33;
+  background: var(--bad-soft);
+  color: var(--bad);
 }
 .lint-item.warn {
-  background: #fff7e6;
-  color: #8a5200;
+  background: var(--warn-soft);
+  color: var(--warn);
 }
 .lint-item.info {
   background: var(--card);
@@ -964,8 +964,8 @@ onMounted(async () => {
   font-size: 11px;
 }
 .act-meta .chip.on {
-  background: #e9f7f0;
-  color: #116c4c;
+  background: var(--ok-soft);
+  color: var(--ok);
 }
 .act-bar .job-bar {
   display: flex;
@@ -975,8 +975,8 @@ onMounted(async () => {
   color: var(--text-2);
 }
 .btn.danger {
-  border-color: #f0b7c3;
-  color: #a3243b;
+  border-color: color-mix(in srgb, var(--bad) 45%, var(--line));
+  color: var(--bad);
 }
 
 /* ── 预览 ── */
@@ -984,7 +984,7 @@ onMounted(async () => {
   display: flex;
   justify-content: center;
   align-items: center;
-  background: #0d1117;
+  background: var(--bg);
   padding: 10px 0;
 }
 /* 竖屏片子按高度铺满，避免两侧留大黑边（宽度交给比例决定） */
@@ -993,7 +993,7 @@ onMounted(async () => {
   width: auto;
   max-width: 100%;
   object-fit: contain;
-  background: #0d1117;
+  background: var(--bg);
   display: block;
 }
 .preview-empty {
@@ -1004,7 +1004,7 @@ onMounted(async () => {
   text-align: center;
   font-size: 12px;
   line-height: 1.9;
-  color: #6b7280;
+  color: var(--text-3);
 }
 .preview-foot {
   display: flex;
