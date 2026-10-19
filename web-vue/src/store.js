@@ -1334,19 +1334,27 @@ async function stop() {
   }
 }
 
-async function prepareGenerationReview() {
+/* `only` = 这一次要跑的生成卡。审批面板按它过滤 jobs；确认后必须用同一批 id 走
+ * approvals → run（服务端审批哈希会算 only，换一批就会被拒）。 */
+async function prepareGenerationReview({ only = [] } = {}) {
   const plan = await getJSON(`/api/canvas/generation-plan?name=${encodeURIComponent(state.canvasName)}`);
-  state.generationReview = plan.total ? {
+  const target = Array.isArray(only) ? only.filter(Boolean) : [];
+  const provider = state.mediaProviders.find((item) => item.id === state.mediaProvider);
+  // 单卡/选区即使不在批量计划里（如 tts_gen）也要弹审批：花钱的事必须过一次确认。
+  state.generationReview = plan.total || target.length ? {
     ...plan,
+    only: target,
     provider: state.mediaProvider,
     model: state.mediaModel,
+    mock: Boolean(provider?.mock),
     requestedAt: Date.now(),
   } : null;
   return plan;
 }
 
 async function approveGeneration() {
-  return runCanvas({ approved: true });
+  const only = Array.isArray(state.generationReview?.only) ? state.generationReview.only : [];
+  return runCanvas({ approved: true, only });
 }
 
 async function prepareCompositionReview() {

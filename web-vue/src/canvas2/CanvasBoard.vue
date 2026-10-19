@@ -24,6 +24,7 @@ import GenerationHistoryDrawer from "../components/GenerationHistoryDrawer.vue";
 import ContextMenu from "./ContextMenu.vue";
 import NodeSearch from "./NodeSearch.vue";
 import VideoLightbox from "./VideoLightbox.vue";
+import ApprovalSheet from "./ApprovalSheet.vue";
 
 /* 顶栏的项目管理入口由工作台外壳（CanvasWorkspace）负责，这里只转发 */
 const emit = defineEmits(["open-project"]);
@@ -507,27 +508,43 @@ async function generateOne(node) {
     showToast("这张卡正在生成，等它完成（或到「历史」里看上一版）");
     return;
   }
-  const provider = state.mediaProviders.find((item) => item.id === state.mediaProvider);
-  const cost = provider?.mock ? "Mock 占位生成，不产生费用。" : "真实 Provider，可能产生费用。";
+  await openApproval([raw.id]);
+}
+
+/* 生成前一律走审批面板：参数、参考、可生成性都由后端 generation-plan 决定，
+ * 面板只负责把这一次要花什么摊开，确认后才 approvals → run。 */
+async function openApproval(ids) {
   try {
-    await ElMessageBox.confirm(
-      `只跑「${raw.label || raw.id}」这一张，模型：${state.mediaModel || "默认"}。${cost}`,
-      "单卡重新生成",
-      { confirmButtonText: "开始生成", cancelButtonText: "先不跑", type: provider?.mock ? "info" : "warning" },
-    );
-  } catch {
+    await actions.prepareGenerationReview({ only: ids });
+  } catch (err) {
+    ElMessage.error({ message: `读取生成计划失败：${err.message || err}`, duration: 5000 });
     return;
   }
-  markPending([raw.id], true);
+  if (!state.generationReview) showToast("没有可生成的卡片");
+}
+
+async function approveReview() {
+  const review = state.generationReview;
+  if (!review || state.canvasBusy) return;
+  const scoped = Array.isArray(review.only) ? review.only : [];
+  const scope = scoped.length
+    ? scoped
+    : boardNodes.value.filter((node) => GEN_TYPES.has(node.type)).map((node) => node.id);
+  if (!scope.length) {
+    actions.dismissGenerationReview();
+    return;
+  }
+  markPending(scope, true);
+  showToast(`已提交 ${scope.length} 张，生成中…`);
   try {
-    await actions.runCanvas({ approved: true, only: [raw.id] });
+    await actions.approveGeneration();
     await actions.loadCanvas();
-    flashDone([raw.id]);
-    showToast("已生成，可在「历史」里对比版本");
+    flashDone(scope);
+    showToast(scope.length > 1 ? `已生成 ${scope.length} 张` : "已生成，可在「历史」里对比版本");
   } catch (err) {
     ElMessage.error({ message: `生成失败：${err.message || err}`, duration: 5000 });
   } finally {
-    markPending([raw.id], false);
+    markPending(scope, false);
   }
 }
 
@@ -742,28 +759,7 @@ async function batchGenerate() {
     showToast("选中的卡都在生成中，等它们完成");
     return;
   }
-  const provider = state.mediaProviders.find((item) => item.id === state.mediaProvider);
-  try {
-    await ElMessageBox.confirm(
-      `只跑选中的 ${runnable.length} 张生成卡，模型：${state.mediaModel || "默认"}。${provider?.mock ? "Mock 占位生成，不产生费用。" : "真实 Provider，可能产生费用。"}`,
-      "批量生成选中卡片",
-      { confirmButtonText: "开始生成", cancelButtonText: "先不跑", type: provider?.mock ? "info" : "warning" },
-    );
-  } catch {
-    return;
-  }
-  markPending(runnable, true);
-  showToast(`已提交 ${runnable.length} 张，生成中…`);
-  try {
-    await actions.runCanvas({ approved: true, only: runnable });
-    await actions.loadCanvas();
-    flashDone(runnable);
-    showToast(`已生成 ${runnable.length} 张`);
-  } catch (err) {
-    ElMessage.error({ message: `批量生成失败：${err.message || err}`, duration: 5000 });
-  } finally {
-    markPending(runnable, false);
-  }
+  await openApproval(runnable);
 }
 
 /* ---------- 删除节点 ---------- */
@@ -1055,6 +1051,13 @@ onMounted(() => {
       />
 
       <VideoLightbox v-if="videoOpen" :video="videoOpen" @close="videoOpen = null" />
+
+      <ApprovalSheet
+        :review="state.generationReview"
+        :busy="state.canvasBusy"
+        @approve="approveReview"
+        @cancel="actions.dismissGenerationReview()"
+      />
 
       <input ref="uploadInput" type="file" accept="image/*,video/*,audio/*" class="hidden-upload" @change="onUploadPicked" />
     </main>

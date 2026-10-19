@@ -826,19 +826,6 @@ body {
 .stage-problems { grid-column: 2 / -1; margin: 2px 0 3px; padding-left: 17px; color: var(--danger); }
 .production-progress footer { margin-top: 8px; padding-top: 9px; border-top: 1px dashed var(--line); }
 .part-note { display: flex; align-items: center; gap: 8px; padding: 8px 12px; font-size: 12px; }
-.generation-review {
-  margin: 10px 8px; padding: 12px 14px;
-  border: 1px solid color-mix(in srgb, var(--primary) 55%, var(--line));
-  border-radius: var(--ui-radius); background: color-mix(in srgb, var(--primary) 8%, var(--card));
-  box-shadow: 0 8px 24px rgba(31,35,41,.10); font-size: 13px;
-}
-.generation-review p { margin: 9px 0; color: var(--text-2); }
-.review-head, .review-actions { display: flex; align-items: center; gap: 8px; }
-.review-head { justify-content: space-between; }
-.review-actions { justify-content: flex-end; }
-.mock-pill, .cost-pill { padding: 2px 8px; border-radius: var(--radius-pill); font-size: 11px; }
-.mock-pill { color: var(--success); background: color-mix(in srgb, var(--success) 12%, transparent); }
-.cost-pill { color: var(--warning); background: color-mix(in srgb, var(--warning) 14%, transparent); }
 .usage-strip { white-space: nowrap; }
 .mono { font-family: ui-monospace, Consolas, monospace; }
 

@@ -114,15 +114,6 @@ async function switchBranch(item, offset) {
   }
 }
 
-async function approveGeneration() {
-  try {
-    const res = await actions.approveGeneration();
-    ElMessage.success(`已批准并完成 ${res.done}/${res.total} 个生成任务`);
-  } catch (err) {
-    ElMessage.error(`生成失败：${err.message}`);
-  }
-}
-
 const liveAssistant = computed(() => {
   for (let i = state.feed.length - 1; i >= 0; i -= 1) {
     const item = state.feed[i];
@@ -333,26 +324,6 @@ watch(lastActivity, () => scrollToBottom());
           <span class="dim">{{ item.text }}</span>
         </div>
       </template>
-
-      <div v-if="state.generationReview" class="generation-review">
-        <div class="review-head">
-          <b>生成前需要你拍板</b>
-          <span :class="currentProvider?.mock ? 'mock-pill' : 'cost-pill'">
-            {{ currentProvider?.mock ? "Mock · 不扣费" : "真实 Provider · 可能产生费用" }}
-          </span>
-        </div>
-        <p>
-          画布 {{ state.generationReview.canvas }} 有
-          <b>{{ state.generationReview.ready }}/{{ state.generationReview.total }}</b>
-          个节点可生成，将使用 {{ providerLabel }} / {{ state.mediaModel }}。
-        </p>
-        <div class="review-actions">
-          <el-button size="small" @click="actions.dismissGenerationReview()">暂不生成</el-button>
-          <el-button size="small" type="primary" :loading="state.canvasBusy" @click="approveGeneration">
-            批准并开始生成
-          </el-button>
-        </div>
-      </div>
 
       <!-- 还没收到任何事件时的占位：发完消息不该只有一句提问留在屏幕上 -->
       <div v-if="showLiveRow" class="msg assistant">
