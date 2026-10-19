@@ -1118,7 +1118,9 @@ def _materialize_prompt(prompt: str, refs: list[dict[str, Any]]) -> str:
         label = name_by_ordinal.get(ordinal)
         return f"图片{ordinal}{label}" if label else match.group(0)
 
-    body = re.sub(r"(?<!图片)(?<!\d)@([^\s@，,。；;：:、）)】\]\"'“”]{1,24})", replace, prompt)
+    # 左括号也要截断：服务端渲染成 `@林直人（画面左三分之一；…）`，
+    # 否则物化时会把括号里的描述当成名字的一部分查不到，引用就留在正文里了。
+    body = re.sub(r"(?<!图片)(?<!\d)@([^\s@，,。；;：:、（）()【】\[\]\"'“”]{1,24})", replace, prompt)
     body = re.sub(r"\{\{\s*ref\s*(\d+)\s*\}\}", replace_ref, body, flags=re.IGNORECASE)
     return "\n".join(lines) + "\n\n" + body
 
@@ -1674,6 +1676,7 @@ async def generate_look(node_id: str, canvas: str, body: AssetGenerateRequest) -
             "generated": True,
             "provider": result.provider,
             "mock": bool(result.mock),
+            "model": model,
             "size": size,
             "created_at": time.time(),
         }
@@ -2308,7 +2311,7 @@ def _sync_rendered_prompts(graph: Canvas) -> int:
 
 
 def _repair_links(graph: Canvas) -> int:
-    """补齐 Agent 漏掉的「分镜 → 提示词」连线，返回补了几条。
+    """补齐 Agent 漏掉的「分镜 → 提示词」连线，并重渲染服务端正文，返回改动条数。
 
     这条边是制作页读分镜表和台词的唯一入口：漏了不会报错，只会让片段详情
     悄无声息地变空。图上的不变量就该由系统保证，不能指望模型每次都记得连。
@@ -2333,8 +2336,9 @@ def _repair_links(graph: Canvas) -> int:
         except Exception:  # noqa: BLE001 - 端口/类型不合就是模型建错了，跳过即可
             continue
         added += 1
-    _sync_rendered_prompts(graph)
-    return added
+    # 重渲染也算改动：只补连线时 added 可能为 0，但正文已经写进画布，
+    # 调用方靠返回值决定要不要落盘，漏算就会让 data.prompt 只活在内存里。
+    return added + _sync_rendered_prompts(graph)
 
 
 def _produce_counts(graph: Canvas) -> dict[str, int]:
