@@ -9,6 +9,7 @@ import { actions, bootstrap, state } from "./store.js";
 import { goHome, openStudioForCurrent } from "./shell/shellStore.js";
 import { studio } from "./studio/studioStore.js";
 import CanvasPanel from "./components/CanvasPanel.vue";
+import CanvasBoard from "./canvas2/CanvasBoard.vue";
 import FloatingAgent from "./components/FloatingAgent.vue";
 import InfoDrawer from "./components/InfoDrawer.vue";
 import ExportDialog from "./components/ExportDialog.vue";
@@ -28,7 +29,11 @@ onMounted(async () => {
   }
 });
 
-const agentVisible = ref(true);
+/* Agent 默认收成右下角一颗悬浮球（LibTV 形态）：画布先给内容让路，
+ * 需要对话时再点开，不常驻占掉右侧 1/3。 */
+const agentVisible = ref(false);
+// 新画布（demo 引擎）默认启用；?legacy=1 回退到 @vue-flow 版
+const useLegacyCanvas = ref(location.search.includes("legacy=1"));
 const projectPanelOpen = ref(false);
 const currentProjectTitle = computed(
   () => state.canvasMeta[state.canvasName]?.story_title || state.canvasName || "未选择项目",
@@ -36,8 +41,9 @@ const currentProjectTitle = computed(
 </script>
 
 <template>
-  <div class="app">
-    <CanvasPanel />
+  <div class="app canvas-app">
+    <CanvasPanel v-if="useLegacyCanvas" />
+    <CanvasBoard v-else />
 
     <!-- 左上：返回项目列表 + 项目入口 + 制片台。画布已降级，制片台才是主界面。 -->
     <div class="dock dock-left">

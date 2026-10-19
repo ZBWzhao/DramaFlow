@@ -10,6 +10,9 @@ import "@vue-flow/controls/dist/style.css";
 import "@vue-flow/minimap/dist/style.css";
 
 import "./styles/theme.css";
+// 画布视图专用暗色主题（作用域 .canvas-app，不影响首页/制片台）
+import "./styles/canvas.css";
+import "./styles/canvas2.css";
 import App from "./App.vue";
 
 const app = createApp(App);
