@@ -12,6 +12,7 @@ import { actions, state } from "../store.js";
 import { assetUrl, mediaOf } from "../utils.js";
 import { CARD_W, cardHeight, clamp, edgePath, nodeAnchor, portOffset } from "./geometry.js";
 import { dragMoves } from "./positions.js";
+import { generationProgress } from "./progress.js";
 import { goHome, openStudioForCurrent, openStudioTab } from "../shell/shellStore.js";
 import NodeCard from "./NodeCard.vue";
 import HeroPage from "./HeroPage.vue";
@@ -254,6 +255,10 @@ const boardNodes = computed(() => (state.canvas.nodes || []).map((node) => {
     status: node.status || "",
     busy: pendingGen.value.has(node.id) || ["queued", "generating"].includes(node.status),
     busyLabel: node.status === "queued" ? "排队中…" : node.status === "generating" ? "生成中…" : "已提交…",
+    // 进度只读服务端写的 data.generation_progress；没有时按 0/3 起点画，不编百分比
+    progress: pendingGen.value.has(node.id) || ["queued", "generating"].includes(node.status)
+      ? generationProgress(node.data)
+      : null,
     failed: node.status === "error",
     justDone: doneFlash.value.has(node.id),
     attempts: ATTEMPTS[type] || null,

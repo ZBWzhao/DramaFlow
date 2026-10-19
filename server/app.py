@@ -1708,6 +1708,41 @@ async def _execute_composition_job(task: MediaJob, payload: dict[str, Any]) -> d
     return {"ok": passed, "canvas": task.canvas, "kind": "composition", "total": total, "done": done, "results": results}
 
 
+# 生成进度只做「粗粒度阶段」：真实模型调用是一个阻塞请求，拿不到更细的百分比。
+# 阶段数固定为 3，前端按 step/total 画进度环；写失败不影响生成结果。
+GENERATION_PROGRESS_TOTAL = 3
+
+
+async def _write_generation_progress(
+    canvas_name: str, node_id: str, generation_id: str, *, stage: str, step: int
+) -> None:
+    """把「生成到第几步」写到节点 data 上，前端轮询画布时就能显示进度环。"""
+
+    def mutate(board: Canvas) -> bool:
+        node = board.nodes.get(node_id)
+        # 旧任务不能覆盖新一代任务的进度；节点被删也直接放弃。
+        if node is None or node.data.get("active_generation_id") != generation_id:
+            return False
+        board.update_node(
+            node_id,
+            invalidate_generation=False,
+            data={
+                "generation_progress": {
+                    "stage": stage,
+                    "step": step,
+                    "total": GENERATION_PROGRESS_TOTAL,
+                    "updated_at": time.time(),
+                }
+            },
+        )
+        return True
+
+    try:
+        await _mutate_canvas_with_retry(canvas_name, mutate)
+    except CanvasConflictError:
+        pass  # 进度只是展示信息，写不进去不能拖垮生成
+
+
 async def _execute_media_job(task: MediaJob) -> dict[str, Any]:
     """Worker 使用审批时冻结的提示词和参数执行，不重新读取可能已变化的输入。"""
     payload = json.loads(task.payload_json)
@@ -1776,7 +1811,12 @@ async def _execute_media_job(task: MediaJob) -> dict[str, Any]:
                 def apply_replay(board: Canvas) -> bool:
                     if owned_node(board) is None:
                         return False
-                    board.update_node(job["node_id"], status=replay_status)
+                    board.update_node(
+                        job["node_id"],
+                        status=replay_status,
+                        invalidate_generation=False,
+                        data={"generation_progress": None},
+                    )
                     return True
 
                 try:
@@ -1795,7 +1835,12 @@ async def _execute_media_job(task: MediaJob) -> dict[str, Any]:
                     def apply_unknown(board: Canvas) -> bool:
                         if owned_node(board) is None:
                             return False
-                        board.update_node(job["node_id"], status="error")
+                        board.update_node(
+                            job["node_id"],
+                            status="error",
+                            invalidate_generation=False,
+                            data={"generation_progress": None},
+                        )
                         return True
 
                     try:
@@ -1811,7 +1856,19 @@ async def _execute_media_job(task: MediaJob) -> dict[str, Any]:
         def apply_generating(board: Canvas) -> bool:
             if owned_node(board) is None:
                 return False
-            board.update_node(job["node_id"], status="generating")
+            board.update_node(
+                job["node_id"],
+                status="generating",
+                invalidate_generation=False,
+                data={
+                    "generation_progress": {
+                        "stage": "submitting",
+                        "step": 1,
+                        "total": GENERATION_PROGRESS_TOTAL,
+                        "updated_at": time.time(),
+                    }
+                },
+            )
             return True
 
         if not await _mutate_canvas_with_retry(canvas_name, apply_generating):
@@ -1829,7 +1886,12 @@ async def _execute_media_job(task: MediaJob) -> dict[str, Any]:
                 def apply_not_executing(board: Canvas) -> bool:
                     if owned_node(board) is None:
                         return False
-                    board.update_node(job["node_id"], status="error")
+                    board.update_node(
+                            job["node_id"],
+                            status="error",
+                            invalidate_generation=False,
+                            data={"generation_progress": None},
+                        )
                     return True
 
                 try:
@@ -1880,7 +1942,12 @@ async def _execute_media_job(task: MediaJob) -> dict[str, Any]:
             def apply_failed(board: Canvas) -> bool:
                 if owned_node(board) is None:
                     return False
-                board.update_node(job["node_id"], status="error")
+                board.update_node(
+                            job["node_id"],
+                            status="error",
+                            invalidate_generation=False,
+                            data={"generation_progress": None},
+                        )
                 return True
 
             try:
@@ -1898,6 +1965,10 @@ async def _execute_media_job(task: MediaJob) -> dict[str, Any]:
                 await registry.invocations.complete(invocation.invocation_id, failed, failed=True)
             results.append({**failed, "invocation_id": invocation.invocation_id})
             continue
+        # 拿到远端媒体后还要下载/落盘/写回画布，这最后一段也值得让用户看到。
+        await _write_generation_progress(
+            canvas_name, job["node_id"], job["generation_id"], stage="writing", step=2
+        )
         port = "image" if job["kind"] == "image" else "video"
         # take_id 在重试之外只生成一次：重试是"把同一笔增量再贴一遍"，不是"再生成一版"。
         take_id = f"take_{uuid.uuid4().hex[:12]}"
@@ -1922,6 +1993,7 @@ async def _execute_media_job(task: MediaJob) -> dict[str, Any]:
                 shot_no=1,
                 mode="canvas",
             )
+            board.update_node(job["node_id"], invalidate_generation=False, data={"generation_progress": None})
             return True
 
         if not await _mutate_canvas_with_retry(canvas_name, apply_success):

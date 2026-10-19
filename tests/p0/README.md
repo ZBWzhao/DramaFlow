@@ -11,7 +11,7 @@ $env:PYTHONUTF8="1"   # Windows 控制台中文输出
 python -m pytest tests/p0 -q
 ```
 
-当前预期：**58 passed / 0 failed** —— 已修复并转绿的有：
+当前预期：**60 passed / 0 failed** —— 已修复并转绿的有：
 P0-2（写接口 revision 契约）、P0-1（Worker 写回 CAS 重试）、P0-8（审批/入队事务化）、
 P0-7（无连线按自身提示词生成）、P0-9（新式正文读取与体检分级）、P0-10（项目画幅/分镜时长进入生成参数）、
 合成路径原子化（compose 与生成同构的提交点，§11）、
@@ -20,13 +20,14 @@ P0-13（任务终态四态语义：succeeded/failed/discarded/unknown，§13）�
 P0-14（异常边界收窄：编程错误 500 + traceback、临时故障 503 可重试，§14）、
 P0-6（删除节点：级联删边 + 严格 revision，生成中删除按过期丢弃，§15）、
 P0-3（拖拽回弹：坐标先写回本地再提交，多选整组落点一次提交，§16——这条的回归网在前端，见下）、
-P0-5（视频卡：三层懒加载 + 悬停预览 + 只读灯箱，§17——回归网同样在前端）。
+P0-5（视频卡：三层懒加载 + 悬停预览 + 只读灯箱，§17——回归网同样在前端）、
+生成进度（Worker 把粗粒度阶段写到 `node.data.generation_progress`，前端画真进度环；总/清空两态见 `test_p0_16_progress.py`）。
 
 前端这批的回归网是另一套（`tests/p0` 是 Python；拖拽落点、时长格式化、首帧地址都是纯前端逻辑）：
 
 ```powershell
 cd web-vue
-npm run test:unit    # node --test "tests/**/*.test.mjs" → 9 passed（positions 5 + video 4）
+npm run test:unit    # node --test "tests/**/*.test.mjs" → 13 passed（positions 5 + video 4 + progress 4）
 npm run build
 ```
 
@@ -106,6 +107,8 @@ npm run build
 | | `test_delete_missing_node_returns_404` | ✅ | 删不存在的节点 → 404 |
 | | `test_deleted_prompt_node_makes_generation_not_ready` | ✅ | 删提示词节点后，生成卡回到 `ready=False` 且有 `ready_reason` |
 | | `test_deleting_node_during_generation_discards_result` | ✅ | 生成中删节点：任务 `discarded`、不复活节点、不落 take、不判失败 |
+| `test_p0_16_progress.py` | `test_progress_is_written_while_generating_and_cleared_after` | ✅ | 生成中 `data.generation_progress` 有 step/total（total=3），成功后清空、产物仍写入 |
+| | `test_progress_is_cleared_when_generation_fails` | ✅ | Provider 失败后进度清空、节点 `error`，不残留"生成中 2/3" |
 
 ## 已核实的现场（2026-02，HEAD 工作区）
 

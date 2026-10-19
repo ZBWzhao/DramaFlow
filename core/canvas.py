@@ -497,7 +497,7 @@ class Canvas:
         self.nodes[node.id] = node
         return node
 
-    def update_node(self, node_id: str, **fields: Any) -> Node:
+    def update_node(self, node_id: str, *, invalidate_generation: bool = True, **fields: Any) -> Node:
         node = self.require(node_id)
         if fields.get("status") is not None and fields["status"] not in NODE_STATUS:
             raise CanvasError(f"未知状态：{fields['status']}（可选：{', '.join(NODE_STATUS)}）")
@@ -510,9 +510,12 @@ class Canvas:
                 # A user/Agent edit made while a Worker is rendering must
                 # invalidate that Worker's generation token.  The Worker only
                 # writes ``active_generation_id`` itself, so that internal
-                # update is exempt from invalidation.
+                # update is exempt from invalidation.  Worker-internal writes
+                # (进度/状态) pass invalidate_generation=False for the same
+                # reason: a task must never invalidate its own token.
                 if (
                     key == "data"
+                    and invalidate_generation
                     and node.data.get("active_generation_id")
                     and any(name != "active_generation_id" for name in fields[key])
                 ):

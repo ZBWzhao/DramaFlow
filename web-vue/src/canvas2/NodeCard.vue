@@ -8,6 +8,7 @@ import { CAPTION_GAP, CAPTION_H, CARD_W, portOffset } from "./geometry.js";
 import NodeToolbar from "./NodeToolbar.vue";
 import PromptBox from "./PromptBox.vue";
 import VideoPlayer from "./VideoPlayer.vue";
+import { progressDash, progressText } from "./progress.js";
 
 const props = defineProps({
   node: { type: Object, required: true },
@@ -57,6 +58,10 @@ const statusKind = computed(() => {
   if (node.status === "ready") return "ready";
   return "";
 });
+
+/* 进度环：后端给 step/total（1 调用模型 / 2 写回画布），没有数据时按 0/3 画起点 */
+const ring = computed(() => progressDash(props.node.progress));
+const stepText = computed(() => progressText(props.node.progress));
 
 const shownOffset = computed(() => (drag.value ? offset.value : props.preview || { x: 0, y: 0 }));
 const left = computed(() => props.node.x + (shownOffset.value.x || 0));
@@ -192,8 +197,19 @@ function onOpenVideo() {
 
         <!-- 生成状态：服务端状态 + 本地"已提交"共同驱动；失败给一键重试 -->
         <div v-if="node.busy" class="gen-overlay" aria-live="polite">
-          <span class="gen-ring" aria-hidden="true"></span>
-          <span class="gen-text">{{ node.busyLabel || "生成中" }}</span>
+          <svg class="gen-ring" viewBox="0 0 32 32" aria-hidden="true">
+            <circle class="gen-ring-track" cx="16" cy="16" r="13" />
+            <circle
+              class="gen-ring-bar"
+              cx="16"
+              cy="16"
+              r="13"
+              :stroke-dasharray="ring.circumference"
+              :stroke-dashoffset="ring.offset"
+            />
+          </svg>
+          <span class="gen-text">{{ node.progress?.label || node.busyLabel || "生成中" }}…</span>
+          <span v-if="stepText" class="gen-steps">{{ stepText }}</span>
         </div>
         <div v-else-if="node.failed" class="gen-overlay is-error">
           <span class="gen-fail-icon" aria-hidden="true">!</span>

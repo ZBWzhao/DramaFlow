@@ -488,21 +488,35 @@ textarea {
   pointer-events: none;
 }
 
-/* 生成中：2px 青环（顶边高亮），不是满屏 loading 图标 */
+/* 生成中：2px 青环 + step/total。环是「真进度」（后端只给粗粒度阶段，不编百分比）。 */
 .cv2 .gen-ring {
-  width: 22px;
-  height: 22px;
-  border-radius: 50%;
-  border: 2px solid rgba(88, 216, 248, 0.22);
-  border-top-color: var(--accent);
-  animation: cv2-gen-spin 1s linear infinite;
+  width: 28px;
+  height: 28px;
+  transform: rotate(-90deg);
 }
 
-/* 排队中：虚线环（静态），与生成中的实线环灰度下也可区分 */
-.cv2 .node.status-queued .gen-ring {
-  border-style: dashed;
-  border-top-color: var(--accent-line);
-  animation: none;
+.cv2 .gen-ring-track,
+.cv2 .gen-ring-bar {
+  fill: none;
+  stroke-width: 2;
+}
+
+.cv2 .gen-ring-track { stroke: rgba(88, 216, 248, 0.22); }
+
+.cv2 .gen-ring-bar {
+  stroke: var(--accent);
+  stroke-linecap: round;
+  transition: stroke-dashoffset 0.45s var(--ease);
+}
+
+/* 还没有任何进度（排队中）：整环慢慢转，表示"在动但不假装知道到哪了" */
+.cv2 .node.status-queued .gen-ring { animation: cv2-gen-spin 1.6s linear infinite; }
+
+.cv2 .gen-steps {
+  font-size: var(--fs-11);
+  color: var(--text-3);
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.04em;
 }
 
 @keyframes cv2-gen-spin {
