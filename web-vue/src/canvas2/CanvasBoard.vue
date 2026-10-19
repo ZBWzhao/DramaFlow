@@ -61,6 +61,36 @@ const TEXT_TYPES = new Set(["prompt", "text", "storyboard"]);
 const GEN_TYPES = new Set(["image_gen", "video_gen", "tts_gen"]);
 
 const view = ref({ x: 0, y: 0, z: 0.85 });
+
+/* 拖拽/缩放把事件频率直接打到响应式上，55 节点的画布会掉帧。
+ * 这里把「最近一次目标状态」攒到下一帧再统一写入：事件再多，一帧只渲染一次。 */
+let viewRaf = 0;
+let pendingView = null;
+function currentView() {
+  return pendingView || view.value;
+}
+function setView(next) {
+  pendingView = next;
+  if (viewRaf) return;
+  viewRaf = requestAnimationFrame(() => {
+    viewRaf = 0;
+    const apply = pendingView;
+    pendingView = null;
+    if (apply) view.value = apply;
+  });
+}
+
+let dragRaf = 0;
+let pendingDrag = null;
+function setDragPreview(payload) {
+  pendingDrag = payload;
+  if (dragRaf) return;
+  dragRaf = requestAnimationFrame(() => {
+    dragRaf = 0;
+    dragPreview.value = pendingDrag;
+    pendingDrag = null;
+  });
+}
 const tab = ref("canvas");
 const keyword = ref("");
 const toast = ref("");
@@ -350,7 +380,8 @@ function onPointerDown(event) {
   if (event.target.closest?.(".node")) return;
   // 中键 / 按住空格 = 平移；左键拖空白 = 框选（和主流画布一致）
   if (event.button === 1 || spaceDown.value) {
-    pan.value = { sx: event.clientX, sy: event.clientY, vx: view.value.x, vy: view.value.y };
+    const base = currentView();
+    pan.value = { sx: event.clientX, sy: event.clientY, vx: base.x, vy: base.y };
     return;
   }
   if (event.button !== 0) return;
@@ -365,7 +396,7 @@ function onPointerDown(event) {
 function onPointerMove(event) {
   if (pan.value) {
     const { sx, sy, vx, vy } = pan.value;
-    view.value = { ...view.value, x: vx + (event.clientX - sx), y: vy + (event.clientY - sy) };
+    setView({ ...currentView(), x: vx + (event.clientX - sx), y: vy + (event.clientY - sy) });
     return;
   }
   if (marquee.value) {
@@ -415,18 +446,20 @@ function onWheel(event) {
   const rect = stageRect();
   const px = event.clientX - rect.left;
   const py = event.clientY - rect.top;
-  const z = clamp(view.value.z * Math.exp(-event.deltaY * 0.0016), 0.15, 2.2);
-  const k = z / view.value.z;
-  view.value = { z, x: px - (px - view.value.x) * k, y: py - (py - view.value.y) * k };
+  const base = currentView();
+  const z = clamp(base.z * Math.exp(-event.deltaY * 0.0016), 0.15, 2.2);
+  const k = z / base.z;
+  setView({ z, x: px - (px - base.x) * k, y: py - (py - base.y) * k });
 }
 
 function zoomBy(factor) {
   const rect = stageRect();
   const px = rect.width / 2;
   const py = rect.height / 2;
-  const z = clamp(view.value.z * factor, 0.15, 2.2);
-  const k = z / view.value.z;
-  view.value = { z, x: px - (px - view.value.x) * k, y: py - (py - view.value.y) * k };
+  const base = currentView();
+  const z = clamp(base.z * factor, 0.15, 2.2);
+  const k = z / base.z;
+  setView({ z, x: px - (px - base.x) * k, y: py - (py - base.y) * k });
 }
 
 function onStageClick(event) {
@@ -715,7 +748,7 @@ async function connectNodes(sourceId, targetId) {
 
 /* ---------- 多选：批量拖动 / 批量生成 ---------- */
 function onDragPreview(payload) {
-  dragPreview.value = payload;
+  setDragPreview(payload);
 }
 
 function previewFor(nodeId) {
@@ -732,6 +765,7 @@ async function onMove(payload) {
     : [id];
   const nodes = ids.map((item) => byId.value[item]).filter(Boolean);
   const moves = dragMoves(nodes, id, dx, dy);
+  pendingDrag = null;
   dragPreview.value = null;
   if (!moves.length) return;
   try {

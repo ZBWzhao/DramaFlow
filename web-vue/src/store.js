@@ -179,11 +179,29 @@ async function loadCanvases() {
   return state.canvases;
 }
 
-async function loadCanvas(name) {
-  if (name) state.canvasName = name;
-  const target = state.canvasName;
-  const data = await getJSON(`/api/canvas?name=${encodeURIComponent(target)}`);
-  state.canvas = {
+/* 轮询是 800ms 一次的全量 GET；如果每次都替换 state.canvas，
+ * 所有卡片都会因为"新对象"而重渲染（视频闪一下、输入框丢焦点）。
+ * 这里做一次浅层结构化 diff：内容没变的节点/边继续复用旧对象，
+ * 只有真正变化的项才换新引用——渲染层因此能跳过没变的卡。 */
+function mergeFlat(prev, next) {
+  if (prev === undefined) return next;
+  return JSON.stringify(prev) === JSON.stringify(next) ? prev : next;
+}
+
+function mergeById(prevList, nextList, key = "id") {
+  const list = Array.isArray(nextList) ? nextList : [];
+  if (!Array.isArray(prevList) || prevList.length !== list.length) return list;
+  const prev = new Map(prevList.map((item) => [item?.[key], item]));
+  const merged = list.map((item) => {
+    const old = prev.get(item?.[key]);
+    if (old && JSON.stringify(old) === JSON.stringify(item)) return old;
+    return item;
+  });
+  return merged.every((item, index) => item === prevList[index]) ? prevList : merged;
+}
+
+function patchCanvas(prev, data) {
+  const next = {
     meta: data.meta || {},
     nodes: data.nodes || [],
     edges: data.edges || [],
@@ -191,6 +209,22 @@ async function loadCanvas(name) {
     topo: data.topo_order || [],
     problems: data.problems || [],
   };
+  if (!prev) return next;
+  return {
+    meta: mergeFlat(prev.meta, next.meta),
+    nodes: mergeById(prev.nodes, next.nodes, "id"),
+    edges: mergeById(prev.edges, next.edges, "id"),
+    spec: mergeFlat(prev.spec, next.spec),
+    topo: mergeFlat(prev.topo, next.topo),
+    problems: mergeFlat(prev.problems, next.problems),
+  };
+}
+
+async function loadCanvas(name) {
+  if (name) state.canvasName = name;
+  const target = state.canvasName;
+  const data = await getJSON(`/api/canvas?name=${encodeURIComponent(target)}`);
+  state.canvas = patchCanvas(state.canvas, data);
   state.canvasName = data.name;
   state.canvasServerRevision = Number(data.revision || 0);
   if (!state.canvases.includes(data.name)) await loadCanvases();
