@@ -99,68 +99,102 @@ async function choose(take) {
 </template>
 
 <style scoped>
+/* 历史版本：和单卡工作台同尺寸同层级，切版时盖在它上面（z 高一档）。
+ * 当前版本是「选中态」而不是「另一块颜色」：左边 accent 竖条 + 缩略图角标。 */
 .studio-history {
   position: absolute;
-  top: 58px;
-  /* 与单卡工作台同处右侧：它是工作台的上一层，切版时盖在工作台上 */
-  right: 14px;
-  bottom: 78px;
+  top: var(--sp-7);
+  right: var(--sp-4);
+  bottom: calc(var(--sp-7) + var(--sp-5));
   width: 348px;
   display: flex;
   flex-direction: column;
-  gap: 10px;
-  padding: 12px;
-  border: 1px solid var(--line);
-  border-radius: 14px;
-  background: linear-gradient(180deg, rgba(23, 28, 37, 0.98), rgba(15, 19, 26, 0.99));
-  box-shadow: 0 18px 48px rgba(0, 0, 0, 0.55);
-  backdrop-filter: blur(14px);
+  gap: var(--sp-3);
+  padding: var(--sp-4);
+  color: var(--text);
+  background: var(--panel);
+  border: 1px solid var(--line-2);
+  border-radius: var(--r-card);
+  box-shadow: var(--elev-3);
   overflow-y: auto;
-  z-index: 8;
+  z-index: calc(var(--z-node-ui) + 10);
+  font: var(--fs-12) / var(--lh-base) var(--font-sans);
 }
-.studio-history-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 8px; }
-.studio-history-head b { display: block; color: var(--text); font-size: 13px; }
-.studio-history-head span { color: var(--text-3); font-size: 10.5px; }
+.studio-history-head { display: flex; align-items: flex-start; justify-content: space-between; gap: var(--sp-3); }
+.studio-history-head b { display: block; color: var(--text); font-size: var(--fs-13); font-weight: 600; letter-spacing: -0.01em; }
+.studio-history-head span {
+  display: block;
+  margin-top: 2px;
+  color: var(--text-3);
+  font: var(--fs-11) / 1.5 var(--font-mono);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 .studio-close {
   width: 24px;
   height: 24px;
-  border: none;
-  border-radius: 7px;
-  background: rgba(255, 255, 255, 0.06);
-  color: var(--text-2);
-  font-size: 15px;
+  border: 1px solid transparent;
+  border-radius: var(--r-btn);
+  background: transparent;
+  color: var(--text-3);
+  font-size: var(--fs-13);
   line-height: 1;
   cursor: pointer;
 }
-.studio-close:hover { background: rgba(255, 255, 255, 0.12); color: var(--text); }
-.studio-history-empty { margin: 0; color: var(--text-3); font-size: 11px; line-height: 1.7; }
-.studio-history-list { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 8px; }
+.studio-close:hover { background: var(--card-2); border-color: var(--line); color: var(--text); }
+.studio-history-empty {
+  margin: 0;
+  color: var(--text-3);
+  font-size: var(--fs-11);
+  line-height: 1.7;
+}
+.studio-history-list { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: var(--sp-2); }
 .studio-history-list li {
   display: flex;
-  gap: 9px;
-  padding: 7px;
+  gap: var(--sp-3);
+  padding: var(--sp-2);
   border: 1px solid var(--line);
-  border-radius: 10px;
-  background: rgba(255, 255, 255, 0.025);
+  border-radius: var(--r-btn);
+  background: var(--card);
 }
-.studio-history-list li.current { border-color: rgba(124, 196, 255, 0.5); background: rgba(124, 196, 255, 0.08); }
-.take-thumb { position: relative; flex: none; width: 88px; height: 52px; border-radius: 7px; overflow: hidden; background: #0a0d13; }
+.studio-history-list li.current {
+  border-color: var(--accent-line);
+  background: color-mix(in srgb, var(--accent) 7%, var(--card));
+  box-shadow: inset 2px 0 0 var(--accent);
+}
+.take-thumb {
+  position: relative;
+  flex: none;
+  width: 88px;
+  height: 52px;
+  overflow: hidden;
+  background: var(--bg);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+}
 .take-thumb img, .take-thumb video { width: 100%; height: 100%; object-fit: cover; display: block; }
 .take-badge {
   position: absolute;
-  left: 4px;
-  bottom: 4px;
-  padding: 0 5px;
-  border-radius: 999px;
-  background: rgba(8, 11, 16, 0.78);
-  color: #7cc4ff;
-  font-size: 9px;
+  left: var(--sp-1);
+  bottom: var(--sp-1);
+  padding: 0 var(--sp-1);
+  border-radius: var(--r-pill);
+  background: color-mix(in srgb, var(--bg) 82%, transparent);
+  color: var(--accent);
+  font: var(--fs-11) / 1.5 var(--font-mono);
 }
-.take-meta { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
-.take-line { display: flex; align-items: baseline; justify-content: space-between; gap: 6px; }
-.take-model { color: var(--text); font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.take-time { flex: none; color: var(--text-3); font-size: 10px; }
-.take-sub { display: flex; flex-wrap: wrap; gap: 6px; color: var(--text-3); font-size: 10px; }
-.take-rating { color: #58c9a0; }
+.take-meta { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: var(--sp-1); }
+.take-line { display: flex; align-items: baseline; justify-content: space-between; gap: var(--sp-2); }
+.take-model {
+  color: var(--text);
+  font: var(--fs-11) / 1.5 var(--font-mono);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.take-time { flex: none; color: var(--text-3); font: var(--fs-11) / 1.5 var(--font-mono); }
+.take-sub { display: flex; flex-wrap: wrap; gap: var(--sp-2); color: var(--text-3); font-size: var(--fs-11); }
+.take-rating { color: var(--ok); }
 .take-note { color: var(--text-2); }
 </style>

@@ -108,6 +108,26 @@
   --dur-base: 180ms;
   --dur-slow: 300ms;
   --ease: cubic-bezier(0.2, 0.8, 0.2, 1);
+
+  /* ---------- Element Plus 表现层对齐（只改观感，不动组件行为） ---------- */
+  --el-border-radius-base: var(--r-btn);
+  --el-border-radius-small: 6px;
+  --el-font-size-base: var(--fs-12);
+  --el-font-size-small: var(--fs-11);
+  --el-box-shadow-light: var(--elev-2);
+  --el-box-shadow-lighter: var(--elev-1);
+  --el-color-primary: var(--accent);
+  --el-color-success: var(--ok);
+  --el-color-warning: var(--warn);
+  --el-color-danger: var(--bad);
+  --el-color-error: var(--bad);
+  --el-text-color-primary: var(--text);
+  --el-text-color-regular: var(--text-2);
+  --el-text-color-secondary: var(--text-3);
+  --el-border-color: var(--line-2);
+  --el-bg-color: var(--card);
+  --el-bg-color-overlay: var(--panel);
+  --el-fill-color-blank: var(--card);
 }
 
 /* ---------- 基础层 ---------- */
