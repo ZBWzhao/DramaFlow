@@ -181,6 +181,56 @@
   font-variant-numeric: tabular-nums;
 }
 
+/* ============================================================
+ * 视觉规格 v2（01-visual-spec.md）——画布视图先落地（阶段 B）
+ *
+ * 只新增「不与旧变量同名」的规格变量；同名但语义不同的
+ * （--accent / --sp-* / --fs-* / --lh-* / --r-*）在 .cv2 作用域内覆盖，
+ * 见 canvas2.css 顶部映射块。这样本轮「只做画布」，首页/制片台不被波及。
+ * ============================================================ */
+:root {
+  /* 表面：靠亮度差分楼层级（spec §1） */
+  --bg-canvas: #141414;
+  --bg-panel: #161616;
+  --bg-s1: #1e1e1e;
+  --bg-s2: #262626;
+  --bg-s3: #2b2b2b;
+  --bg-s4: #383838;
+
+  /* 描边：极少用，仅需硬边时 */
+  --bd-subtle: #232323;
+  --bd-default: #2a2a2a;
+  --bd-strong: #3a3a3a;
+
+  /* 文字：4 级；--tx-4 仅图标/分隔线，禁止承载正文 */
+  --tx-1: #f8f8f8;
+  --tx-2: #a8a8a8;
+  --tx-3: #808080;
+  --tx-4: #525252;
+
+  /* 语义色：画布内只允许 accent / danger / warning 三类 */
+  --accent-solid: #22ebe5;
+  --danger: #f03838;
+  --warning: #daa717;
+
+  /* 圆角：按尺度命名（旧 --r-card/--r-nest/--r-btn 是角色名，迁移时映射） */
+  --r-xs: 4px;
+  --r-sm: 8px;
+  --r-md: 10px;
+  --r-lg: 12px;
+  --r-xl: 16px;
+
+  /* 字体：沿用系统中文黑体栈，不引入新字体 */
+  --font-sans: "PingFang SC", "HarmonyOS Sans SC", "Source Han Sans SC",
+    "Microsoft YaHei", system-ui, sans-serif;
+  --fs-14: 14px;
+  --fs-16: 16px;
+  --lh-body: 1.75;
+
+  /* 连线：画布内唯一允许的"光效"只给选中链路 */
+  --wire: #4a4a4a;
+}
+
 /* 减动效：所有动画/过渡停掉，界面必须仍然完整可读 */
 @media (prefers-reduced-motion: reduce) {
   *,

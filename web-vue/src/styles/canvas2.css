@@ -1,17 +1,61 @@
-:root {
-  --bg: #08090b;
-  --bg-2: #0b0d10;
-  --panel: #101318;
-  --card: #14171d;
-  --card-2: #171b22;
-  --line: rgba(255, 255, 255, 0.07);
-  --line-2: rgba(255, 255, 255, 0.12);
-  --text: #e9edf4;
-  --text-2: #a7b0bf;
-  --text-3: #6d7787;
-  --accent: #6ea8ff;
-  --accent-soft: rgba(110, 168, 255, 0.16);
-  --warm: #ff8a5c;
+/* ============================================================
+ * 阶段 B：视觉规格 v2 的「旧名 → 新 token」映射（只作用于画布）
+ *
+ * 组件仍消费旧变量名（--bg/--card/--text/--line/--accent…），
+ * 这里把它们解析到 01-visual-spec.md 的新 token，先把画布切到规格表面层级。
+ * 颜色/层级只在本作用域内改，首页与制片台不受影响。
+ *
+ * 间距 / 字号 / 圆角（--sp-* / --fs-* / --r-*）与旧值语义不同（例如旧 --sp-2=6px，
+ * 规格 --sp-2=8px），留到 C/D 阶段随几何重构逐组件迁移，避免与结构调整互相干扰。
+ * ============================================================ */
+.cv2 {
+  /* 表面：画布 #141414 / 面板 #161616 / 浮层卡 #1e1e1e / 节点卡 #262626 */
+  --bg: var(--bg-canvas);
+  --bg-2: var(--bg-panel);
+  --panel: var(--bg-panel);
+  --card: var(--bg-s2);
+  --card-2: var(--bg-s1);
+  --card-3: var(--bg-s3);
+
+  /* 描边：深色底靠 1px 硬边，不靠投影 */
+  --line: var(--bd-subtle);
+  --line-2: var(--bd-default);
+  --line-3: var(--bd-strong);
+
+  /* 文字：4 级 */
+  --text: var(--tx-1);
+  --text-2: var(--tx-2);
+  --text-3: var(--tx-3);
+  --text-3-strong: var(--tx-2);
+  --text-on-accent: var(--bg-canvas);
+
+  /* 强调：全局唯一青色 */
+  --accent: #58d8f8;
+  --accent-soft: rgba(88, 216, 248, 0.1);
+  --accent-line: rgba(88, 216, 248, 0.28);
+  --primary: var(--accent);
+
+  /* 状态：已生成 = accent；失败 = danger；警示 = warning（不再出现绿色成功） */
+  --ok: var(--accent);
+  --ok-soft: rgba(88, 216, 248, 0.1);
+  --bad: var(--danger);
+  --bad-soft: rgba(240, 56, 56, 0.12);
+  --warn: var(--warning);
+  --warn-soft: rgba(218, 167, 23, 0.12);
+  --warm: var(--warning);
+  --success: var(--accent);
+
+  /* 类型色退场：类型只靠「前缀文案 + 图标 + 媒体形态」区分（spec §4.1） */
+  --fam-string: var(--tx-3);
+  --fam-image: var(--tx-3);
+  --fam-video: var(--tx-3);
+  --fam-audio: var(--tx-3);
+  --fam-mixed: var(--tx-3);
+
+  /* 连线 / 点阵 */
+  --edge: var(--wire);
+  --grid-dot: rgba(255, 255, 255, 0.05);
+
   color-scheme: dark;
 }
 
@@ -69,8 +113,7 @@ textarea {
   gap: 14px;
   padding: 0 12px;
   border-bottom: 1px solid var(--line);
-  background: rgba(10, 12, 15, 0.92);
-  backdrop-filter: blur(12px);
+  background: var(--bg-canvas);
   z-index: 20;
 }
 
