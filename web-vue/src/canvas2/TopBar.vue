@@ -444,7 +444,7 @@ onBeforeUnmount(() => {
   font-weight: 500;
 }
 .tb-btn.primary:hover {
-  background: color-mix(in srgb, var(--accent) 88%, #ffffff);
+  background: color-mix(in srgb, var(--accent) 88%, var(--text));
 }
 .tb-btn:disabled {
   border-color: var(--line);

@@ -459,7 +459,7 @@
   overflow: hidden;
 }
 .clip-card .fig video { width: 100%; height: 100%; object-fit: cover; }
-.clip-card .fig .dur { position: absolute; right: 6px; bottom: 6px; background: rgba(0,0,0,.62); color: #fff; font-size: 10px; padding: 1px 6px; border-radius: var(--radius-pill); }
+.clip-card .fig .dur { position: absolute; right: 6px; bottom: 6px; background: rgba(0,0,0,.62); color: var(--text); font-size: 10px; padding: 1px 6px; border-radius: var(--radius-pill); }
 .clip-card .cap { padding: 7px 9px; font-size: 11.5px; display: flex; flex-direction: column; gap: 3px; }
 .clip-card .cap .t { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 

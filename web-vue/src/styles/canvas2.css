@@ -586,7 +586,7 @@ textarea {
   display: flex;
   border-radius: 50%;
   background: var(--ok);
-  color: #04120b;
+  color: var(--text-on-accent);
 }
 
 .cv2 .node.status-error .status-mark,
@@ -594,7 +594,7 @@ textarea {
   display: flex;
   clip-path: polygon(50% 4%, 98% 94%, 2% 94%);
   background: var(--bad);
-  color: #1b0407;
+  color: var(--text-on-accent);
   padding-top: 4px;
   font-size: 9px;
 }
@@ -702,7 +702,7 @@ textarea {
   height: 20px;
   clip-path: polygon(50% 4%, 98% 94%, 2% 94%);
   background: var(--bad);
-  color: #1b0407;
+  color: var(--text-on-accent);
   padding-top: 4px;
   font-size: 10px;
   font-weight: 700;
