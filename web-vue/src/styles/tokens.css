@@ -1,0 +1,138 @@
+/* ============================================================
+ * Design tokens — 单一视觉真源（阶段 0）
+ *
+ * 只做两件事：
+ *   1) 把调色板/间距/圆角/字体/层级固化到 :root，禁止组件再写裸值；
+ *   2) 提供少量基础层规则（焦点环、等宽数字、减动效降级）。
+ *
+ * 不覆盖 canvas2.css 已有的 --bg/--panel/--text 等同名变量（值相同），
+ * 只补充新变量，因此首页/制片台/画布三种视图可以平滑迁移。
+ * ============================================================ */
+
+:root {
+  /* ---------- 表面：越靠上越亮，靠「差 2~4 级灰」而不是阴影区分 ---------- */
+  --bg: #08090b;              /* 画布底：全系统最暗，内容浮起来 */
+  --bg-2: #0b0d10;            /* 次级底：左栏、状态栏 */
+  --panel: #101318;           /* 面板/顶栏 */
+  --card: #14171d;            /* 卡片默认面 */
+  --card-2: #171b22;          /* 卡片悬停/内嵌块 */
+  --card-3: #1c212a;          /* 卡片内浮层、输入框填充 */
+
+  /* ---------- 描边：深色底不能靠阴影堆层级，靠 1px 描边 ---------- */
+  --line: rgba(255, 255, 255, 0.07);   /* 分隔线、卡片默认边框 */
+  --line-2: rgba(255, 255, 255, 0.12); /* 悬停边框、重要分隔 */
+  --line-3: rgba(255, 255, 255, 0.18); /* 聚焦/选中边框 */
+
+  /* ---------- 文字：4 级，够用且不糊 ---------- */
+  --text: #e9edf4;            /* 主文字 15.3:1 */
+  --text-2: #a7b0bf;          /* 次文字 8.2:1 */
+  --text-3: #6d7787;          /* muted 3.96:1 —— 只用于单位/占位/禁用，不做正文 */
+  --text-3-strong: #7e8899;   /* 可读的次要正文 5.16:1（--text-3 不达标时的替代） */
+  --text-on-accent: #06101f;  /* 强调色底上的文字 */
+
+  /* ---------- 强调色：全局唯一，只给「可操作/当前」 ---------- */
+  --accent: #6ea8ff;
+  --accent-soft: rgba(110, 168, 255, 0.16);
+  --accent-line: rgba(110, 168, 255, 0.42);
+
+  /* ---------- 状态色：只表达状态，不做装饰 ---------- */
+  --ok: #45c08a;              /* 成功/已完成 */
+  --ok-soft: rgba(69, 192, 138, 0.14);
+  --warn: #ff8a5c;            /* 警示/待处理（沿用 --warm） */
+  --warn-soft: rgba(255, 138, 92, 0.14);
+  --bad: #ff6b7e;             /* 失败/非法 */
+  --bad-soft: rgba(255, 107, 126, 0.14);
+
+  /* ---------- 数据家族色：只给 2px 类型条 / 端口 / 连线 ---------- */
+  --fam-string: #8b94a5;      /* text / prompt / storyboard */
+  --fam-image: #6ea8ff;       /* image / image_gen / asset */
+  --fam-video: #45bfae;       /* video / video_gen */
+  --fam-audio: #cfa050;       /* audio / tts_gen */
+  --fam-mixed: #a7b0bf;       /* timeline */
+
+  /* ---------- 字体 ---------- */
+  --font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC",
+    "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
+  --font-mono: ui-monospace, SFMono-Regular, "SF Mono", Consolas,
+    "Liberation Mono", monospace;
+  --fs-11: 11px;   /* 单位/参数/角标 */
+  --fs-12: 12px;   /* 正文、卡片标题 */
+  --fs-13: 13px;   /* 面板标题 */
+  --fs-15: 15px;   /* 区块标题 */
+  --fs-20: 20px;   /* 页面标题 */
+  --fs-28: 28px;   /* 首页主标题 */
+  --lh-tight: 1.25;
+  --lh-base: 1.5;
+
+  /* ---------- 间距：4 基准；组件内用 4/6/8，面板用 8/12/16，页面用 16/24 ---------- */
+  --sp-1: 4px;
+  --sp-2: 6px;
+  --sp-3: 8px;
+  --sp-4: 12px;
+  --sp-5: 16px;
+  --sp-6: 24px;
+  --sp-7: 32px;
+
+  /* ---------- 圆角：卡 12、卡内嵌 10、按钮 8、徽标 999 ---------- */
+  --r-card: 12px;
+  --r-nest: 10px;
+  --r-btn: 8px;
+  --r-pill: 999px;
+
+  /* ---------- 布局 ---------- */
+  --h-topbar: 56px;
+  --h-statusbar: 28px;
+  --w-rail: 260px;
+  --card-w: 248px;
+  --card-caption: 24px;
+  --card-h: 164px;
+  --port: 8px;
+  --grid: 22px;
+
+  /* ---------- 层级：只有 6 层，超出说明设计有问题 ---------- */
+  --z-edge: 10;
+  --z-node: 20;
+  --z-node-ui: 30;
+  --z-chrome: 40;
+  --z-popover: 60;
+  --z-modal: 80;
+
+  /* ---------- 阴影：深色底上用「描边 + 微光 + 小阴影」表达层级 ---------- */
+  --elev-1: 0 1px 2px rgba(0, 0, 0, 0.4);
+  --elev-2: 0 8px 24px -8px rgba(0, 0, 0, 0.65), 0 0 0 1px var(--line);
+  --elev-3: 0 24px 64px -16px rgba(0, 0, 0, 0.72), 0 0 0 1px var(--line);
+  --hairline-top: inset 0 1px 0 rgba(255, 255, 255, 0.06);
+
+  /* ---------- 动效：只动 opacity / transform / border-color ---------- */
+  --dur-fast: 120ms;
+  --dur-base: 180ms;
+  --dur-slow: 300ms;
+  --ease: cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+/* ---------- 基础层 ---------- */
+
+/* 键盘焦点：只在键盘导航时出现，鼠标点击不闪 */
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+
+/* 数字（尺寸/时长/版本/成本）一律等宽，避免跳动 */
+.tabular,
+.cv2 [data-num] {
+  font-variant-numeric: tabular-nums;
+}
+
+/* 减动效：所有动画/过渡停掉，界面必须仍然完整可读 */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
