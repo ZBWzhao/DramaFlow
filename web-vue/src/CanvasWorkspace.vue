@@ -95,6 +95,6 @@ const currentProjectTitle = computed(
     <InfoDrawer v-if="state.drawerOpen" />
     <ProjectPanel :open="projectPanelOpen" @close="projectPanelOpen = false" />
     <ExportDialog />
-    <FloatingAgent v-model="agentVisible" />
+    <FloatingAgent v-model="agentVisible" :variant="useLegacyCanvas ? 'legacy' : 'cv2'" />
   </div>
 </template>
