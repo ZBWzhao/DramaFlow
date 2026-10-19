@@ -103,7 +103,18 @@ const uploadInput = ref(null);
  * 这样卡下提示词框/右侧详情/历史这些「单卡」入口不会被多选搅乱。 */
 const selection = ref([]);
 const marquee = ref(null);      // { sx, sy, cx, cy }（stage 内坐标）
-const edgeDraft = ref(null);    // { sourceId, from:{x,y}, to:{x,y} }
+const edgeDraft = ref(null);    // { sourceId, handle, ptype, from:{x,y}, to:{x,y} }
+// 连线交互（双模）：① 按住端口拖到目标卡；② 轻点端口进入「点击式连线」，再点目标卡。
+// 两种模式共用 hoverTargetId 做目标高亮与吸附，落点不再要求像素级精确。
+const connectFrom = ref(null);   // 点击式连线：{ nodeId, handle, ptype }
+const connectCursor = ref(null); // 点击式连线的预览线终点（world 坐标）
+const hoverTargetId = ref("");   // 当前吸附到的目标卡
+const selectedEdgeId = ref("");  // 选中的连线（Delete 删除 / 双击直接删）
+const PORT_LABELS = {
+  prompt: "提示词", ref: "参考图", image: "图像", video: "视频", video_ref: "视频参考",
+  text: "文本", desc: "描述", script: "剧本", ctx: "上下文", audio: "音频",
+  subtitle: "字幕", video_in: "视频", shots: "分镜",
+};
 const dragPreview = ref(null);  // 多选拖动时主卡位移 { id, dx, dy }，供同组卡片即时跟手
 const spaceDown = ref(false);
 let suppressClick = false;
@@ -287,6 +298,7 @@ const edges = computed(() => visibleEdges.value
     const targetHandle = edge.targetHandle ?? edge.target_handle;
     // 连线颜色跟随上游数据家族：人一眼能看出"这条线送的是什么"
     return {
+      id: edge.id,
       d: edgePath(edgeAnchor(from, "right", sourceHandle), edgeAnchor(to, "left", targetHandle)),
       fam: from.fam || "mixed",
     };
@@ -397,6 +409,12 @@ function toFlow(clientX, clientY) {
 }
 
 function onPointerDown(event) {
+  // 点击式连线时点空白 = 取消连线，不要顺手开始框选
+  if (connectFrom.value && !event.target.closest?.(".node")) {
+    event.preventDefault();
+    cancelConnect();
+    return;
+  }
   if (event.target.closest?.(".node")) return;
   // 中键 / 按住空格 = 平移；左键拖空白 = 框选（和主流画布一致）
   if (event.button === 1 || spaceDown.value) {
@@ -414,6 +432,18 @@ function onPointerDown(event) {
   };
 }
 function onPointerMove(event) {
+  // 拖拽连线由 window 上的 onEdgeMove 负责，这里不要重复处理
+  if (edgeDraft.value) return;
+  // 点击式连线：预览线跟着光标走，并吸附高亮合法目标
+  if (connectFrom.value && !pan.value) {
+    const point = toFlow(event.clientX, event.clientY);
+    const candidate = candidateFor(point);
+    hoverTargetId.value = candidate ? candidate.id : "";
+    connectCursor.value = candidate
+      ? targetAnchor(candidate.id, candidate.ports.targetHandle) || point
+      : point;
+    return;
+  }
   if (pan.value) {
     const { sx, sy, vx, vy } = pan.value;
     setView({ ...currentView(), x: vx + (event.clientX - sx), y: vy + (event.clientY - sy) });
@@ -483,6 +513,10 @@ function zoomBy(factor) {
 }
 
 function onStageClick(event) {
+  if (connectFrom.value) {
+    cancelConnect();
+    return;
+  }
   if (event.target.closest?.(".node")) return;
   // 框选结束时浏览器还会补一个 click，不能让它把刚选中的东西清掉
   if (suppressClick) {
@@ -491,6 +525,7 @@ function onStageClick(event) {
   }
   selection.value = [];
   state.selectedId = null;
+  selectedEdgeId.value = "";
 }
 
 function onStageDoubleClick(event) {
@@ -668,6 +703,16 @@ function onToolbar(key, node) {
 /* 选中一张卡时只出「卡上工具条 + 卡下提示词框」，右侧详情面板要显式点「详情」才打开，
  * 否则它会把画布右半边整块盖住（LibTV 也没有常驻的详情面板）。 */
 function onSelect(id) {
+  // 点击式连线进行中：这一下点击是「选落点」，不是换选中
+  if (connectFrom.value) {
+    const source = connectFrom.value;
+    if (id !== source.nodeId) {
+      cancelConnect();
+      connectNodes(source.nodeId, id, source.handle);
+    }
+    return;
+  }
+  selectedEdgeId.value = "";
   selection.value = [id];
   state.selectedId = id;
   studioOpen.value = false;
@@ -682,18 +727,120 @@ function onOpenVideo({ id, src, title, badge, duration }) {
   videoOpen.value = { src, title, badge, duration: Number(duration) || 0, download: src, filename };
 }
 
-/* ---------- 拖线建边：从卡片右侧 ⊕ 按住在画布上拖到另一张卡 ---------- */
+/* ---------- 连线：拖拽 + 点击 双模 ---------- */
+/* 端口配对：从某个具体输出口出发时，只接受能收这个类型的输入口；
+ * 否则按「第一个同类型组合」兜底（旧行为）。 */
+function portMatch(sourceType, fromHandle, targetType) {
+  const from = portSpec(sourceType);
+  const to = portSpec(targetType);
+  if (!from.out.length || !to.in.length) return null;
+  const draggedType = fromHandle ? (from.out.find(([name]) => name === fromHandle) || [])[1] : "";
+  if (draggedType) {
+    const hit = to.in.find(([, inType]) => inType === draggedType);
+    return hit ? { sourceHandle: fromHandle, targetHandle: hit[0] } : null;
+  }
+  return matchPorts(sourceType, targetType);
+}
+
+function sourceAnchor(sourceId, handle) {
+  const node = byId.value[sourceId];
+  if (!node) return null;
+  const list = portSpec(node.type).out;
+  const index = Math.max(0, list.findIndex(([name]) => name === handle));
+  return nodeAnchor(node, "right", index, list.length);
+}
+
+function targetAnchor(targetId, targetHandle) {
+  const node = byId.value[targetId];
+  if (!node) return null;
+  const list = portSpec(node.type).in;
+  const index = Math.max(0, list.findIndex(([name]) => name === targetHandle));
+  return nodeAnchor(node, "left", index, list.length);
+}
+
+/* 光标准星：先看指针是否落在「类型兼容」的卡附近（外扩 36px），取最近的一张。
+ * 这样松手偏出卡片 20px 也能连上，不用像素级对准。 */
+function candidateFor(worldPoint) {
+  const sourceId = edgeDraft.value?.sourceId || connectFrom.value?.nodeId;
+  const handle = edgeDraft.value?.handle || connectFrom.value?.handle || "";
+  const sourceNode = byId.value[sourceId];
+  if (!sourceNode) return null;
+  const pad = 36 / view.value.z;
+  let best = null;
+  let bestDistance = Infinity;
+  for (const node of visibleNodes.value) {
+    if (node.id === sourceId) continue;
+    const ports = portMatch(sourceNode.type, handle, node.type);
+    if (!ports) continue;
+    const height = cardHeight(node);
+    if (
+      worldPoint.x < node.x - pad || worldPoint.x > node.x + CARD_W + pad
+      || worldPoint.y < node.y - pad || worldPoint.y > node.y + height + pad
+    ) continue;
+    const dx = worldPoint.x - (node.x + CARD_W / 2);
+    const dy = worldPoint.y - (node.y + height / 2);
+    const distance = dx * dx + dy * dy;
+    if (distance < bestDistance) {
+      bestDistance = distance;
+      best = { id: node.id, ports };
+    }
+  }
+  return best;
+}
+
+/* 点击式连线时，预览线要跟着光标走，并且同样吸附到目标端口 */
+const connectLine = computed(() => {
+  if (edgeDraft.value) return { from: edgeDraft.value.from, to: edgeDraft.value.to };
+  if (!connectFrom.value || !connectCursor.value) return null;
+  const from = sourceAnchor(connectFrom.value.nodeId, connectFrom.value.handle);
+  return from ? { from, to: connectCursor.value } : null;
+});
+
+const connectSourceLabel = computed(() => {
+  const node = byId.value[connectFrom.value?.nodeId];
+  return node?.title || "";
+});
+
+function isConnectable(nodeId) {
+  const sourceId = edgeDraft.value?.sourceId || connectFrom.value?.nodeId;
+  if (!sourceId || nodeId === sourceId) return false;
+  const sourceNode = byId.value[sourceId];
+  const node = byId.value[nodeId];
+  if (!sourceNode || !node) return false;
+  const handle = edgeDraft.value?.handle || connectFrom.value?.handle || "";
+  return !!portMatch(sourceNode.type, handle, node.type);
+}
+
+function enterConnectMode(sourceId, handle, ptype) {
+  if (!byId.value[sourceId]) return;
+  connectFrom.value = { nodeId: sourceId, handle: handle || "", ptype: ptype || "" };
+  connectCursor.value = null;
+  hoverTargetId.value = "";
+  showToast("已选起点：点击目标卡片完成连线（Esc 取消）");
+}
+
+function cancelConnect() {
+  if (!connectFrom.value) return;
+  connectFrom.value = null;
+  connectCursor.value = null;
+  hoverTargetId.value = "";
+}
+
 function onEdgeStart({ id, handle, ptype, clientX, clientY }) {
   const from = byId.value[id];
   if (!from) return;
-  const list = portsFor(from.type).out;
-  const index = Math.max(0, list.findIndex(([name]) => name === handle));
+  // 上一次「点击式连线」还开着：从端口重新拖，视为换起点
+  cancelConnect();
+  const anchor = sourceAnchor(id, handle);
+  if (!anchor) return;
   edgeDraft.value = {
     sourceId: id,
     handle: handle || "",
     ptype: ptype || "",
-    from: nodeAnchor(from, "right", index, list.length),
+    from: anchor,
     to: toFlow(clientX, clientY),
+    startClient: { x: clientX, y: clientY },
+    moved: false,
   };
   window.addEventListener("pointermove", onEdgeMove);
   window.addEventListener("pointerup", onEdgeUp, { once: true });
@@ -701,17 +848,44 @@ function onEdgeStart({ id, handle, ptype, clientX, clientY }) {
 
 function onEdgeMove(event) {
   if (!edgeDraft.value) return;
-  edgeDraft.value = { ...edgeDraft.value, to: toFlow(event.clientX, event.clientY) };
+  const point = toFlow(event.clientX, event.clientY);
+  const candidate = candidateFor(point);
+  hoverTargetId.value = candidate ? candidate.id : "";
+  const end = candidate ? targetAnchor(candidate.id, candidate.ports.targetHandle) || point : point;
+  const dx = event.clientX - edgeDraft.value.startClient.x;
+  const dy = event.clientY - edgeDraft.value.startClient.y;
+  edgeDraft.value = {
+    ...edgeDraft.value,
+    to: end,
+    moved: edgeDraft.value.moved || Math.hypot(dx, dy) > 4,
+  };
 }
 
 async function onEdgeUp(event) {
   window.removeEventListener("pointermove", onEdgeMove);
   const draft = edgeDraft.value;
   edgeDraft.value = null;
+  const snapped = hoverTargetId.value;
+  hoverTargetId.value = "";
   if (!draft) return;
-  const el = document.elementFromPoint(event.clientX, event.clientY)?.closest?.(".node");
-  const targetId = el?.getAttribute("data-id");
-  if (!targetId || targetId === draft.sourceId) return;
+  // 没拖动 = 轻点了一下端口：进入点击式连线，不用精确拖拽
+  if (!draft.moved) {
+    enterConnectMode(draft.sourceId, draft.handle, draft.ptype);
+    return;
+  }
+  let targetId = snapped;
+  if (!targetId) {
+    const el = document.elementFromPoint(event.clientX, event.clientY)?.closest?.(".node");
+    targetId = el?.getAttribute("data-id") || "";
+  }
+  if (!targetId) {
+    showToast("松手的位置没有可接的卡，连线已取消");
+    return;
+  }
+  if (targetId === draft.sourceId) {
+    showToast("不能连到自己");
+    return;
+  }
   await connectNodes(draft.sourceId, targetId, draft.handle);
 }
 
@@ -775,12 +949,40 @@ async function connectNodes(sourceId, targetId, fromHandle) {
       targetHandle: ports.targetHandle,
     });
     await actions.loadCanvas();
-    const added = (state.canvas.edges || []).length - edgeCountBefore;
+    const edgesNow = state.canvas.edges || [];
+    const added = edgesNow.length - edgeCountBefore;
+    const created = edgesNow.find((edge) => {
+      const source = edge.source ?? edge.from;
+      const target = edge.target ?? edge.to;
+      return source === sourceId && target === targetId
+        && (edge.sourceHandle ?? edge.source_handle) === ports.sourceHandle
+        && (edge.targetHandle ?? edge.target_handle) === ports.targetHandle;
+    });
+    // 刚连上的线默认选中：连错了直接 Delete，不用去猜「哪条是新的」
+    selectedEdgeId.value = created?.id || "";
+    const portLabel = PORT_LABELS[ports.targetHandle] || ports.targetHandle;
     showToast(added > 0
-      ? `已连线：${source.label || sourceId} → ${target.label || targetId}`
+      ? `已连线：${source.label || sourceId} → ${target.label || targetId}（${portLabel}）`
       : "这两个节点已经连过了");
   } catch (err) {
     ElMessage.error(`连线失败：${err.message || err}`);
+  }
+}
+
+/* ---------- 已有连线：可点选、可删除（连线命中区 16px，不用瞄准 1px 线条） ---------- */
+function pickEdge(edgeId) {
+  selectedEdgeId.value = selectedEdgeId.value === edgeId ? "" : edgeId;
+  if (selectedEdgeId.value) showToast("已选中这条连线：Delete 删除，双击直接删");
+}
+
+async function removeEdge(edgeId) {
+  if (!edgeId) return;
+  selectedEdgeId.value = "";
+  try {
+    await actions.deleteEdge(edgeId);
+    showToast("已删除这条连线");
+  } catch (err) {
+    ElMessage.error(`删除连线失败：${err.message || err}`);
   }
 }
 
@@ -958,6 +1160,11 @@ function onKeyDown(event) {
   }
   const typing = event.target.closest?.("textarea, input, [contenteditable='true']");
   if (!typing && (event.key === "Delete" || event.key === "Backspace")) {
+    if (selectedEdgeId.value) {
+      event.preventDefault();
+      removeEdge(selectedEdgeId.value);
+      return;
+    }
     const ids = selection.value.length ? [...selection.value] : [state.selectedId].filter(Boolean);
     if (ids.length) {
       event.preventDefault();
@@ -968,6 +1175,8 @@ function onKeyDown(event) {
   if (event.key === "Escape") {
     menu.value = null;
     searchOpen.value = false;
+    cancelConnect();
+    selectedEdgeId.value = "";
     clearSelection();
   }
 }
@@ -1017,7 +1226,7 @@ onMounted(() => {
     <main
       ref="stageRef"
       class="board-stage"
-      :class="lodClass"
+      :class="[lodClass, { 'connect-mode': !!connectFrom || !!edgeDraft }]"
       @contextmenu.prevent="onStageContextMenu"
       @pointerdown="onPointerDown"
       @pointermove="onPointerMove"
@@ -1042,11 +1251,23 @@ onMounted(() => {
           :style="{ transform: `translate(${view.x}px, ${view.y}px) scale(${view.z})` }"
         >
           <svg class="edges" width="6000" height="4000">
-            <path v-for="(edge, index) in edges" :key="index" :d="edge.d" :data-fam="edge.fam" />
+            <g
+              v-for="edge in edges"
+              :key="edge.id || edge.d"
+              :class="{ 'is-on': selectedEdgeId === edge.id }"
+            >
+              <path
+                class="hit"
+                :d="edge.d"
+                @pointerdown.stop="pickEdge(edge.id)"
+                @dblclick.stop="removeEdge(edge.id)"
+              />
+              <path class="line" :class="{ on: selectedEdgeId === edge.id }" :d="edge.d" :data-fam="edge.fam" />
+            </g>
             <path
-              v-if="edgeDraft"
+              v-if="connectLine"
               class="temp"
-              :d="edgePath(edgeDraft.from, edgeDraft.to)"
+              :d="edgePath(connectLine.from, connectLine.to)"
             />
           </svg>
           <NodeCard
@@ -1057,6 +1278,8 @@ onMounted(() => {
             :in-selection="selectedIds.has(node.id)"
             :in-ports="node.portsIn"
             :out-ports="node.portsOut"
+            :connectable="isConnectable(node.id)"
+            :connect-mode="!!connectFrom"
             :zoom="view.z"
             :preview="previewFor(node.id)"
             @select="onSelect"
@@ -1080,6 +1303,12 @@ onMounted(() => {
           <span class="multi-count">已选中 {{ selection.length }} 张</span>
           <button type="button" @click="batchGenerate">批量生成</button>
           <button type="button" class="ghost" @click="clearSelection">取消选择</button>
+        </div>
+
+        <div v-if="connectFrom" class="connect-hint">
+          <span class="ch-dot" aria-hidden="true"></span>
+          <span>连线中：点目标卡片{{ connectSourceLabel ? `（来自「${connectSourceLabel}」）` : "" }}</span>
+          <em>{{ hoverTargetId ? "松手 / 点击即连接" : "Esc 取消" }}</em>
         </div>
 
         <HeroPage v-if="!boardNodes.length" @pick="addNode()" />

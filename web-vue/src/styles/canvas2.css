@@ -1572,3 +1572,77 @@ textarea {
 @media (prefers-reduced-motion: reduce) {
   .cv2-lightbox, .lb-panel { animation: none; }
 }
+
+/* ---------- 连线交互：点击式连线 + 目标吸附高亮 + 连线可选中 ---------- */
+/* 端口命中区从 16px 加到 22px：缩到 60% 时仍然点得中（视觉点仍是 8px） */
+.cv2 .handle {
+  width: 22px;
+  height: 22px;
+}
+.cv2 .handle.left { left: -11px; }
+.cv2 .handle.right { right: -11px; }
+.cv2 .node:hover .handle.right::after,
+.cv2 .node.connectable .handle.right::after {
+  background: var(--type-color);
+}
+
+/* 连线模式：兼容的卡亮起，不兼容的压暗并让出指针，避免误点 */
+.cv2 .connect-mode { cursor: crosshair; }
+.cv2 .connect-mode .node:not(.connectable) {
+  opacity: 0.3;
+  filter: saturate(0.35);
+  pointer-events: none;
+}
+.cv2 .connect-mode .node.connectable .node-body {
+  box-shadow: 0 0 0 1px var(--accent), 0 0 0 6px rgba(88, 216, 248, 0.1);
+}
+.cv2 .connect-mode .temp { opacity: 1; }
+
+/* 顶部提示条：告诉人「现在在连线、下一步点什么、怎么退」 */
+.cv2 .connect-hint {
+  position: absolute;
+  top: 16px;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 30px;
+  padding: 0 12px;
+  border-radius: 999px;
+  background: rgba(38, 38, 38, 0.94);
+  border: 1px solid var(--line-2);
+  color: var(--text-2);
+  font-size: 12px;
+  white-space: nowrap;
+  z-index: 30;
+  pointer-events: none;
+  backdrop-filter: blur(10px);
+}
+.cv2 .connect-hint .ch-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--accent);
+  box-shadow: 0 0 0 3px rgba(88, 216, 248, 0.18);
+}
+.cv2 .connect-hint em {
+  color: var(--text-3);
+  font-style: normal;
+  font-size: 11px;
+}
+
+/* 连线可点选：16px 透明命中区，不必瞄准 1px 线条；选中后整条高亮 */
+.cv2 .edges path.hit {
+  fill: none;
+  stroke: transparent;
+  stroke-width: 16;
+  pointer-events: stroke;
+  cursor: pointer;
+}
+.cv2 .edges path.line.on {
+  stroke: var(--accent);
+  stroke-width: 1.6;
+  opacity: 1;
+}
+.cv2 .edges g.is-on .temp { opacity: 1; }

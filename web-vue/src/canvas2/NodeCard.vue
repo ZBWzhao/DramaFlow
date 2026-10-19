@@ -19,6 +19,9 @@ const props = defineProps({
   // 服务端 node_spec 里的类型化端口：[[name, STRING|IMAGE|VIDEO|AUDIO], ...]
   inPorts: { type: Array, default: () => [] },
   outPorts: { type: Array, default: () => [] },
+  // 连线交互：这张卡能否作为当前连线的落点 / 是否正在「点击式连线」模式
+  connectable: { type: Boolean, default: false },
+  connectMode: { type: Boolean, default: false },
 });
 const emit = defineEmits([
   "select", "send", "change", "move", "drag", "generate", "upload", "history", "detail", "edge-start",
@@ -62,7 +65,9 @@ function isInteractive(target) {
 
 function onPointerDown(event) {
   if (event.button !== 0 || isInteractive(event.target)) return;
+  // 点击式连线：这一下点击是「选落点」，不要顺带把卡片拖走
   emit("select", props.node.id);
+  if (props.connectMode) return;
   drag.value = { sx: event.clientX, sy: event.clientY, moved: false };
   window.addEventListener("pointermove", onPointerMove);
   window.addEventListener("pointerup", onPointerUp, { once: true });
@@ -133,6 +138,7 @@ function onOpenVideo() {
       'gen-busy': node.busy,
       'gen-failed': node.failed,
       'gen-done': node.justDone,
+      connectable,
       ['status-' + statusKind]: !!statusKind,
     }"
     :style="{ left: left + 'px', top: top + 'px', width: CARD_W + 'px' }"
@@ -227,7 +233,7 @@ function onOpenVideo() {
           class="handle right"
           :class="'port-' + portType"
           :style="{ top: portTop(index, outPorts.length) + 'px' }"
-          :title="`拖出连线 · ${portName} (${portType})`"
+          :title="`点击选择起点，或按住拖到目标卡 · ${portName} (${portType})`"
           @pointerdown.stop="onEdgeStartFrom($event, portName, portType)"
         />
         <span class="node-menu" title="更多" @click.stop="emit('detail', node)">⋯</span>
