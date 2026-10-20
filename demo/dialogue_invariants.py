@@ -67,12 +67,52 @@ def main() -> None:
         c = Canvas("t", Path(d) / "t.canvas.json")
         asset = Node(
             id="a_lin", type="asset", label="林越",
-            data={"kind": "character", "name": "林越"}, status="ready",
+            data={"kind": "character", "name": "林越", "voice_id": "nv_warm"}, status="ready",
         )
         c.nodes[asset.id] = asset
         sb = c.add_node("storyboard", "分镜", data={"shots": [dict(shots[0])], "segment_no": 1})
         text = c.render_storyboard(sb.id)
         assert "台词（林越，同期声，原文一字不改）：你到底是谁。" in text, text
+
+        # 4) timeline_jobs 的对白配音计划：speaker→voice 解析 + 老画布前缀回退
+        prompt = c.add_node("prompt", "片段1", data={"episode_no": 1, "segment_no": 1})
+        gen = c.add_node("video_gen", "生成槽1")
+        gen.outputs["video"] = {"data_type": "VIDEO", "value": {"path": "a.mp4", "mime": "video/mp4"}}
+        tl = c.add_node("timeline", "整集", data={"clip_order": [gen.id], "output": {"width": 480, "height": 854}})
+        c.connect(sb.id, "shots", prompt.id, "ctx")
+        c.connect(prompt.id, "prompt", gen.id, "prompt")
+        c.connect(gen.id, "video", tl.id, "video")
+        job = c.timeline_jobs()[0]
+        plan = job["dialogue"]
+        assert len(plan) == 1, plan
+        assert plan[0]["clip_index"] == 0 and plan[0]["speaker"] == "a_lin", plan
+        assert plan[0]["voice"] == "nv_warm", "speaker 命中资产时应取其 voice_id"
+
+        # 老画布回退：无 speaker，正文「林越：我等了你十年。」前缀命中资产名
+        old_shot = {
+            "no": 1, "segment_no": 1, "duration_s": 4, "action": "抬头",
+            "subjects": [{"id": "a_lin", "name": "林越"}],
+            "dialogue": {"text": "林越：我等了你十年。", "duration_s": 2},
+        }
+        sb2 = c.add_node("storyboard", "分镜2", data={"shots": [old_shot], "segment_no": 2})
+        prompt2 = c.add_node("prompt", "片段2", data={"episode_no": 1, "segment_no": 2})
+        gen2 = c.add_node("video_gen", "生成槽2")
+        gen2.outputs["video"] = {"data_type": "VIDEO", "value": {"path": "b.mp4", "mime": "video/mp4"}}
+        c.connect(sb2.id, "shots", prompt2.id, "ctx")
+        c.connect(prompt2.id, "prompt", gen2.id, "prompt")
+        c.connect(gen2.id, "video", tl.id, "video")
+        tl.data["clip_order"] = [gen.id, gen2.id]
+        job2 = c.timeline_jobs()[0]
+        plan2 = job2["dialogue"]
+        legacy = next(l for l in plan2 if l["clip_index"] == 1)
+        assert legacy["speaker"] == "林越" and legacy["voice"] == "nv_warm", legacy
+        assert legacy["text"] == "我等了你十年。", "前缀应剥掉，TTS 不读人名"
+
+        # 无主对白：default 音色，整句照读
+        sb2.data["shots"] = [dict(old_shot, dialogue={"text": "雨声渐大。", "duration_s": 1})]
+        plan3 = c.timeline_jobs()[0]["dialogue"]
+        anon = next(l for l in plan3 if l["clip_index"] == 1)
+        assert anon["speaker"] == "" and anon["voice"] == "default" and anon["text"] == "雨声渐大。", anon
 
     print("dialogue_invariants PASS")
 

@@ -1436,6 +1436,8 @@ class Canvas:
                     "clips": clips,
                     "audio": audio,
                     "tts": tts,
+                    # 逐句对白配音计划：合成时按镜头边界对齐成对白轨（见 CompositionService）
+                    "dialogue": self._dialogue_plan(clips),
                     "subtitle_text": subtitle_text,
                     "output": {
                         "width": int(output.get("width") or 1280),
@@ -1447,6 +1449,84 @@ class Canvas:
                 }
             )
         return jobs
+
+    def _voice_for(self, speaker: str, shot: dict[str, Any] | None = None) -> tuple[str, bool]:
+        """speaker（资产 id 或名字）→ (voice_id, 是否命中资产)。
+
+        音色是「声音的参考图」：角色绑固定 voice_id，每句台词才是同一个嗓音。
+        """
+        if not speaker:
+            return "default", False
+        ids = [speaker]
+        for subject in (shot or {}).get("subjects") or []:
+            if isinstance(subject, dict) and speaker in (
+                str(subject.get("id") or ""),
+                str(subject.get("name") or ""),
+            ):
+                ids.insert(0, str(subject.get("id") or ""))
+                break
+        for cand in ids:
+            node = self.nodes.get(cand)
+            if node is not None and node.type == "asset":
+                return str(node.data.get("voice_id") or "default"), True
+        for node in self.nodes.values():
+            if node.type != "asset":
+                continue
+            if speaker in (str(node.data.get("name") or ""), node.label):
+                return str(node.data.get("voice_id") or "default"), True
+        return "default", False
+
+    def _dialogue_plan(self, clips: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        """逐句对白配音计划：clip_index + 文本 + 音色。
+
+        数据源 = 每段上游 prompt 节点经 ctx 边挂的分镜 shots[].dialogue。
+        老画布没有 speaker 时回退「名字：台词」前缀（命中资产才采用并剥前缀，
+        否则整句照读，避免把普通句子误当对白拆掉）。
+        """
+        out: list[dict[str, Any]] = []
+        for index, clip in enumerate(clips):
+            for edge in self.incoming(str(clip.get("node_id") or "")):
+                if self.edge_type(edge) != "STRING" or edge.target_handle != "prompt":
+                    continue
+                prompt_node = self.nodes.get(edge.source)
+                if prompt_node is None or prompt_node.type != "prompt":
+                    continue
+                for ctx_edge in self.incoming(prompt_node.id):
+                    if ctx_edge.target_handle != "ctx":
+                        continue
+                    sb = self.nodes.get(ctx_edge.source)
+                    if sb is None or sb.type != "storyboard":
+                        continue
+                    for shot in sb.data.get("shots") or []:
+                        if not isinstance(shot, dict):
+                            continue
+                        entry = shot.get("dialogue")
+                        entries = entry if isinstance(entry, list) else [entry]
+                        for item in entries:
+                            if not isinstance(item, dict):
+                                continue
+                            text = str(item.get("text") or "").strip()
+                            if not text:
+                                continue
+                            speaker = str(item.get("speaker") or "").strip()
+                            voice, found = self._voice_for(speaker, shot)
+                            if not speaker:
+                                match = re.match(r"^([^：:，,。]{1,12})\s*[：:]\s*(.+)$", text, re.DOTALL)
+                                if match:
+                                    cand = match.group(1).strip()
+                                    cand_voice, cand_found = self._voice_for(cand, shot)
+                                    if cand_found:
+                                        speaker, voice, text = cand, cand_voice, match.group(2).strip()
+                            out.append(
+                                {
+                                    "clip_index": index,
+                                    "text": text,
+                                    "speaker": speaker,
+                                    "voice": voice if voice else "default",
+                                    "speed": 1.0,
+                                }
+                            )
+        return out
 
     # ------------------------------------------------------------------
     # 给模型看的紧凑视图 / 给前端看的完整视图
