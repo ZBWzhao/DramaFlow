@@ -309,11 +309,15 @@ export async function selectTake(nodeId, takeId) {
  * 后端约定：硬校验不通过时，必须显式带上 duration 才放行（等于人工确认「我知道它有问题」）。
  * 所以这里**只有调用方明确要强制时才发 duration**，否则交给后端按校验结果决定放不放行。
  */
-export async function generateSegment(nodeId, { duration = 0, shotNo = 0 } = {}) {
+export async function generateSegment(nodeId, { duration = 0, shotNo = 0, force = false } = {}) {
   studio.notice = "";
   flag("generating", nodeId, true);
   try {
-    const body = { ...(duration ? { duration } : {}), ...(shotNo ? { shot_no: shotNo } : {}) };
+    const body = {
+      ...(duration ? { duration } : {}),
+      ...(shotNo ? { shot_no: shotNo } : {}),
+      ...(force ? { force: true } : {}),
+    };
     const data = await postJSON(`/api/studio/segments/${nodeId}/generate${qs()}`, body);
     const jobId = data.job.job_id;
     studio.jobs[jobId] = data.job;

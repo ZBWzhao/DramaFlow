@@ -704,7 +704,7 @@ async function generate(force) {
   jobActive.value = true;
   jobText.value = "正在生成…";
   try {
-    const job = await generateSegment(nodeId, { duration, shotNo });
+    const job = await generateSegment(nodeId, { duration, shotNo, force });
     if (job?.status === "succeeded" || job?.status === "done") toast("出片了");
     else if (job?.status === "cancelled") toast("已取消");
     else toast(job?.error || "生成失败");

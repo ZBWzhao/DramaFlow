@@ -113,6 +113,9 @@ class GenerateRequest(BaseModel):
     # 用户手改/前端显式传入的正文。非空时优先于服务端渲染——首帧模式也生效。
     # 不传时，若片段已被人改过（rendered_by=human），同样用已保存的人改正文。
     prompt: str | None = None
+    # 显式「忽略校验问题，强制生成」。以前靠「传个 duration 就能绕过硬校验」的
+    # 旁路——语义错位且容易误触；现在绕过必须显式声明。
+    force: bool = False
 
 
 class KeyframeRequest(BaseModel):
@@ -1166,12 +1169,22 @@ def _render_segment_text(shot: dict[str, Any], name_by_id: dict[str, str] | None
     return _shot_prompt(shot, [], name_by_id=name_by_id)
 
 
+_ASPECT_LABEL = {
+    "9:16": "竖屏 9:16",
+    "3:4": "竖屏 3:4",
+    "16:9": "横屏 16:9",
+    "4:3": "横屏 4:3",
+    "1:1": "方形 1:1",
+}
+
+
 def _keyframe_prompt(
     shot: dict[str, Any],
     ref_names: list[str],
     *,
     full_prompt: str = "",
     name_by_id: dict[str, str] | None = None,
+    aspect: str = "9:16",
 ) -> str:
     """为首帧生成写的提示词：一张静止剧照，按 8 段式写（skills/drama_craft/SKILL.md 第二节）。
 
@@ -1182,7 +1195,7 @@ def _keyframe_prompt(
     camera = _camera_text(shot)
     action = str(shot.get("action") or "").strip()
     text = (full_prompt or "").strip()
-    lines = ["电影级写实剧照，竖屏 9:16 构图。这是下面这一镜的第 0 秒画面，静止定格。"]
+    lines = [f"电影级写实剧照，{_ASPECT_LABEL.get(str(aspect or '9:16'), '竖屏 9:16')} 构图。这是下面这一镜的第 0 秒画面，静止定格。"]
     subject_text = _subject_text(shot, mapping)
     lines.append((subject_text or "画面主体见下方画面描述，人数与站位严格按描述") + "。")
     props_text = _props_text(shot, mapping)
@@ -1240,13 +1253,13 @@ def _materialize_prompt(prompt: str, refs: list[dict[str, Any]]) -> str:
 
     # 左括号也要截断：服务端渲染成 `@林直人（画面左三分之一；…）`，
     # 否则物化时会把括号里的描述当成名字的一部分查不到，引用就留在正文里了。
-    body = re.sub(r"(?<!图片)(?<!\d)@([^\s@，,。；;：:、（）()【】\[\]\"'“”]{1,24})", replace, prompt)
+    body = re.sub(r"(?<!图片)(?<!\d)@([^\s@，,。；;：:、（）()【】\[\]\"'“”]{1,64})", replace, prompt)
     body = re.sub(r"\{\{\s*ref\s*(\d+)\s*\}\}", replace_ref, body, flags=re.IGNORECASE)
     return "\n".join(lines) + "\n\n" + body
 
 
 # 与 `_materialize_prompt` 里替换用的正则保持同一套边界，避免「能渲染」但「查不到」。
-_MENTION_SCAN_RE = re.compile(r"(?<!图片)(?<!\d)@([^\s@，,。；;：:、（）()【】\[\]\"'“”]{1,24})")
+_MENTION_SCAN_RE = re.compile(r"(?<!图片)(?<!\d)@([^\s@，,。；;：:、（）()【】\[\]\"'“”]{1,64})")
 _REF_SLOT_SCAN_RE = re.compile(r"\{\{\s*ref\s*(\d+)\s*\}\}", re.IGNORECASE)
 
 
@@ -1369,10 +1382,10 @@ async def generate_segment(node_id: str, canvas: str, body: GenerateRequest) -> 
 
         view = _segment_view(graph, prompt_node, with_detail=True)
         blocking = [item for item in view["lint"]["findings"] if item["severity"] == "error"]
-        if blocking and not body.duration:
+        if blocking and not body.force:
             raise HTTPException(
                 status_code=422,
-                detail={"message": "片段未通过硬校验，先修好再生成", "findings": blocking},
+                detail={"message": "片段未通过硬校验，先修好再生成（确实要跳过请显式 force=true）", "findings": blocking},
             )
 
         refs = view["references"]
@@ -1432,6 +1445,12 @@ async def generate_segment(node_id: str, canvas: str, body: GenerateRequest) -> 
                 "resolution": str(project.get("quality") or "480P").lower(),
             }
 
+        # 30s 是视频生成请求的硬上限：超限直接拒绝（以前静默钳到 30s，尾段内容无声丢失）
+        if duration > 30:
+            raise HTTPException(
+                status_code=422,
+                detail=f"单次视频生成上限 30s，当前要生成 {duration:.0f}s；请把片段拆短（一镜一段 3-8 秒）",
+            )
         request["shot_no"] = int(shot.get("no") or body.shot_no or 1)
         request["mode"] = "first_frame" if use_keyframe else "references"
         # stale 凭据：记下本次生成看到的分镜与引用，之后分镜/形象一变即可判过期
@@ -1503,10 +1522,11 @@ async def generate_keyframe(node_id: str, canvas: str, body: KeyframeRequest) ->
             head, _, rest = full_prompt.partition("\n\n")
             full_prompt = rest.strip() or full_prompt
         shot_names = {str(ref.get("asset_id") or ""): str(ref.get("name") or "") for ref in view["references"]}
-        prompt = (body.prompt or "").strip() or _keyframe_prompt(
-            shot, ref_names, full_prompt=full_prompt, name_by_id=shot_names
-        )
         project = _project_meta(graph)
+        prompt = (body.prompt or "").strip() or _keyframe_prompt(
+            shot, ref_names, full_prompt=full_prompt, name_by_id=shot_names,
+            aspect=str(project.get("aspect_ratio") or "9:16"),
+        )
         model = body.model or _default_image_model()
         size = body.size or _default_size(project.get("aspect_ratio"), project.get("quality"))
         request = {
@@ -1988,14 +2008,25 @@ async def get_script(canvas: str, episode: int | None = None) -> dict[str, Any]:
 # 老画布升级 + 剧本导入
 # ---------------------------------------------------------------------------
 
-_SPLIT_EPISODE = re.compile(r"^\s*(?:#{1,4}\s*)?第\s*([0-9一二三四五六七八九十百]+)\s*[集章回]", re.MULTILINE)
+# 中文标题（第N集/章/回/节/话）或英文标题（Episode N / EP N）都认，
+# 否则「Episode 2」整本落进第 1 集还无告警
+_SPLIT_EPISODE = re.compile(
+    r"^\s*(?:#{1,4}\s*)?(?:第\s*[0-9一二三四五六七八九十百]+\s*[集章回节话]|(?:Episode|EP)\s*\.?\s*\d+)\b",
+    re.IGNORECASE | re.MULTILINE,
+)
 
 
 def _split_episodes(text: str) -> list[dict[str, Any]]:
-    """按「第N集」标题行切集；标题取整行（第2集 门缝里的灯），正文取标题行之后。"""
+    """按标题行切集；标题取整行（第2集 门缝里的灯 / Episode 2 xxx），正文取标题行之后。"""
     raw = text or ""
     if not any(_SPLIT_EPISODE.match(line) for line in raw.splitlines()):
-        return [{"no": 1, "title": "第1集", "chars": len(raw), "body": raw}]
+        # 长剧本却一个标题都没切到：多半是格式不认识，提示一句而不是静默当单集
+        warning = (
+            "没找到分集标题（支持「第N集/章/回/节/话」「Episode N / EP N」），已按 1 集导入"
+            if len(raw) > 3000
+            else ""
+        )
+        return [{"no": 1, "title": "第1集", "chars": len(raw), "body": raw, "warning": warning}]
     lines = raw.splitlines(keepends=True)
     heads: list[tuple[int, str]] = []
     for index, line in enumerate(lines):
@@ -2008,6 +2039,9 @@ def _split_episodes(text: str) -> list[dict[str, Any]]:
         end_index = heads[position + 1][0] if position + 1 < len(heads) else len(lines)
         body = "".join(lines[line_index + 1 : end_index]).strip()
         episodes.append({"no": position + 1, "title": head or f"第{position + 1}集", "chars": len(body), "body": body})
+    if len(episodes) == 1 and len(raw) > 3000:
+        # 长剧本只切出 1 集：可能标题格式不认识，宁可多说一句
+        episodes[0]["warning"] = "这篇剧本很长但只切出 1 集；请确认分集标题格式（第N集/Episode N）"
     return episodes
 
 
@@ -2059,7 +2093,12 @@ async def import_script(canvas: str, body: ImportScriptRequest) -> dict[str, Any
     ]
     graph.meta = meta
     revision = await _save(graph)
-    return {"ok": True, "revision": revision, "episodes": script_nodes}
+    return {
+        "ok": True,
+        "revision": revision,
+        "episodes": script_nodes,
+        "warnings": [str(item.get("warning")) for item in episodes if item.get("warning")],
+    }
 
 
 def _new_node(

@@ -1564,6 +1564,22 @@ async def _execute_composition_job(task: MediaJob, payload: dict[str, Any]) -> d
             results.append({"node_id": item["node_id"], "label": item["label"], "ok": False, "error": "输入视频尚未就绪"})
             continue
         generation_id = str(item["generation_id"])
+        # 审批与执行之间切版检测：冻结计划里的片段路径必须仍是该节点当前的采用版。
+        # args_hash 刻意不含 revision（重试要复用同一单），所以这里做内容级比对。
+        stale_clips = []
+        for clip in item["clips"]:
+            node = task.canvas.nodes.get(str(clip.get("node_id") or ""))
+            current = ((node.outputs.get("video") or {}).get("value") or {}).get("path") if node else None
+            if current and clip.get("path") and str(current) != str(clip["path"]):
+                stale_clips.append(str(clip.get("node_id")))
+        if stale_clips:
+            await _save_composition_state(task.canvas, item["node_id"], generation_id, status="error")
+            results.append({
+                "node_id": item["node_id"], "label": item["label"], "ok": False,
+                "error": f"片段 {'、'.join(stale_clips)} 的采用版本在审批后已切换；请重新审批后再合成",
+                "stale_approval": True,
+            })
+            continue
         if not await _save_composition_state(task.canvas, item["node_id"], generation_id, status="generating"):
             results.append({
                 "node_id": item["node_id"], "label": item["label"], "ok": False,
