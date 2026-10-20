@@ -1,12 +1,15 @@
 <script setup>
-/* B 版卡片：卡外标题 + 16:9 卡体 + 选中时的工具条/提示词框 + 「拖动整卡」手势 + 右侧连接点拖线。
- * 与 demo 的差别：图片来自真实 assets、工具条按钮接真实动作、卡片可拖（写回 position）、
- * 右边 ⊕ 可以按住往外拖出一条新连线（由 CanvasBoard 负责落点判定与写库）。
+/* V2 卡片：媒体层占满整卡 + 卡外标签行（14 图标 / 12 名称 / 11 分辨率）。
+ *
+ * 与 V1 的差别：
+ *  - 卡体不再「空壳」：图片/视频/文本/空态/生成中/失败都是同一块媒体层的不同状态；
+ *  - 宽高比固定（媒体 16:9、文本 3:2），宽度取 300/360/420 三档（geometry.js）；
+ *  - 提示词输入框从这个组件里移走了（HUD 检查器，见 CardInspector.vue）——
+ *    它以前渲染在 transform:scale 的容器里，缩放时会变形；
+ *  - 工具条也移走（检查器底部参数条承担生成/上传/历史/详情）。
  */
 import { computed, onBeforeUnmount, ref } from "vue";
-import { CAPTION_GAP, CAPTION_H, CARD_W, portOffset } from "./geometry.js";
-import NodeToolbar from "./NodeToolbar.vue";
-import PromptBox from "./PromptBox.vue";
+import { CAPTION_GAP, CAPTION_H, bodyHeight, cardWidth, portOffset } from "./geometry.js";
 import VideoPlayer from "./VideoPlayer.vue";
 import { progressDash, progressText } from "./progress.js";
 
@@ -25,18 +28,12 @@ const props = defineProps({
   connectMode: { type: Boolean, default: false },
 });
 const emit = defineEmits([
-  "select", "send", "change", "move", "drag", "generate", "upload", "history", "detail", "edge-start",
-  "open-video", "retry",
+  "select", "move", "drag", "edge-start", "open-video", "retry", "context-menu", "detail",
 ]);
 
-/* 端口纵坐标：与 geometry.portOffset 同一公式，保证连线落点和圆点重合。
- * 锚点现在挂在 `.node` 根上（不再放在 overflow:hidden 的卡体里），
- * 所以直接用「节点左上角为原点」的 portOffset，不再扣标签行。 */
 function portTop(index, count) {
   return portOffset(props.node, index, count);
 }
-
-/* 卡外锚点与 geometry.nodeAnchor 同源：连线端点 = 圆点中心 = x/y + portOffset */
 const portOffsetFor = portOffset;
 
 function onEdgeStartFrom(event, handle, portType) {
@@ -54,29 +51,39 @@ const statusKind = computed(() => {
   if (node.status === "unknown") return "unknown";
   if (node.busy) return node.status === "generating" ? "generating" : "queued";
   if (node.status === "done") return "done";
-  if (node.status === "draft") return "draft";
   if (node.status === "ready") return "ready";
-  return "";
+  return "draft";
 });
 
-/* 进度环：后端给 step/total（1 调用模型 / 2 写回画布），没有数据时按 0/3 画起点 */
-const ring = computed(() => progressDash(props.node.progress));
+const mediaState = computed(() => {
+  if (statusKind.value === "error" || props.node.busy) return "status";
+  if (props.node.plain) return "text";
+  if (props.node.video && props.node.src) return "video";
+  if (props.node.img) return "image";
+  return "empty";
+});
+
+const ring = computed(() => progressDash(props.node.progress, 16));
 const stepText = computed(() => progressText(props.node.progress));
+const bodyH = computed(() => props.node.cardBodyH || bodyHeight(props.node));
+const cardW = computed(() => props.node.cardW || cardWidth(props.node));
 
 const shownOffset = computed(() => (drag.value ? offset.value : props.preview || { x: 0, y: 0 }));
 const left = computed(() => props.node.x + (shownOffset.value.x || 0));
 const top = computed(() => props.node.y + (shownOffset.value.y || 0));
 
+const failReason = computed(() => {
+  const data = props.node.raw?.data || {};
+  return String(data.generation_error || data.error || "").trim();
+});
+
 function isInteractive(target) {
   if (target?.closest?.(".handle.move")) return false; // 上下抓手就是用来拖卡的
-  return Boolean(
-    target?.closest?.("textarea, input, button, .node-menu, .handle, .prompt-box, .node-toolbar"),
-  );
+  return Boolean(target?.closest?.("button, .node-menu, .handle, input, textarea"));
 }
 
 function onPointerDown(event) {
   if (event.button !== 0 || isInteractive(event.target)) return;
-  // 点击式连线：这一下点击是「选落点」，不要顺带把卡片拖走
   emit("select", props.node.id);
   if (props.connectMode) return;
   drag.value = { sx: event.clientX, sy: event.clientY, moved: false };
@@ -91,7 +98,6 @@ function onPointerMove(event) {
   const dy = (event.clientY - drag.value.sy) / z;
   if (Math.abs(dx) > 2 || Math.abs(dy) > 2) drag.value.moved = true;
   offset.value = { x: dx, y: dy };
-  // 通知画板：同组卡片跟着移动（松手前不写库，只做视觉效果）
   if (drag.value.moved) emit("drag", { id: props.node.id, dx, dy });
 }
 
@@ -110,21 +116,12 @@ function onPointerUp() {
   offset.value = { x: 0, y: 0 };
 }
 
-// 拖到一半组件被卸载（画布切换/节点被删）时，别把 window 监听留在外面
 onBeforeUnmount(() => {
   window.removeEventListener("pointermove", onPointerMove);
   window.removeEventListener("pointerup", onPointerUp);
   drag.value = null;
 });
 
-/* 右侧连接点：按住就能拖出一条线，落点由画板判定 */
-function onEdgeStart(event) {
-  if (event.button !== 0) return;
-  event.stopPropagation();
-  emit("edge-start", { id: props.node.id, clientX: event.clientX, clientY: event.clientY });
-}
-
-/* 视频大图：卡太小看不清表演，交给画板统一开灯箱 */
 function onOpenVideo() {
   emit("open-video", {
     id: props.node.id,
@@ -144,106 +141,103 @@ function onOpenVideo() {
     :class="{
       selected,
       'in-selection': inSelection && !selected,
-      plain: node.plain,
       dragging: !!drag,
       'gen-busy': node.busy,
       'gen-failed': node.failed,
       'gen-done': node.justDone,
+      'is-fail': statusKind === 'error',
       connectable,
       ['status-' + statusKind]: !!statusKind,
     }"
-    :style="{ left: left + 'px', top: top + 'px', width: CARD_W + 'px' }"
+    :style="{ left: left + 'px', top: top + 'px', width: cardW + 'px' }"
     @pointerdown="onPointerDown"
     @click.stop="emit('select', node.id)"
+    @dblclick.stop="mediaState === 'video' ? onOpenVideo() : emit('select', node.id)"
     @contextmenu.prevent.stop="emit('context-menu', { node, clientX: $event.clientX, clientY: $event.clientY })"
   >
-    <!-- 聚焦闪一下：左侧列表/搜索跳过来时告诉人「是这一张」 -->
     <span v-if="node.flash" class="focus-flash" aria-hidden="true"></span>
-    <NodeToolbar
-      v-if="selected"
-      :node="node"
-      @generate="emit('generate', $event)"
-      @upload="emit('upload', $event)"
-      @history="emit('history', $event)"
-      @detail="emit('detail', $event)"
-    />
 
-    <div class="node-caption">
-      <span class="cap-glyph">{{ node.glyph || "▣" }}</span>
-      <span class="cap-title">{{ node.title }}</span>
-      <span v-if="node.dims" class="cap-dims">{{ node.dims }}</span>
+    <!-- 卡外标签行：类型图标 14 + 名称 12 + 右对齐分辨率 11（tabular） -->
+    <div class="node-head">
+      <span class="nh-ic" aria-hidden="true">{{ node.glyph || "▣" }}</span>
+      <span class="nh-nm">{{ node.title }}</span>
+      <span class="nh-res">{{ node.res || node.dims || "" }}</span>
     </div>
 
-    <div class="node-body" :class="{ 'is-text': node.plain, 'is-video': node.video }">
-      <span
-        v-if="statusKind === 'done'"
-        class="status-mark"
-      >已生成</span>
-      <template v-if="node.plain">
-        <p class="node-text">{{ node.prompt }}</p>
-      </template>
-      <template v-else>
-        <VideoPlayer
-          v-if="node.video && node.src"
-          :src="node.src"
-          :title="node.title"
-          :duration="node.durationSeconds || 0"
-          :enabled="zoom >= 0.45"
-          @open="onOpenVideo"
-        />
-        <img v-else-if="node.img" :src="node.img" :alt="node.title" draggable="false" />
-        <span v-else class="node-empty-icon">{{ node.glyph || "▣" }}</span>
-        <span v-if="node.badge" class="ai-tag">{{ node.badge }}</span>
+    <!-- 卡体：媒体层占满整卡 -->
+    <div class="node-card" :style="{ height: bodyH + 'px' }">
+      <div class="node-media" :class="'media-' + mediaState">
+        <template v-if="mediaState === 'text'">
+          <div class="media-text">{{ node.prompt }}</div>
+        </template>
 
-        <!-- 生成状态：服务端状态 + 本地"已提交"共同驱动；失败给一键重试 -->
-        <div v-if="node.busy" class="gen-overlay" aria-live="polite">
-          <svg class="gen-ring" viewBox="0 0 32 32" aria-hidden="true">
-            <circle class="gen-ring-track" cx="16" cy="16" r="13" />
-            <circle
-              class="gen-ring-bar"
-              cx="16"
-              cy="16"
-              r="13"
-              :stroke-dasharray="ring.circumference"
-              :stroke-dashoffset="ring.offset"
-            />
-          </svg>
-          <span class="gen-text">{{ node.progress?.label || node.busyLabel || "生成中" }}…</span>
-          <span v-if="stepText" class="gen-steps">{{ stepText }}</span>
-        </div>
-        <div v-else-if="node.failed" class="gen-overlay is-error">
-          <span class="gen-fail-icon" aria-hidden="true">!</span>
-          <span class="gen-text">生成失败</span>
-          <button type="button" class="gen-retry" @click.stop="emit('retry', node)">重试</button>
-        </div>
-        <div v-else-if="statusKind === 'discarded'" class="gen-overlay">
-          <span class="gen-fail-icon" aria-hidden="true">!</span>
-          <span class="gen-text">结果已过期，未写入</span>
-        </div>
-        <div v-else-if="statusKind === 'unknown'" class="gen-overlay">
-          <span class="gen-unknown-icon" aria-hidden="true">?</span>
-          <span class="gen-text">结果不确定，待核对</span>
-        </div>
+        <template v-else-if="mediaState === 'video'">
+          <VideoPlayer
+            :src="node.src"
+            :title="node.title"
+            :duration="node.durationSeconds || 0"
+            :enabled="zoom >= 0.45"
+            @open="onOpenVideo"
+          />
+          <span v-if="node.durationSeconds" class="badge">{{ node.durationText }}</span>
+        </template>
 
-        <div v-if="!node.video && node.attempts" class="attempts">
-          <span class="attempts-title">尝试：</span>
-          <button
-            v-for="label in node.attempts"
-            :key="label"
-            class="attempt"
-            type="button"
-            @click.stop="emit('select', node.id)"
-          >
-            ⬆ {{ label }}
-          </button>
-        </div>
+        <template v-else-if="mediaState === 'image'">
+          <img :src="node.img" :alt="node.title" draggable="false" />
+        </template>
 
-        <span class="node-menu" title="更多" @click.stop="emit('detail', node)">⋯</span>
-      </template>
+        <template v-else-if="mediaState === 'empty'">
+          <div class="media-empty">
+            <div class="slot" aria-hidden="true">⤒</div>
+            <div class="act">{{ node.canUpload ? "上传 / 拖入图片" : "等待上游素材" }}</div>
+          </div>
+        </template>
+
+        <template v-else-if="node.busy">
+          <div class="media-progress" aria-live="polite">
+            <svg class="ring" viewBox="0 0 40 40" aria-hidden="true">
+              <circle class="ring-track" cx="20" cy="20" r="16" />
+              <circle
+                class="ring-bar"
+                cx="20"
+                cy="20"
+                r="16"
+                :stroke-dasharray="ring.circumference"
+                :stroke-dashoffset="ring.offset"
+              />
+            </svg>
+            <div class="t1">{{ node.progress?.label || node.busyLabel || "生成中" }}</div>
+            <div class="t2">{{ stepText || "排队中" }}</div>
+          </div>
+        </template>
+
+        <template v-else-if="statusKind === 'discarded'">
+          <div class="media-fail is-muted">
+            <div class="t1">结果已过期，未写入画布</div>
+          </div>
+        </template>
+
+        <template v-else-if="statusKind === 'unknown'">
+          <div class="media-fail is-muted">
+            <div class="t1">结果不确定，待人工核对</div>
+          </div>
+        </template>
+
+        <template v-else>
+          <div class="media-fail">
+            <div class="t1">生成失败{{ failReason ? ` · ${failReason}` : "" }}</div>
+            <button type="button" class="retry" @click.stop="emit('retry', node)">重试</button>
+          </div>
+        </template>
+
+        <!-- 角标：已生成（右上，文字 + 形状可辨）/ 来源（左下） -->
+        <span v-if="statusKind === 'done' && !node.busy" class="tag-ok">已生成</span>
+        <span v-if="node.badge && mediaState === 'image'" class="tag-src">{{ node.badge }}</span>
+        <span class="node-menu" title="详情" @click.stop="emit('detail', node)">⋯</span>
+      </div>
     </div>
 
-    <!-- 四向锚点放在卡体外：卡体 overflow:hidden 会把卡外的把手裁掉，
-         而且 hover 时它们要能压在邻卡之上。左右是真实类型化端口，上下是「拖动整卡」的抓手。 -->
+    <!-- 端口锚点（卡体外，避免被 overflow 裁掉）：左右是真实类型化端口，上下是拖动抓手 -->
     <span
       v-for="([portName, portType], index) in inPorts"
       :key="'in-' + portName"
@@ -259,24 +253,7 @@ function onOpenVideo() {
       :title="`点击选择起点，或按住拖到目标卡 · ${portName} (${portType})`"
       @pointerdown.stop="onEdgeStartFrom($event, portName, portType)"
     />
-    <span
-      v-if="selected"
-      class="handle move top"
-      title="拖动卡片"
-      aria-hidden="true"
-    />
-    <span
-      v-if="selected"
-      class="handle move bottom"
-      title="拖动卡片"
-      aria-hidden="true"
-    />
-
-    <PromptBox
-      v-if="selected"
-      :node="node"
-      @send="emit('send', $event)"
-      @change="emit('change', $event)"
-    />
+    <span v-if="selected" class="handle move top" title="拖动卡片" aria-hidden="true" />
+    <span v-if="selected" class="handle move bottom" title="拖动卡片" aria-hidden="true" />
   </div>
 </template>

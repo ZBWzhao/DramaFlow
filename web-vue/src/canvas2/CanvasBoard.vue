@@ -10,11 +10,12 @@ import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue"
 import { ElMessage, ElMessageBox } from "element-plus";
 import { actions, state } from "../store.js";
 import { assetUrl, mediaOf } from "../utils.js";
-import { CARD_W, cardHeight, clamp, edgePath, nodeAnchor, portOffset } from "./geometry.js";
+import { bodyHeight, cardHeight, cardWidth, clamp, edgePath, nodeAnchor, portOffset } from "./geometry.js";
 import { dragMoves } from "./positions.js";
 import { generationProgress } from "./progress.js";
 import { goHome, openStudioForCurrent, openStudioTab } from "../shell/shellStore.js";
 import NodeCard from "./NodeCard.vue";
+import CardInspector from "./CardInspector.vue";
 import HeroPage from "./HeroPage.vue";
 import DockBar from "./DockBar.vue";
 import SidebarPanel from "./SidebarPanel.vue";
@@ -162,7 +163,7 @@ const visibleNodes = computed(() => {
   const bottom = (rect.height - view.value.y + pad) / view.value.z;
   return boardNodes.value.filter((node) => {
     const h = cardHeight(node);
-    return node.x + CARD_W > left && node.x < right && node.y + h > top && node.y < bottom;
+    return node.x + cardWidth(node) > left && node.x < right && node.y + h > top && node.y < bottom;
   });
 });
 
@@ -226,6 +227,8 @@ function bodyText(node) {
   return values.find((item) => item?.data_type === "STRING" && typeof item.value === "string")?.value || "";
 }
 
+const projectMeta = computed(() => state.canvas?.meta?.project || {});
+
 const boardNodes = computed(() => (state.canvas.nodes || []).map((node) => {
   const media = mediaOf(node);
   const type = node.type;
@@ -246,6 +249,15 @@ const boardNodes = computed(() => (state.canvas.nodes || []).map((node) => {
     glyph: TYPE_GLYPH[type] || "▣",
     tag: TYPE_LABEL[type] || type,
     dims: node.data?.width && node.data?.height ? `${node.data.width} × ${node.data.height}` : "",
+    // V2 卡片几何（宽高比固定 + 三档宽度）：NodeCard 直接用，连线/剔除/适配同一口径
+    cardW: cardWidth({ type }),
+    cardBodyH: bodyHeight({ type, plain: TEXT_TYPES.has(type) && !media }),
+    // 标签行右对齐的元信息：真实像素优先，否则给项目画幅 + 画质
+    res: node.data?.width && node.data?.height
+      ? `${node.data.width} × ${node.data.height}`
+      : `${projectMeta.value.aspect_ratio || "16:9"} · ${String(projectMeta.value.quality || "720P").toUpperCase()}`,
+    seconds: Number(node.data?.duration_s || node.data?.duration || 0) || null,
+    durationText: durationSeconds ? `${Math.floor(durationSeconds / 60)}:${String(Math.round(durationSeconds % 60)).padStart(2, "0")}` : "",
     img: media && !isVideo ? assetUrl(media.path) : "",
     src: media ? assetUrl(media.path) : "",
     video: isVideo,
@@ -342,6 +354,156 @@ const marqueeStyle = computed(() => {
   };
 });
 
+/* ---------- 卡片检查器（HUD / 屏幕坐标系） ----------
+ * 为什么不放进 .world：world 上有 transform: scale()，放进去会随缩放变形。
+ * 定位一律用选中节点元素的 getBoundingClientRect()（已含平移+缩放），
+ * 所以只需要在「选中 / 平移 / 缩放 / 拖动 / 窗口变化」时重算。 */
+const INSPECTOR_W = 620;
+const inspectorWrap = ref(null);
+const inspectorStyle = ref({ left: "-9999px", top: "0px" });
+let inspectorRaf = 0;
+
+// 多选不出检查器（出多选浮条）
+const inspectorNode = computed(() => (
+  selection.value.length === 1 && state.selectedId === selection.value[0]
+    ? byId.value[state.selectedId] || null
+    : null
+));
+
+const inspectorRefs = computed(() => {
+  const node = inspectorNode.value;
+  if (!node) return [];
+  const target = node.id;
+  const sourceIds = new Set(
+    (state.canvas.edges || [])
+      .filter((edge) => (edge.target ?? edge.to) === target)
+      .map((edge) => edge.source ?? edge.from),
+  );
+  return (state.canvas.nodes || [])
+    .filter((raw) => sourceIds.has(raw.id))
+    .map((raw) => {
+      const board = byId.value[raw.id];
+      const media = mediaOf(raw);
+      return {
+        id: raw.id,
+        title: raw.label || raw.id,
+        src: media ? assetUrl(media.path) : "",
+        kind: media?.port === "video" ? "video" : "image",
+        desc: bodyText(raw),
+        duration: board?.durationText || "",
+      };
+    })
+    .filter((item) => item.src || item.desc);
+});
+
+const providerLabel = computed(() => (
+  state.mediaProvider === "mock" ? "mock · 不产生费用" : (state.mediaProvider || "占位")
+));
+const modelLabel = computed(() => state.mediaModel || "默认模型");
+
+function positionInspector() {
+  inspectorRaf = 0;
+  const node = inspectorNode.value;
+  const wrap = inspectorWrap.value?.$el || inspectorWrap.value;
+  if (!node || !wrap) return;
+  const w = INSPECTOR_W;
+  // 自然高度 = 头部 32 + 底部 44 + 正文内容高度；不能拿被 max-height 夹过的 offsetHeight，
+  // 否则检查器会越缩越小。
+  const bodyEl = wrap.querySelector?.(".ins-body");
+  const natural = 32 + 44 + (bodyEl?.scrollHeight || 220);
+  const desired = Math.min(natural, Math.round(window.innerHeight * 0.7), 560);
+  if (view.value.z < 0.4) {
+    // 缩得太小：节点本身已经承载不了信息，检查器贴视口右侧固定
+    const left = Math.max(16, window.innerWidth - w - 20);
+    inspectorStyle.value = { left: `${left}px`, top: "88px", maxHeight: `${desired}px` };
+    return;
+  }
+  const el = stageRef.value?.querySelector(`.node[data-id="${node.id}"]`);
+  if (!el) return;
+  const r = el.getBoundingClientRect();
+  const pad = 12;
+  const minY = 72;
+  const stage = stageRect();
+  // 不允许压住左侧项目栏：检查器是画布 HUD，不是全屏弹层
+  const minX = Math.max(16, stage.left + 8);
+  const maxX = window.innerWidth - 16 - w;
+  const maxY = window.innerHeight - 16;
+  const fitH = 196; // 低于这个高度就不值得放在这个方向了
+  let left = 0;
+  let top = 0;
+  let maxH = desired;
+  const belowTop = r.bottom + pad;
+  const aboveTop = r.top - pad - desired;
+  const rightLeft = r.right + pad;
+  const leftLeft = r.left - pad - w;
+  if (belowTop + fitH <= maxY) {
+    // 首选卡片正下方：阅读顺序最自然
+    top = belowTop;
+    maxH = Math.min(desired, maxY - top);
+    left = clampRect(r.left, minX, Math.max(minX, maxX));
+  } else if (aboveTop >= minY) {
+    top = Math.max(minY, aboveTop);
+    maxH = Math.min(desired, r.top - pad - top);
+    left = clampRect(r.left, minX, Math.max(minX, maxX));
+  } else if (rightLeft <= maxX) {
+    left = rightLeft;
+    top = clampRect(r.top, minY, Math.max(minY, maxY - 120));
+    maxH = Math.min(desired, maxY - top);
+  } else if (leftLeft >= minX) {
+    left = leftLeft;
+    top = clampRect(r.top, minY, Math.max(minY, maxY - 120));
+    maxH = Math.min(desired, maxY - top);
+  } else {
+    // 四个方向都放不下（卡片比视口还大）：贴右侧下部，允许压住卡片边缘
+    left = Math.max(minX, maxX);
+    top = Math.max(minY, maxY - desired);
+    maxH = desired;
+  }
+  // 底部 dock / AI 球是常驻操作区：检查器宁可缩高度，也不要压住它们
+  const dockEl = document.querySelector(".cv2 .dock");
+  const orbEl = document.querySelector(".cv2-agent-launcher");
+  const obstacles = [dockEl, orbEl].filter(Boolean).map((el) => el.getBoundingClientRect());
+  for (const ob of obstacles) {
+    const overlapX = left + w > ob.left - 8 && left < ob.right + 8;
+    const overlapY = top + maxH > ob.top + 4 && top < ob.bottom - 4;
+    if (!overlapX || !overlapY) continue;
+    const shifted = ob.left - 12 - w;
+    if (shifted >= minX) left = shifted;
+    else maxH = Math.min(maxH, Math.max(120, ob.top - 8 - top));
+  }
+  inspectorStyle.value = { left: `${Math.round(left)}px`, top: `${Math.round(top)}px`, maxHeight: `${Math.round(maxH)}px` };
+}
+
+function clampRect(value, low, high) {
+  return Math.min(Math.max(low, value), Math.max(low, high));
+}
+
+function scheduleInspector() {
+  if (inspectorRaf) return;
+  inspectorRaf = requestAnimationFrame(positionInspector);
+}
+
+watch(
+  () => [
+    inspectorNode.value?.id,
+    view.value.x,
+    view.value.y,
+    view.value.z,
+    dragPreview.value?.dx,
+    dragPreview.value?.dy,
+  ],
+  () => scheduleInspector(),
+  { flush: "post" },
+);
+watch(inspectorNode, () => nextTick(scheduleInspector));
+onMounted(() => {
+  window.addEventListener("resize", scheduleInspector);
+});
+onBeforeUnmount(() => {
+  window.removeEventListener("resize", scheduleInspector);
+  if (inspectorRaf) cancelAnimationFrame(inspectorRaf);
+});
+
 function stageRect() {
   return stageRef.value?.getBoundingClientRect() || { left: 0, top: 0, width: 1200, height: 800 };
 }
@@ -350,7 +512,7 @@ function fit() {
   const rect = stageRect();
   const nodes = boardNodes.value;
   if (!nodes.length || !rect.width) return;
-  const maxX = Math.max(...nodes.map((node) => node.x + CARD_W));
+  const maxX = Math.max(...nodes.map((node) => node.x + cardWidth(node)));
   const maxY = Math.max(...nodes.map((node) => node.y + cardHeight(node)));
   const z = clamp(Math.min(rect.width / (maxX + 200), rect.height / (maxY + 200)), 0.2, 1.1);
   view.value = { x: (rect.width - maxX * z) / 2, y: (rect.height - maxY * z) / 2, z };
@@ -364,7 +526,7 @@ function focusFirst() {
   const z = clamp(0.95, 0.4, 1.1);
   view.value = {
     z,
-    x: rect.width / 2 - (first.x + CARD_W / 2) * z,
+    x: rect.width / 2 - (first.x + cardWidth(first) / 2) * z,
     y: rect.height / 3 - (first.y + 110) * z,
   };
 }
@@ -490,7 +652,7 @@ function selectInBox(box) {
     y2: (y2 - view.value.y) / z,
   };
   const hit = (boardNodes.value || []).filter((node) => {
-    const nx2 = node.x + CARD_W;
+    const nx2 = node.x + cardWidth(node);
     const ny2 = node.y + cardHeight(node);
     return nx2 >= world.x1 && node.x <= world.x2 && ny2 >= world.y1 && node.y <= world.y2;
   }).map((node) => node.id);
@@ -558,7 +720,7 @@ async function addNode(clientX, clientY, type = "image_gen") {
     const created = await actions.createNode({
       type,
       label: ADDABLE[type] || "新节点",
-      position: { x: Math.round(point.x - CARD_W / 2), y: Math.round(point.y - 100) },
+      position: { x: Math.round(point.x - 180), y: Math.round(point.y - 100) },
     });
     if (created?.node_id || created?.id) state.selectedId = created.node_id || created.id;
     showToast(`已新建一张${ADDABLE[type] || "节点"}卡`);
@@ -579,7 +741,7 @@ function focusNode(id) {
   const rect = stageRect();
   view.value = {
     ...view.value,
-    x: rect.width / 2 - (node.x + CARD_W / 2) * view.value.z,
+    x: rect.width / 2 - (node.x + cardWidth(node) / 2) * view.value.z,
     y: rect.height / 2 - (node.y + cardHeight(node) / 2) * view.value.z,
   };
   flashId.value = id;
@@ -791,11 +953,12 @@ function candidateFor(worldPoint) {
     const ports = portMatch(sourceNode.type, handle, node.type);
     if (!ports) continue;
     const height = cardHeight(node);
+    const width = cardWidth(node);
     if (
-      worldPoint.x < node.x - pad || worldPoint.x > node.x + CARD_W + pad
+      worldPoint.x < node.x - pad || worldPoint.x > node.x + width + pad
       || worldPoint.y < node.y - pad || worldPoint.y > node.y + height + pad
     ) continue;
-    const dx = worldPoint.x - (node.x + CARD_W / 2);
+    const dx = worldPoint.x - (node.x + width / 2);
     const dy = worldPoint.y - (node.y + height / 2);
     const distance = dx * dx + dy * dy;
     if (distance < bestDistance) {
@@ -1303,13 +1466,9 @@ onMounted(() => {
             @select="onSelect"
             @move="onMove"
             @drag="onDragPreview"
-            @send="onSend"
             @edge-start="onEdgeStart"
             @context-menu="onNodeContextMenu"
-            @generate="(n) => onToolbar('generate', n)"
             @upload="(n) => onToolbar('upload', n)"
-            @history="(n) => onToolbar('history', n)"
-            @detail="(n) => onToolbar('detail', n)"
             @retry="onRetry"
             @open-video="onOpenVideo"
           />
@@ -1382,6 +1541,27 @@ onMounted(() => {
 
       <input ref="uploadInput" type="file" accept="image/*,video/*,audio/*" class="hidden-upload" @change="onUploadPicked" />
     </main>
+
+    <!-- 卡片检查器：fixed 在视口层，pointer-events 只在面板本身打开，画布仍可拖动/缩放 -->
+    <div class="cv2-hud">
+      <CardInspector
+        v-if="inspectorNode"
+        ref="inspectorWrap"
+        :style="inspectorStyle"
+        :node="inspectorNode"
+        :refs="inspectorRefs"
+        :project="projectMeta"
+        :provider-label="providerLabel"
+        :model-label="modelLabel"
+        @close="clearSelection"
+        @focus="(n) => focusNode(n.id)"
+        @send="onSend"
+        @upload="(n) => onToolbar('upload', n)"
+        @history="(n) => onToolbar('history', n)"
+        @detail="(n) => onToolbar('detail', n)"
+        @retry="onRetry"
+      />
+    </div>
 
     <div v-if="toast" class="toast">{{ toast }}</div>
   </div>

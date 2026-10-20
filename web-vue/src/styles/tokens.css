@@ -197,6 +197,7 @@
   --bg-s2: #262626;
   --bg-s3: #2b2b2b;
   --bg-s4: #383838;
+  --bg-input: #202020;   /* 提示词/输入区（03-card-inspector-spec） */
 
   /* 描边：极少用，仅需硬边时 */
   --bd-subtle: #232323;
@@ -208,6 +209,7 @@
   --tx-2: #a8a8a8;
   --tx-3: #808080;
   --tx-4: #525252;
+  --tx-card: #dcdcdc;    /* 卡片正文（03-card-inspector-spec §一.4） */
 
   /* 语义色：画布内只允许 accent / danger / warning 三类 */
   --accent-solid: #22ebe5;
