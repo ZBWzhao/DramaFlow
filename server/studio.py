@@ -2300,7 +2300,8 @@ _PRODUCE_INSTRUCTION = """把第{no}集做成可以进入「制作」的状态�
    - `props`：{{"id": "<资产 node id>", "state": "螺纹段贴住皮肤"}}
    - `action`：一件连续动作，写明起点与可见末态（「下颌绷紧、手背青筋凸起」算末态，「他很愤怒」不算），资产用 `@资产名` 引用
    - `focus` 焦点；`light`：{{"direction": "右后方", "color": "暖橙 2700K", "contrast": "高"}}
-   - `sound` 环境音/拟音；`dialogue`：{{"text": "原文台词", "duration_s": 0}}，没有台词就留空串
+   - `sound` 环境音/拟音；`dialogue`：{{"text": "原文台词", "speaker": "<说话角色的资产 node id>", "duration_s": 0}}，没有台词就留空串。
+     **有台词必须写 speaker**（谁在说），旁白/画外音留空——配音按 speaker 绑定角色音色。
    - `forbidden`：本镜禁止出现的具体东西（不能为空）
    另写 `data.episode_no` = {no}，`data.segment_no` 从 1 连续编号。
 3. 从剧本里提取角色 / 场景 / 道具资产（每类都要），各建一个 asset 节点，**只交字段**：

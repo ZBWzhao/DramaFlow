@@ -1160,7 +1160,10 @@ class Canvas:
             bits.append("光线：" + rules)
         dialogue = shot.get("dialogue") if isinstance(shot.get("dialogue"), dict) else {}
         if str(dialogue.get("text") or "").strip():
-            bits.append(f"台词：{dialogue['text']}")
+            speaker = str(dialogue.get("speaker") or "").strip()
+            who = name_by_id.get(speaker) or speaker
+            # 说话人写进提示词，配音阶段才知道这句该用谁的嗓音
+            bits.append(f"台词（{who}，同期声，原文一字不改）：{dialogue['text']}" if who else f"台词：{dialogue['text']}")
         if shot.get("focus"):
             bits.append("焦点：" + str(shot["focus"]))
         forbidden = shot.get("forbidden")

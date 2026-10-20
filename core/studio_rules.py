@@ -447,6 +447,21 @@ def lint_segment(
 
     findings: list[Finding] = []
     findings.extend(check_shots(items, name_by_id=name_by_id))
+    # speaker 必须能落到具体资产：写了个查无此人的名字，配音阶段就不知道用谁的嗓音
+    _known_ids = {str(k) for k in (name_by_id or {})}
+    _known_names = {str(v) for v in (name_by_id or {}).values()}
+    for shot in items:
+        d = shot.get("dialogue") if isinstance(shot.get("dialogue"), Mapping) else {}
+        spk = str(d.get("speaker") or "").strip()
+        if spk and spk not in _known_ids and spk not in _known_names:
+            findings.append(
+                _error(
+                    "segment.dialogue.speaker_unknown",
+                    f"台词说话人「{spk}」不是本片段引用的资产；改成 @资产名 或对应资产 id，配音才能绑定音色",
+                    speaker=spk,
+                )
+            )
+            break  # 一条足够，别刷屏
     findings.extend(check_segment_duration(duration_s, dialogue))
     findings.extend(check_references(prompt, references, name_by_id=name_by_id))
 

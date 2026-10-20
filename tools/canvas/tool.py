@@ -146,6 +146,7 @@ class Light(BaseModel):
 
 class Dialogue(BaseModel):
     text: str = Field("", description="同期台词原文，一字不改；没有就留空")
+    speaker: str = Field("", description="说话角色：资产 node id 或资产名；旁白/画外音留空")
     duration_s: float = Field(0, ge=0, description="台词时长秒")
 
 
