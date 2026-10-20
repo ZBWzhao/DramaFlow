@@ -19,9 +19,21 @@
         </button>
       </div>
 
+      <div class="q-filter">
+        <button
+          v-for="f in qFilters"
+          :key="f.key"
+          class="chip"
+          :class="{ on: qFilter === f.key }"
+          @click="qFilter = f.key"
+        >
+          {{ f.label }}{{ f.key === "stale" && staleCount ? ` ${staleCount}` : "" }}
+        </button>
+      </div>
+
       <div class="pv-scroll pv-q-scroll">
         <button
-          v-for="seg in studio.segments"
+          v-for="seg in visibleSegments"
           :key="seg.node_id"
           class="q-row"
           :class="{ on: seg.node_id === studio.activeSegmentId }"
@@ -37,6 +49,11 @@
               <span>{{ seg.duration_s }}s</span>
               <span>{{ seg.take_count || 0 }} 版</span>
               <span v-if="seg.keyframe_path" class="q-kf">首帧</span>
+              <span
+                v-if="seg.keyframe_stale === true || seg.video_stale === true"
+                class="q-stale"
+                :title="seg.stale_reason || '上游已变更，产物已过期'"
+              >过期</span>
             </span>
           </span>
           <span class="q-st" :class="seg.status">{{ statusText(seg.status) }}</span>
@@ -52,6 +69,11 @@
           <h3>{{ detail.title || "未命名片段" }}</h3>
           <span class="sub">E{{ detail.episode_no }}-{{ String(detail.segment_no).padStart(2, "0") }}</span>
           <span class="tag" :class="lintTagClass">{{ lintTagText }}</span>
+          <span
+            v-if="detail.keyframe_stale === true || detail.video_stale === true"
+            class="tag tag-stale"
+            :title="detail.stale_reason || '上游已变更，产物已过期'"
+          >产物过期</span>
         </template>
         <template v-else>
           <h3>片段详情</h3>
@@ -146,6 +168,11 @@
                 <video v-if="t.path" :src="mediaUrl(t.path)" muted preload="metadata"></video>
                 <span v-else class="ph">无</span>
                 <span v-if="t.take_id === detail.current_take_id" class="cur">当前</span>
+                <span
+                  v-else-if="t.take_id === detail.latest_take_id"
+                  class="cur new"
+                  title="刚生成的新版本；确认满意再点它设为当前"
+                >新</span>
                 <span class="cap">
                   <span>第 {{ i + 1 }} 版</span>
                   <span>{{ t.duration_s ? t.duration_s + "s" : "" }}</span>
@@ -374,6 +401,23 @@ const batchTotal = ref(0);
 /* 批量只跑「还没出片」的片段：出片成本高，重跑必须由人针对某一镜单独决定。 */
 const pendingList = computed(() => studio.segments.filter((s) => !s.has_video && s.status !== "generating"));
 const pendingDuration = computed(() => pendingList.value.reduce((sum, s) => sum + Number(s.duration_s || 0), 0));
+
+// 队列筛选：过期 = 首帧/已采用视频落后于当前分镜或形象（None=无指纹，不算过期）
+const qFilter = ref("all");
+const qFilters = [
+  { key: "all", label: "全部" },
+  { key: "pending", label: "未生成" },
+  { key: "done", label: "已完成" },
+  { key: "stale", label: "过期" },
+];
+const isStale = (s) => s.keyframe_stale === true || s.video_stale === true;
+const staleCount = computed(() => studio.segments.filter(isStale).length);
+const visibleSegments = computed(() => {
+  if (qFilter.value === "stale") return studio.segments.filter(isStale);
+  if (qFilter.value === "pending") return studio.segments.filter((s) => s.status === "pending" || s.status === "no_slot");
+  if (qFilter.value === "done") return studio.segments.filter((s) => s.status === "done");
+  return studio.segments;
+});
 const isMock = computed(() => {
   const m = String(studio.project?.project?.video_model || "");
   return !m || m.startsWith("mock");
@@ -1090,5 +1134,47 @@ onMounted(async () => {
   display: flex;
   flex-wrap: wrap;
   gap: 7px;
+}
+
+/* 队列筛选 chips */
+.q-filter {
+  display: flex;
+  gap: 6px;
+  padding: 8px 12px 0;
+}
+.q-filter .chip {
+  border: 1px solid #333;
+  background: transparent;
+  color: #999;
+  border-radius: 999px;
+  padding: 2px 10px;
+  font-size: 11px;
+  cursor: pointer;
+}
+.q-filter .chip.on {
+  color: #f8f8f8;
+  border-color: #4e4e4e;
+  background: #262626;
+}
+
+/* 过期徽标：首帧/已采用视频落后于当前分镜或形象 */
+.q-stale {
+  color: #f0b429;
+  font-size: 10px;
+  line-height: 16px;
+  border: 1px solid rgba(240, 180, 41, 0.45);
+  border-radius: 4px;
+  padding: 0 4px;
+}
+.tag-stale {
+  color: #f0b429;
+  border-color: rgba(240, 180, 41, 0.45);
+}
+
+/* 未采用的最新版本：提醒「有新版等你确认」，不自动抢占当前版 */
+.take-card .cur.new {
+  background: transparent;
+  color: var(--primary);
+  border: 1px solid var(--primary);
 }
 </style>
