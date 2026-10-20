@@ -250,7 +250,10 @@ async function batchGenerate() {
   for (const a of targets) {
     try {
       const look = activeLook(a) || (a.looks || [])[0];
-      await generateLook(a.node_id, look?.id || "", look?.prompt || "");
+      // 参考链：特写/后续形象以第一个形象（正面全身锚点）为参考；首项自身无参考
+      const first = (a.looks || [])[0];
+      const basedOn = look && first && look.id !== first.id ? first.id : "";
+      await generateLook(a.node_id, look?.id || "", look?.prompt || "", basedOn);
       ok += 1;
     } catch (err) {
       failed += 1;
@@ -332,7 +335,13 @@ async function generate() {
   if (!active.value || !currentLook.value) return;
   busy.value = true;
   try {
-    await generateLook(active.value.node_id, currentLook.value.id || "", lookDraft.value.prompt || "");
+    const first = looks.value[0];
+    await generateLook(
+      active.value.node_id,
+      currentLook.value.id || "",
+      lookDraft.value.prompt || "",
+      first && currentLook.value.id !== first.id ? first.id : "",
+    );
     toast("形象图已生成");
     syncDraft();
   } catch (err) {

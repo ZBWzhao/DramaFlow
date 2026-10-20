@@ -1725,6 +1725,9 @@ class AssetGenerateRequest(BaseModel):
     prompt: str = ""
     model: str = ""
     size: str = ""
+    # 以哪个形象为参考出图（默认第一项「正面全身」）：全身定脸→特写参考全身，
+    # 同一角色两张图才不会长成两张脸。参考对象自身或无图时自动退化为无参考。
+    based_on: str = ""
 
 
 def _look_prompt(graph: Canvas, node: Any, kind: str) -> str:
@@ -1755,6 +1758,50 @@ def _look_prompt(graph: Canvas, node: Any, kind: str) -> str:
     return "\n".join(lines)
 
 
+def _look_request(
+    graph: Canvas,
+    target: Any,
+    looks: list[dict[str, Any]],
+    index: int,
+    body: "AssetGenerateRequest",
+) -> tuple[dict[str, Any], str, str]:
+    """素材图生成请求组装：锁定检查 + 参考链 + 提示词/尺寸。纯函数，可测。
+
+    返回 (request, based_on_id, ref_path)；ref_path 非空表示这次以另一形象的图为参考。
+    """
+    look = looks[index]
+    # 锁定=真锁：locked 形象禁止重新生成，防止手滑重画打乱已在镜头里用着的形象
+    if look.get("locked"):
+        raise HTTPException(status_code=409, detail="该形象已锁定；先解锁再重新生成")
+    kind = str(target.data.get("kind") or "prop")
+    # 提示词优先级：用户手改 > 画布里 Agent 写的 > 系统按规范合成。
+    # 「三视图」是旧规范留下的文本：视频模型会把并排的三个视图读成三个不同的人，
+    # 这套文本不能再进生成链路，遇到就用系统模板重算（画布里的原文不动，只是不采用）。
+    written = (body.prompt or look.get("prompt") or "").strip()
+    if "三视图" in written:
+        written = ""
+    project = _project_meta(graph)
+    # 参考链：默认以第一项（正面全身锚点）为参考出图；全身/特写同源，脸才不会漂
+    based_on_id = str(body.based_on or "") or (str(looks[0].get("id") or "") if looks else "")
+    ref_path = ""
+    if based_on_id and based_on_id != str(look.get("id") or ""):
+        for cand in looks:
+            if str(cand.get("id") or "") == based_on_id and cand.get("image_path"):
+                ref_path = str(cand["image_path"])
+                break
+    request = {
+        "prompt": written or _look_prompt(graph, target, kind),
+        "model": body.model or _default_image_model(),
+        "provider": str(getattr(_media, "active", "") or ""),
+        "size": body.size or _DEFAULT_LOOK_SIZE.get(kind, "1024x576"),
+        "ratio": project.get("aspect_ratio") or "9:16",
+    }
+    if ref_path:
+        # 参考图进生图请求（TF-router 转 data URL）；mock 忽略
+        request["references"] = [ref_path]
+    return request, based_on_id, ref_path
+
+
 @router.post("/assets/{node_id}/generate")
 async def generate_look(node_id: str, canvas: str, body: AssetGenerateRequest) -> dict[str, Any]:
     """给资产的一个形象生成参考图。Mock 下也会产出真实 PNG，链路与真模型一致。"""
@@ -1763,37 +1810,17 @@ async def generate_look(node_id: str, canvas: str, body: AssetGenerateRequest) -
     if target is None or target.type != "asset":
         raise HTTPException(status_code=404, detail=f"资产不存在：{node_id}")
 
-    kind = str(target.data.get("kind") or "prop")
     looks = [dict(look) for look in _asset_looks(graph, target)]
     index = next((i for i, look in enumerate(looks) if look.get("id") == body.look_id), None)
     if index is None:
         index = 0
     look = looks[index]
-
-    # 提示词优先级：用户手改 > 画布里 Agent 写的 > 系统按规范合成。
-    # 「三视图」是旧规范留下的文本：视频模型会把并排的三个视图读成三个不同的人，
-    # 这套文本不能再进生成链路，遇到就用系统模板重算（画布里的原文不动，只是不采用）。
-    written = (body.prompt or look.get("prompt") or "").strip()
-    if "三视图" in written:
-        written = ""
-    prompt = written or _look_prompt(graph, target, kind)
-    model = body.model or _default_image_model()
-    size = body.size or _DEFAULT_LOOK_SIZE.get(kind, "1024x576")
-    project = _project_meta(graph)
+    request, based_on_id, ref_path = _look_request(graph, target, looks, index, body)
+    model = request["model"]
+    size = request["size"]
 
     try:
-        result = await asyncio.to_thread(
-            _media.generate,
-            "image",
-            {
-                "prompt": prompt,
-                "model": model,
-                "provider": str(getattr(_media, "active", "") or ""),
-                "size": size,
-                "ratio": project.get("aspect_ratio") or "9:16",
-            },
-            _workspace,
-        )
+        result = await asyncio.to_thread(_media.generate, "image", request, _workspace)
     except Exception as exc:  # noqa: BLE001 - 直接回给前端
         raise HTTPException(status_code=502, detail=f"{type(exc).__name__}: {exc}") from exc
 
@@ -1808,6 +1835,9 @@ async def generate_look(node_id: str, canvas: str, body: AssetGenerateRequest) -
             "model": model,
             "size": size,
             "created_at": time.time(),
+            # 记录参考来源：审计「这张特写是按哪张全身画的」
+            "based_on_id": based_on_id if ref_path else "",
+            "based_on_image": ref_path,
         }
     )
     looks[index] = look
@@ -2331,6 +2361,7 @@ _PRODUCE_INSTRUCTION = """把第{no}集做成可以进入「制作」的状态�
    - `data.spec`：素材图要画成什么样——**单角度单图**，禁止「三视图」或拼图
    - `data.role`：角色填 protagonist/supporting/extra
    - **每个角色按单角度拆图**：`data.looks` 放两项独立单图，第一项「正面全身」（锚点，平光、纯底、中性表情），第二项「正脸特写」。
+     系统生成第二项时会自动以第一项全身图为参考（全身定脸→特写参考全身），无需在提示词里重复描述长相。
 4. 为每个片段建一个 prompt 节点：只写 `data.episode_no`、`data.segment_no`、`data.duration_s`（= 这一镜的 duration_s）。
    **正文不要手写**——服务端会按第 2 步的字段渲染 `data.prompt` 并置 `rendered_by="server"`；
    人改过的正文标 `rendered_by="human"`，服务端不再覆盖。

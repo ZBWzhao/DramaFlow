@@ -222,12 +222,12 @@ export async function pollProduceJob(jobId, { interval = 2000, maxMs = 15 * 60 *
   }
 }
 
-export async function generateLook(nodeId, lookId = "", prompt = "") {
+export async function generateLook(nodeId, lookId = "", prompt = "", basedOn = "") {
   flag("generating", nodeId, true);
   try {
     const data = await postJSON(
       `/api/studio/assets/${nodeId}/generate${qs()}`,
-      { look_id: lookId, prompt },
+      { look_id: lookId, prompt, based_on: basedOn || undefined },
     );
     await loadAssets();
     return data;
