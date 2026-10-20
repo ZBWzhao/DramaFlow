@@ -1355,6 +1355,7 @@ def _composition_execution_plan(req: ComposeCanvasRequest, canvas: Canvas) -> tu
                 "clips": clips,
                 "audio": audio,
                 "tts": dict(job["tts"]) if job.get("tts") else None,
+                "dialogue": job.get("dialogue") or [],
                 "subtitle_text": job.get("subtitle_text") or "",
                 "subtitle_hash": canonical_hash(job.get("subtitle_text") or ""),
                 "output": job["output"],
@@ -1623,6 +1624,53 @@ async def _execute_composition_job(task: MediaJob, payload: dict[str, Any]) -> d
                     "error": f"旁白生成失败：{type(exc).__name__}: {exc}",
                 })
                 continue
+        # 逐句对白配音：计划在审批时刻冻结；一句失败=这一条时间线失败，
+        # 少一句台词的成片是废片，不静默降级。provider 策略与旁白一致：
+        # 配置了 TTS_BASE_URL/TTS_API_KEY 用真端点，否则 mock。
+        dialogue_ready: list[dict[str, Any]] | None = []
+        if item.get("dialogue"):
+            dialogue_provider = "mock"
+            for p in tts_registry.describe():
+                if p.get("id") == "openai-compatible" and p.get("configured"):
+                    dialogue_provider = "openai-compatible"
+                    break
+            for li, ln in enumerate(item["dialogue"]):
+                text = str(ln.get("text") or "").strip()
+                if not text:
+                    continue
+                try:
+                    res = await asyncio.to_thread(
+                        tts_registry.synthesize,
+                        {
+                            "provider": dialogue_provider,
+                            "text": text,
+                            "voice": str(ln.get("voice") or "default"),
+                            "speed": float(ln.get("speed") or 1.0),
+                        },
+                        f"{task.job_id}-dl{li}",
+                    )
+                except Exception as exc:  # noqa: BLE001
+                    await _save_composition_state(
+                        task.canvas, item["node_id"], generation_id, status="error"
+                    )
+                    results.append({
+                        "node_id": item["node_id"], "label": item["label"], "ok": False,
+                        "error": f"第 {li + 1} 句对白配音失败：{exc}",
+                    })
+                    dialogue_ready = None
+                    break
+                dialogue_ready.append(
+                    {
+                        "clip_index": int(ln.get("clip_index") or 0),
+                        "path": res.path,
+                        "text": text,
+                        "voice": str(ln.get("voice") or ""),
+                    }
+                )
+            if dialogue_ready is None:
+                continue
+            if dialogue_ready:
+                render_plan["dialogue"] = {"lines": dialogue_ready}
         duration = sum(float((clip.get("asset") or {}).get("duration") or 0) for clip in item["clips"])
         if item.get("subtitle_text"):
             subtitle_relative = f"assets/rendered/{task.job_id}/{item['node_id']}.srt"
@@ -1655,6 +1703,7 @@ async def _execute_composition_job(task: MediaJob, payload: dict[str, Any]) -> d
             "file_size": rendered.file_size,
             "sha256": rendered.sha256,
             "generation_id": generation_id,
+            "warnings": list(rendered.warnings),
         }
         if not await _save_composition_state(
             task.canvas, item["node_id"], generation_id, status="done", output=output
