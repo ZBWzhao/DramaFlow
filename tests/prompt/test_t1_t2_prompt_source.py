@@ -76,9 +76,9 @@ def test_references_mode_human_text_without_mentions(env) -> None:
 def test_dangling_mention_is_rejected(env) -> None:
     env.set_human_text("参考 @不存在的人 站好。")
 
-    # 传 duration 会跳过「未通过硬校验」的 422（§2.3）：闭包断言必须自己挡住。
+    # 显式 force=true 跳过硬校验（旁路收窄后唯一的出口）：闭包断言必须自己挡住。
     with pytest.raises(HTTPException) as caught:
-        env.generate(duration=5)
+        env.generate(force=True)
 
     detail = caught.value.detail
     assert caught.value.status_code == 422
@@ -91,16 +91,18 @@ def test_dangling_mention_also_caught_by_lint_without_duration(env) -> None:
     with pytest.raises(HTTPException) as caught:
         env.generate()
 
-    # 不传 duration 时先被体检拦下（refs.dangling_mention），同样不发请求。
+    # 不传 force 时先被体检拦下（refs.dangling_mention），同样不发请求；
+    # detail 携带 findings 供制作页展示拦截原因。
     assert caught.value.status_code == 422
-    assert caught.value.detail["message"] == "片段未通过硬校验，先修好再生成"
+    assert "片段未通过硬校验" in caught.value.detail["message"]
+    assert caught.value.detail["findings"]
 
 
 def test_mention_without_any_reference_edge_is_rejected(env) -> None:
     env.drop_ref_edges()
 
     with pytest.raises(HTTPException) as caught:
-        env.generate(prompt="@林直人 抬手。", duration=5)
+        env.generate(prompt="@林直人 抬手。", force=True)
 
     assert caught.value.status_code == 422
     assert "@林直人" in caught.value.detail["dangling"]

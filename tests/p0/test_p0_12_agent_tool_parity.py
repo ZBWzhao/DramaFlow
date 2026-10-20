@@ -84,8 +84,10 @@ def test_p0_12_agent_run_canvas_records_history(p0):
     node = p0.canvas_node(p0.video_id)
     takes = node["data"]["takes"]
     assert len(takes) == 2
-    assert node["data"]["current_take_id"] == takes[-1]["take_id"]
-    assert node["outputs"]["video"]["value"]["path"] == takes[-1]["path"]
+    # 采用语义（P1 修复后）：首次生成自动采用，重生成只追加、永不抢占——
+    # 当前版仍指向第一版，新版留在历史里等人工挑选。
+    assert node["data"]["current_take_id"] == takes[0]["take_id"]
+    assert node["outputs"]["video"]["value"]["path"] == takes[0]["path"]
 
 
 def test_p0_12_agent_run_canvas_survives_concurrent_edit(p0):

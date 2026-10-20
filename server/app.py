@@ -1566,9 +1566,11 @@ async def _execute_composition_job(task: MediaJob, payload: dict[str, Any]) -> d
         generation_id = str(item["generation_id"])
         # 审批与执行之间切版检测：冻结计划里的片段路径必须仍是该节点当前的采用版。
         # args_hash 刻意不含 revision（重试要复用同一单），所以这里做内容级比对。
+        # task.canvas 是画布名（str），当前采用版必须从仓储读实时画布，不能读冻结计划。
         stale_clips = []
+        current_canvas = await registry.canvas_repository.load(str(task.canvas))
         for clip in item["clips"]:
-            node = task.canvas.nodes.get(str(clip.get("node_id") or ""))
+            node = current_canvas.nodes.get(str(clip.get("node_id") or ""))
             current = ((node.outputs.get("video") or {}).get("value") or {}).get("path") if node else None
             if current and clip.get("path") and str(current) != str(clip["path"]):
                 stale_clips.append(str(clip.get("node_id")))
