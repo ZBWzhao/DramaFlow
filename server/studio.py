@@ -749,6 +749,45 @@ async def get_segment(node_id: str, canvas: str) -> dict[str, Any]:
 # ---------------------------------------------------------------------------
 
 
+@router.get("/episodes/{episode_no}/storyboard")
+async def episode_storyboard(episode_no: int, canvas: str) -> dict[str, Any]:
+    """首帧墙：整集片段按段序返回缩略图/状态/过期/台词首句。
+
+    首帧是全链路最便宜的全局质检点——批量出视频之前，先把整集静帧过一遍。
+    """
+    graph = await _load(canvas)
+    cells: list[dict[str, Any]] = []
+    for view in _segments_all(graph):
+        if int(view.get("episode_no") or 1) != int(episode_no):
+            continue
+        detail = _segment_view(graph, graph.nodes.get(view["node_id"]), with_detail=True)
+        dialogue = detail.get("dialogue") or []
+        if detail.get("keyframe_stale") or detail.get("video_stale"):
+            staleness = "stale"
+        elif not detail.get("keyframe_path"):
+            staleness = "none"
+        elif detail.get("keyframe_stale") is None:
+            staleness = "unknown"  # 旧产物无指纹，不当过期处理
+        else:
+            staleness = "fresh"
+        cells.append(
+            {
+                "node_id": detail.get("node_id"),
+                "segment_no": detail.get("segment_no"),
+                "title": detail.get("title"),
+                "duration_s": detail.get("duration_s"),
+                "thumb": detail.get("keyframe_path") or detail.get("thumbnail") or "",
+                "has_video": bool(detail.get("has_video")),
+                "status": detail.get("status"),
+                "staleness": staleness,
+                "stale_reason": detail.get("stale_reason") or "",
+                "dialogue": (str(dialogue[0].get("line") or "") if dialogue else ""),
+                "take_count": detail.get("take_count") or 0,
+            }
+        )
+    return {"ok": True, "episode_no": episode_no, "cells": cells}
+
+
 @router.post("/segments/{node_id}/prompt")
 async def save_prompt(node_id: str, canvas: str, body: PromptPatch) -> dict[str, Any]:
     """保存片段提示词。写回 content.md（若有）或 outputs 内联值。"""

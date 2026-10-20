@@ -338,6 +338,13 @@ export async function generateKeyframe(nodeId, { shotNo = 1 } = {}) {
   }
 }
 
+/** 首帧墙：整集静帧审阅（批量出片前过一遍构图/站位/一致性）。 */
+export async function loadStoryboard(episodeNo) {
+  const res = await fetch(`/api/studio/episodes/${episodeNo}/storyboard${qs()}`);
+  if (!res.ok) throw new Error((await res.json().catch(() => ({}))).detail || res.statusText);
+  return res.json();
+}
+
 let toastTimer = 0;
 /** 顶部/底部一闪而过的提示。比 window.alert 少一次点击。 */
 export function toast(message, ms = 2200) {

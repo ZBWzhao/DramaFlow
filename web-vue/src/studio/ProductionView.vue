@@ -6,6 +6,9 @@
         <h3>片段队列</h3>
         <span class="sub">{{ doneCount }}/{{ studio.segments.length }} 已出片</span>
         <span class="grow"></span>
+        <button class="btn ghost sm" :class="{ primary: leftView === 'wall' }" :disabled="busy" title="整集静帧审阅" @click="toggleWall">
+          首帧墙
+        </button>
         <button class="btn ghost sm" :disabled="busy" @click="reload">刷新</button>
       </header>
 
@@ -19,6 +22,45 @@
         </button>
       </div>
 
+      <!-- 首帧墙：整集静帧审阅（批量出片前先看构图/站位/一致性） -->
+      <div v-if="leftView === 'wall'" class="pv-scroll pv-q-scroll">
+        <div class="wall-actions">
+          <button
+            class="btn primary sm"
+            :disabled="wallBusy || !missingKeyframes.length"
+            @click="fillMissingKeyframes"
+          >
+            {{ wallBusy ? `出图中 ${wallDone}/${wallTotal}` : `补齐缺的 ${missingKeyframes.length} 张首帧` }}
+          </button>
+          <span class="sub">第 {{ currentEpisode }} 集 · {{ wall.length }} 段</span>
+        </div>
+        <div class="wall-grid">
+          <button
+            v-for="cell in wall"
+            :key="cell.node_id"
+            class="wall-cell"
+            :class="[`st-${cell.staleness}`, { hasvideo: cell.has_video }]"
+            :title="cell.stale_reason || cell.title || ''"
+            @click="pick(cell.node_id)"
+          >
+            <span class="wall-img">
+              <img v-if="cell.thumb" :src="mediaUrl(cell.thumb)" :alt="cell.title" />
+              <span v-else class="ph">无首帧</span>
+            </span>
+            <span class="wall-cap">
+              <b>S{{ cell.segment_no }}</b>
+              <span>{{ cell.duration_s }}s</span>
+              <span v-if="cell.has_video" class="ok-dot">片</span>
+              <span v-if="cell.staleness === 'stale'" class="q-stale">过期</span>
+              <span v-else-if="cell.staleness === 'unknown' && cell.thumb" class="q-unk">无指纹</span>
+            </span>
+            <span v-if="cell.dialogue" class="wall-dlg">{{ cell.dialogue }}</span>
+          </button>
+        </div>
+        <div v-if="!wall.length && !wallBusy" class="empty">这一集还没有片段</div>
+      </div>
+
+      <template v-else>
       <div class="q-filter">
         <button
           v-for="f in qFilters"
@@ -60,6 +102,7 @@
         </button>
         <div v-if="!studio.segments.length" class="empty">还没有片段<br />先在剧本页导入剧本</div>
       </div>
+      </template>
     </section>
 
     <!-- ───────────────────────── 中：工作区 -->
@@ -377,6 +420,7 @@ import {
   studio,
   loadSegments,
   loadDetail,
+  loadStoryboard,
   savePrompt,
   saveTags,
   selectTake,
@@ -418,6 +462,56 @@ const visibleSegments = computed(() => {
   if (qFilter.value === "done") return studio.segments.filter((s) => s.status === "done");
   return studio.segments;
 });
+
+// ── 首帧墙：整集静帧审阅，批量出片前的全局质检点 ──
+const leftView = ref("list");
+const wall = ref([]);
+const wallBusy = ref(false);
+const wallDone = ref(0);
+const wallTotal = ref(0);
+const currentEpisode = computed(() => Number(detail.value?.episode_no || studio.segments[0]?.episode_no || 1));
+const missingKeyframes = computed(() => wall.value.filter((c) => !c.thumb || c.staleness === "stale"));
+
+async function toggleWall() {
+  if (leftView.value === "wall") {
+    leftView.value = "list";
+    return;
+  }
+  leftView.value = "wall";
+  await refreshWall();
+}
+
+async function refreshWall() {
+  wallBusy.value = true;
+  try {
+    const data = await loadStoryboard(currentEpisode.value);
+    wall.value = data.cells || [];
+  } catch (err) {
+    toast(err?.message || "首帧墙加载失败");
+  } finally {
+    wallBusy.value = false;
+  }
+}
+
+async function fillMissingKeyframes() {
+  const targets = missingKeyframes.value.slice();
+  wallBusy.value = true;
+  wallDone.value = 0;
+  wallTotal.value = targets.length;
+  let ok = 0;
+  for (const cell of targets) {
+    try {
+      await generateKeyframe(cell.node_id, {});
+      ok += 1;
+    } catch (err) {
+      toast(`S${cell.segment_no} 首帧失败：${err?.message || "未知错误"}`, 3600);
+    }
+    wallDone.value += 1;
+  }
+  await refreshWall();
+  wallBusy.value = false;
+  toast(`首帧补齐完成：成功 ${ok}/${targets.length}`, 3600);
+}
 const isMock = computed(() => {
   const m = String(studio.project?.project?.video_model || "");
   return !m || m.startsWith("mock");
@@ -1176,5 +1270,87 @@ onMounted(async () => {
   background: transparent;
   color: var(--primary);
   border: 1px solid var(--primary);
+}
+
+/* ── 首帧墙：整集静帧审阅 ── */
+.wall-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+}
+.wall-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 8px;
+  padding: 4px 12px 16px;
+}
+.wall-cell {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 5px;
+  border: 1px solid #2c2c2c;
+  border-radius: 8px;
+  background: #1c1c1c;
+  cursor: pointer;
+  text-align: left;
+}
+.wall-cell:hover {
+  border-color: #4e4e4e;
+}
+.wall-cell.st-stale {
+  border-color: rgba(240, 180, 41, 0.5);
+}
+.wall-cell.hasvideo {
+  border-color: rgba(88, 216, 248, 0.35);
+}
+.wall-img {
+  display: block;
+  aspect-ratio: 9 / 16;
+  border-radius: 6px;
+  overflow: hidden;
+  background: #141414;
+}
+.wall-img img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+.wall-img .ph {
+  display: grid;
+  place-items: center;
+  height: 100%;
+  font-size: 10px;
+  color: #666;
+}
+.wall-cap {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  color: #bbb;
+}
+.wall-cap b {
+  color: #f8f8f8;
+}
+.ok-dot {
+  color: #58d8f8;
+  font-size: 10px;
+}
+.q-unk {
+  color: #808080;
+  font-size: 10px;
+  border: 1px solid #3a3a3a;
+  border-radius: 4px;
+  padding: 0 4px;
+}
+.wall-dlg {
+  font-size: 10px;
+  color: #888;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 </style>
