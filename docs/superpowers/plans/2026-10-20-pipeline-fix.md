@@ -1,6 +1,6 @@
 # DramaFlow 制作链路修复实施计划
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [x]`) syntax for tracking.
 
 **Goal:** 按设计文档 `docs/superpowers/specs/2026-10-20-pipeline-fix-design.md`，让 DramaFlow 正确走完短剧制作流程：有声成片、显式采用、stale 标记、一致性链、首帧墙、produce 可迭代。
 
@@ -25,10 +25,10 @@
 
 **Interfaces:** Produces: 干净的工作树。后续所有任务依赖。
 
-- [ ] **Step 1**: `git status --porcelain` 列出全部未提交文件；对每个文件 `git diff -- <file>` 检视
-- [ ] **Step 2**: 按「能否 import（`python -c "import <module>"`）、有无半截函数、是否与本次修复文件重叠」给出逐文件「完成/还原」建议表，**展示给用户拍板**
-- [ ] **Step 3**: 按用户决定执行（完成的补完提交，或 `git checkout -- <files>` 还原）
-- [ ] **Step 4**: `git status --porcelain` 输出为空，验证通过
+- [x] **Step 1**: `git status --porcelain` 列出全部未提交文件；对每个文件 `git diff -- <file>` 检视
+- [x] **Step 2**: 按「能否 import（`python -c "import <module>"`）、有无半截函数、是否与本次修复文件重叠」给出逐文件「完成/还原」建议表，**展示给用户拍板**
+- [x] **Step 3**: 按用户决定执行（完成的补完提交，或 `git checkout -- <files>` 还原）
+- [x] **Step 4**: `git status --porcelain` 输出为空，验证通过
 
 ---
 
@@ -42,7 +42,7 @@
 **Interfaces:**
 - Produces: `Canvas.record_generated_media(node_id, *, kind, path, mime, provider, mock=False, model="", duration_s=None, take_id=None, shot_no=1, mode="canvas") -> dict`（行为变更：仅当节点此前无 take 或无 current_take_id 时自动采用）；studio 侧 `_segment_view` 之后（Task 2）消费 `latest_take_id`。
 
-- [ ] **Step 1: 写失败测试** `demo/takes_invariants.py`：
+- [x] **Step 1: 写失败测试** `demo/takes_invariants.py`：
 
 ```python
 """回归：take 采用规则（首次自动采用，重生成不抢占）+ 30 版上限。"""
@@ -77,8 +77,8 @@ if __name__ == "__main__":
     main()
 ```
 
-- [ ] **Step 2**: 运行并确认失败：`E:\python_tool\python\python.exe -X utf8 demo/takes_invariants.py` → AssertionError「重生成不得抢占」
-- [ ] **Step 3**: 改 `core/canvas.py` `record_generated_media`：把
+- [x] **Step 2**: 运行并确认失败：`E:\python_tool\python\python.exe -X utf8 demo/takes_invariants.py` → AssertionError「重生成不得抢占」
+- [x] **Step 3**: 改 `core/canvas.py` `record_generated_media`：把
 
 ```python
         node.data["takes"] = takes[-30:]
@@ -98,7 +98,7 @@ if __name__ == "__main__":
 
 （注意 `takes` 变量在 append 前取的快照即旧集合：`had_take` 也可写 `if not takes_before`，二选一保持简单——用 `bool(node.data.get("current_take_id"))` 覆盖「有历史但指针丢失」的旧画布。）
 
-- [ ] **Step 4**: 改 `server/studio.py:1218-1233`，把手写 take 块整体替换为共享调用（保持 `active_job_id` 清理与 `_save`）：
+- [x] **Step 4**: 改 `server/studio.py:1218-1233`，把手写 take 块整体替换为共享调用（保持 `active_job_id` 清理与 `_save`）：
 
 ```python
             take = graph.record_generated_media(
@@ -114,8 +114,8 @@ if __name__ == "__main__":
 ```
 
 （执行时先读 1200-1235 现场块：`take` 字典构造保留 model/shot_no/mode 的既有取值来源，只把「追加+采用+outputs 写入」换成共享函数；`record_generated_media` 已写 `outputs["video"]` 与 `status`，删除手写重复。）
-- [ ] **Step 5**: 运行 `demo/takes_invariants.py` → PASS；再跑 `demo/composition_invariants.py`、`demo/invocation_invariants.py` 确认无回归
-- [ ] **Step 6**: `git add core/canvas.py server/studio.py demo/takes_invariants.py && git commit -m "feat: take 采用语义——首次自动采用，重生成不抢占（两路径统一 record_generated_media）"`
+- [x] **Step 5**: 运行 `demo/takes_invariants.py` → PASS；再跑 `demo/composition_invariants.py`、`demo/invocation_invariants.py` 确认无回归
+- [x] **Step 6**: `git add core/canvas.py server/studio.py demo/takes_invariants.py && git commit -m "feat: take 采用语义——首次自动采用，重生成不抢占（两路径统一 record_generated_media）"`
 
 ### Task 2: 片段视图暴露 latest_take_id + 前端「新/采用」
 
@@ -127,17 +127,17 @@ if __name__ == "__main__":
 **Interfaces:**
 - Consumes: Task 1 的采用规则。 Produces: `_segment_view` 返回增加 `"latest_take_id": str`；前端 `take.adopt` 动作复用既有 `POST /segments/{id}/take`。
 
-- [ ] **Step 1**: `_segment_view` 返回 dict 中现有 `current_take_id` 旁增加：
+- [x] **Step 1**: `_segment_view` 返回 dict 中现有 `current_take_id` 旁增加：
 
 ```python
             "latest_take_id": (seg_takes[-1]["take_id"] if (seg_takes := list(generation_node.data.get("takes") or [])) else ""),
 ```
 
 （以现场变量名为准：视图里已读 gen 节点 takes；若未读，则先取再挂两个字段。）
-- [ ] **Step 2**: `demo/takes_invariants.py` 增加断言：构造含 takes 的 gen 节点后，视图字段存在且 latest == 最后一个、current == 被采用的那个（直接构造 dict 或抽 `_segment_view` 可测的最小片段；若 _segment_view 强依赖 Flask 上下文则只测数据组装函数）。
-- [ ] **Step 3**: ProductionView.vue 迭代版本列表：对 `take.take_id === view.latest_take_id && take.take_id !== view.current_take_id` 的版本显示「新」徽标与「采用」按钮（点击调既有 `selectTake` action，无新接口）。
-- [ ] **Step 4**: `npm run build`（web-vue 下）通过；手测：mock 下生成两次，第二版出现「新」，点采用后 outputs 切换。
-- [ ] **Step 5**: 提交 `feat: 片段视图暴露 latest_take_id；前端新版本徽标与显式采用`
+- [x] **Step 2**: `demo/takes_invariants.py` 增加断言：构造含 takes 的 gen 节点后，视图字段存在且 latest == 最后一个、current == 被采用的那个（直接构造 dict 或抽 `_segment_view` 可测的最小片段；若 _segment_view 强依赖 Flask 上下文则只测数据组装函数）。
+- [x] **Step 3**: ProductionView.vue 迭代版本列表：对 `take.take_id === view.latest_take_id && take.take_id !== view.current_take_id` 的版本显示「新」徽标与「采用」按钮（点击调既有 `selectTake` action，无新接口）。
+- [x] **Step 4**: `npm run build`（web-vue 下）通过；手测：mock 下生成两次，第二版出现「新」，点采用后 outputs 切换。
+- [x] **Step 5**: 提交 `feat: 片段视图暴露 latest_take_id；前端新版本徽标与显式采用`
 
 ### Task 3: stale 指纹（shots_hash / refs_hash / 过期判定）
 
@@ -154,8 +154,8 @@ if __name__ == "__main__":
   - `refs_hash(refs: list[dict]) -> str`（输入 `[{"asset_id","active_look_id","image_path"}...]`，stable_hash）
   - `_segment_view` 新增 `"keyframe_stale": bool|None, "video_stale": bool|None, "stale_reason": str`（None=无指纹）
 
-- [ ] **Step 1**: studio_rules.py 尾部加三个纯函数（实现如上 Interfaces）；`json`/`hashlib` 按文件现有 import 风格补充。
-- [ ] **Step 2**: 失败测试（追加到 takes_invariants.py）：
+- [x] **Step 1**: studio_rules.py 尾部加三个纯函数（实现如上 Interfaces）；`json`/`hashlib` 按文件现有 import 风格补充。
+- [x] **Step 2**: 失败测试（追加到 takes_invariants.py）：
 
 ```python
 from core.studio_rules import stable_hash, shots_hash, refs_hash
@@ -168,9 +168,9 @@ r2 = refs_hash([{"asset_id": "a1", "active_look_id": "L1", "image_path": "q.png"
 assert r1 != r2 and stable_hash({"b": 1, "a": 2}) == stable_hash({"a": 2, "b": 1})
 ```
 
-- [ ] **Step 3**: keyframe 端点写 `data.keyframe` 处增加 `"shots_hash": shots_hash(view["shots"]), "refs_hash": refs_hash(refs_view)`（refs_view = `_reference_rows` 结果映射出 asset_id/active_look_id/image_path 三键的列表；active_look_id 需从 asset 节点 data 现取）。
-- [ ] **Step 4**: generate 端点 take 写入前计算同样两哈希，塞进 take 字典（经 Task 1 的 take 构造）。
-- [ ] **Step 5**: `_segment_view` 增加判定（伪码落地）：
+- [x] **Step 3**: keyframe 端点写 `data.keyframe` 处增加 `"shots_hash": shots_hash(view["shots"]), "refs_hash": refs_hash(refs_view)`（refs_view = `_reference_rows` 结果映射出 asset_id/active_look_id/image_path 三键的列表；active_look_id 需从 asset 节点 data 现取）。
+- [x] **Step 4**: generate 端点 take 写入前计算同样两哈希，塞进 take 字典（经 Task 1 的 take 构造）。
+- [x] **Step 5**: `_segment_view` 增加判定（伪码落地）：
 
 ```python
 def _stale(stored: str | None, current: str) -> bool | None:
@@ -179,8 +179,8 @@ def _stale(stored: str | None, current: str) -> bool | None:
 # video_stale 取 current_take 的指纹；stale_reason: "分镜已变更"/"形象已更换"
 ```
 
-- [ ] **Step 6**: 前端：片段行 `keyframe_stale||video_stale` 时显示「过期」徽标（title=stale_reason）；`===false` 不显示；null 不显示。左栏筛选加「过期」项（store 列表过滤）。
-- [ ] **Step 7**: 测试 PASS + `npm run build`；提交 `feat: 生成物 stale 指纹与过期标记（不做自动重生成）`
+- [x] **Step 6**: 前端：片段行 `keyframe_stale||video_stale` 时显示「过期」徽标（title=stale_reason）；`===false` 不显示；null 不显示。左栏筛选加「过期」项（store 列表过滤）。
+- [x] **Step 7**: 测试 PASS + `npm run build`；提交 `feat: 生成物 stale 指纹与过期标记（不做自动重生成）`
 
 ### Task 4: dialogue.speaker 字段（schema/lint/渲染/produce 指令）
 
@@ -194,12 +194,12 @@ def _stale(stored: str | None, current: str) -> bool | None:
 **Interfaces:**
 - Produces: `Dialogue{ text, speaker: str = "", duration_s: float }`；speaker 解析函数 `resolve_speaker(shots, canvas_nodes) -> name`（在 Task 5 的 canvas 侧用）。lint 新 finding id：`segment.dialogue.speaker_unknown`（error：speaker 非空但既不是本镜 subjects 的 id/名字、也不是任何资产节点 id/名字）。
 
-- [ ] **Step 1**: `Dialogue` 加 `speaker: str = Field("", description="说话角色：资产 id 或资产名；旁白留空")`。
-- [ ] **Step 2**: 渲染：`render_storyboard` 台词行改为 `台词（{speaker_name}，同期声，原文一字不改）：{text}`（speaker 为空保持原文案）。
-- [ ] **Step 3**: lint：studio_rules `lint_segment` 的 dialogue 校验处，取 `speaker`，与 `subjects`（id、name 双匹配）比对，不中再对全画布资产（调用方传入 assets 名单；若 lint 函数签名无画布访问，则只对 subjects 校验 + 未知名降级为 warning，id `_error`）。
-- [ ] **Step 4**: `_PRODUCE_INSTRUCTION` dialogue 行改为：`"dialogue": {{"text": "原文台词", "speaker": "<说话角色的资产 node id>", "duration_s": 0}}`，并补一句「有台词必须写 speaker；旁白/画外音留空」。
-- [ ] **Step 5**: 测试：构造 shots（speaker 命中/未命中）断言 finding 有无；`E:\python_tool\python\python.exe -X utf8 demo/dialogue_invariants.py` PASS。
-- [ ] **Step 6**: 提交 `feat: 台词增加 speaker 字段并接入渲染与 lint`
+- [x] **Step 1**: `Dialogue` 加 `speaker: str = Field("", description="说话角色：资产 id 或资产名；旁白留空")`。
+- [x] **Step 2**: 渲染：`render_storyboard` 台词行改为 `台词（{speaker_name}，同期声，原文一字不改）：{text}`（speaker 为空保持原文案）。
+- [x] **Step 3**: lint：studio_rules `lint_segment` 的 dialogue 校验处，取 `speaker`，与 `subjects`（id、name 双匹配）比对，不中再对全画布资产（调用方传入 assets 名单；若 lint 函数签名无画布访问，则只对 subjects 校验 + 未知名降级为 warning，id `_error`）。
+- [x] **Step 4**: `_PRODUCE_INSTRUCTION` dialogue 行改为：`"dialogue": {{"text": "原文台词", "speaker": "<说话角色的资产 node id>", "duration_s": 0}}`，并补一句「有台词必须写 speaker；旁白/画外音留空」。
+- [x] **Step 5**: 测试：构造 shots（speaker 命中/未命中）断言 finding 有无；`E:\python_tool\python\python.exe -X utf8 demo/dialogue_invariants.py` PASS。
+- [x] **Step 6**: 提交 `feat: 台词增加 speaker 字段并接入渲染与 lint`
 
 ### Task 5: timeline_jobs 输出对白配音计划（含 speaker→voice 解析、老画布回退）
 
@@ -216,9 +216,9 @@ def _stale(stored: str | None, current: str) -> bool | None:
 ]
 ```
 
-- [ ] **Step 1**: 在 `timeline_jobs` 里，组装完 clips 后，对每个 clip（video_gen/image_gen 节点）找其 prompt 入边 → prompt 节点 → ctx 入边 → storyboard 节点 `data.shots`；抽每镜 `dialogue`。speaker 解析顺序：① shot.subjects 里 id/name 匹配 → 取资产节点 `data.voice_id`；② 全画布 asset 节点 id/清洁名匹配；③ 老画布回退：`re.match(r"^([^：:]{1,20})[：:]", text)` 取前缀名匹配资产，命中则剥前缀；④ 全部落空 → `speaker=""`、voice 用 `"default"`。
-- [ ] **Step 2**: 测试：构造 canvas（storyboard→prompt→video_gen→timeline，资产带 voice_id），断言 job["dialogue"] 的 clip_index/voice/回退剥前缀行为。
-- [ ] **Step 3**: 运行 dialogue_invariants PASS + composition_invariants 无回归；提交 `feat: 成片计划冻结逐句对白（speaker→voice_id，老画布名字前缀回退）`
+- [x] **Step 1**: 在 `timeline_jobs` 里，组装完 clips 后，对每个 clip（video_gen/image_gen 节点）找其 prompt 入边 → prompt 节点 → ctx 入边 → storyboard 节点 `data.shots`；抽每镜 `dialogue`。speaker 解析顺序：① shot.subjects 里 id/name 匹配 → 取资产节点 `data.voice_id`；② 全画布 asset 节点 id/清洁名匹配；③ 老画布回退：`re.match(r"^([^：:]{1,20})[：:]", text)` 取前缀名匹配资产，命中则剥前缀；④ 全部落空 → `speaker=""`、voice 用 `"default"`。
+- [x] **Step 2**: 测试：构造 canvas（storyboard→prompt→video_gen→timeline，资产带 voice_id），断言 job["dialogue"] 的 clip_index/voice/回退剥前缀行为。
+- [x] **Step 3**: 运行 dialogue_invariants PASS + composition_invariants 无回归；提交 `feat: 成片计划冻结逐句对白（speaker→voice_id，老画布名字前缀回退）`
 
 ### Task 6: CompositionService 渲染对白轨 + 字幕
 
@@ -234,8 +234,8 @@ def _stale(stored: str | None, current: str) -> bool | None:
 ```
 
 - Produces: 成片含对白音轨；`RenderResult.warnings`；`write_dialogue_srt(path, items)`（items=[{start,end,text}]）。
-- [ ] **Step 1**: 失败测试（composition_invariants 追加）：mock TTS 两句（provider mock），dialogue.lines 挂 clip 0/1，render 后 `probe_media(final)["audio"]` 非空、`warnings == []`、srt 文件时间戳单调递增且覆盖两句文本。
-- [ ] **Step 2**: `render()` 实现（插入点：规范化片段循环后已得 `normalized` 列表）：
+- [x] **Step 1**: 失败测试（composition_invariants 追加）：mock TTS 两句（provider mock），dialogue.lines 挂 clip 0/1，render 后 `probe_media(final)["audio"]` 非空、`warnings == []`、srt 文件时间戳单调递增且覆盖两句文本。
+- [x] **Step 2**: `render()` 实现（插入点：规范化片段循环后已得 `normalized` 列表）：
 
 ```python
         # 逐 clip 测真实时长（规范化后尺寸统一，时长即成片各段时长）
@@ -303,7 +303,7 @@ def _stale(stored: str | None, current: str) -> bool | None:
 ```
 
 （执行注：此实现把「句间空隙」简化为紧密衔接——若实测观感差，改在每句 placed 后按 `room - dur` 补静音再 concat；不影响接口。）
-- [ ] **Step 3**: 混音段改造：现有 `-i audio` 分支改为最多两路音轨——
+- [x] **Step 3**: 混音段改造：现有 `-i audio` 分支改为最多两路音轨——
 
 ```python
             audio_inputs = []
@@ -330,8 +330,8 @@ def _stale(stored: str | None, current: str) -> bool | None:
 ```
 
 （落地写法：`-filter_complex "[1:a]apad[a1];[2:a]apad[a2];[a1][a2]amix=inputs=2:normalize=0[out]" -map 0:v:0 -map "[out]" -c:a aac -b:a 192k -shortest`；单轨时保持原样。）
-- [ ] **Step 4**: 字幕：`dialogue.srt` 存在时**优先**用它（subtitle 滤镜输入切到它），否则走既有 subtitle_text → write_srt 路径。`RenderResult` 加 `warnings=[]` 字段并在 `_result` 透传；worker 把 warnings 记进结果日志/任务 payload（app.py 渲染完成回写处）。
-- [ ] **Step 5**: `write_dialogue_srt`（write_srt 旁）：
+- [x] **Step 4**: 字幕：`dialogue.srt` 存在时**优先**用它（subtitle 滤镜输入切到它），否则走既有 subtitle_text → write_srt 路径。`RenderResult` 加 `warnings=[]` 字段并在 `_result` 透传；worker 把 warnings 记进结果日志/任务 payload（app.py 渲染完成回写处）。
+- [x] **Step 5**: `write_dialogue_srt`（write_srt 旁）：
 
 ```python
 def write_dialogue_srt(path: Path, items: list[dict[str, Any]]) -> None:
@@ -350,7 +350,7 @@ def write_dialogue_srt(path: Path, items: list[dict[str, Any]]) -> None:
     path.write_text("\n".join(lines), encoding="utf-8")
 ```
 
-- [ ] **Step 6**: composition_invariants PASS（含新断言）；提交 `feat: 合成支持逐句对白轨——按镜头边界对齐、混音、真实时间轴字幕`
+- [x] **Step 6**: composition_invariants PASS（含新断言）；提交 `feat: 合成支持逐句对白轨——按镜头边界对齐、混音、真实时间轴字幕`
 
 ### Task 7: compose worker 合成对白音频 + 冻结计划接线 + 失败语义
 
@@ -361,8 +361,8 @@ def write_dialogue_srt(path: Path, items: list[dict[str, Any]]) -> None:
 **Interfaces:**
 - Consumes: Task 5/6。 Produces: 审批冻结 payload 含逐句对白（args_hash 自动覆盖）；TTS 失败 → 合成失败并指明句序。
 
-- [ ] **Step 1**: freeze：`frozen.append({... "tts": ..., "dialogue": job.get("dialogue") or [], ...})`（dialogue 为纯数据，args_hash 自动包含）。
-- [ ] **Step 2**: worker（`item.get("tts")` 处理旁）：
+- [x] **Step 1**: freeze：`frozen.append({... "tts": ..., "dialogue": job.get("dialogue") or [], ...})`（dialogue 为纯数据，args_hash 自动包含）。
+- [x] **Step 2**: worker（`item.get("tts")` 处理旁）：
 
 ```python
         dialogue_lines = item.get("dialogue") or []
@@ -384,8 +384,8 @@ def write_dialogue_srt(path: Path, items: list[dict[str, Any]]) -> None:
 ```
 
 （provider 取值：跟 tts_gen 旁白同一策略——有已配置真端点则用 `openai-compatible`，否则 mock；与 `item["tts"]["provider"]` 的现有取值逻辑保持一致，执行时读现场代码复用其函数而非重写。）
-- [ ] **Step 3**: 手测：mock 服务起 8000，对演示项目（含台词）走 assemble→审批→compose，产出 final.mp4 有音轨、有字幕（ffprobe 查 audio 流 + srt 硬压后画面字幕肉眼可辨可放宽为 srt 文件存在于 render 目录）。
-- [ ] **Step 4**: 提交 `feat: compose worker 逐句配音接入（冻结计划含对白，失败明示句序）`
+- [x] **Step 3**: 手测：mock 服务起 8000，对演示项目（含台词）走 assemble→审批→compose，产出 final.mp4 有音轨、有字幕（ffprobe 查 audio 流 + srt 硬压后画面字幕肉眼可辨可放宽为 srt 文件存在于 render 目录）。
+- [x] **Step 4**: 提交 `feat: compose worker 逐句配音接入（冻结计划含对白，失败明示句序）`
 
 ### Task 8: 音色管理（voices 端点 + 资产 voice_id 编辑 + 前端）
 
@@ -395,7 +395,7 @@ def write_dialogue_srt(path: Path, items: list[dict[str, Any]]) -> None:
 - Modify: `web-vue/src/studio/AssetsView.vue`、`studioStore.js`；PreviewView.vue 合成确认框
 - Test: 手测为主（路由薄）
 
-- [ ] **Step 1**: app.py 路由（紧邻现有 providers 路由风格）：
+- [x] **Step 1**: app.py 路由（紧邻现有 providers 路由风格）：
 
 ```python
 @app.get("/api/tts/voices")
@@ -407,7 +407,7 @@ async def list_tts_voices() -> dict[str, Any]:
             "mock_available": True}
 ```
 
-- [ ] **Step 2**: studio.py 路由：
+- [x] **Step 2**: studio.py 路由：
 
 ```python
 @router.patch("/assets/{node_id}")
@@ -424,8 +424,8 @@ async def patch_asset(node_id: str, body: AssetPatch, canvas: str) -> dict[str, 
 ```
 
 （`AssetPatch(BaseModel): voice_id: str | None = None` 加进该文件 models 区。）
-- [ ] **Step 3**: AssetsView 角色卡（character）加「音色」select：mounted 时拉 `/api/tts/voices`；变更调 PATCH。PreviewView 合成确认框显示「对白 N 句 · 角色 M 个」（数据来自 assemble 响应或 segments 列表现算 dialogue 计数）。
-- [ ] **Step 4**: `npm run build` + 手测改音色→重合成（mock 忽略音色，验证链路通）；提交 `feat: 角色音色选择——voice_id 从展示字段变为消费字段`
+- [x] **Step 3**: AssetsView 角色卡（character）加「音色」select：mounted 时拉 `/api/tts/voices`；变更调 PATCH。PreviewView 合成确认框显示「对白 N 句 · 角色 M 个」（数据来自 assemble 响应或 segments 列表现算 dialogue 计数）。
+- [x] **Step 4**: `npm run build` + 手测改音色→重合成（mock 忽略音色，验证链路通）；提交 `feat: 角色音色选择——voice_id 从展示字段变为消费字段`
 
 ### Task 9: 一致性链（全身→特写参考）+ locked 真锁
 
@@ -437,7 +437,7 @@ async def patch_asset(node_id: str, body: AssetPatch, canvas: str) -> dict[str, 
 **Interfaces:**
 - Produces: `generate_look` 请求含 `"references": [全身图路径]`（当生成 look 有 based_on 且该 look 有图）；locked look 生成 → 409。
 
-- [ ] **Step 1**: generate_look 改造（在 `result = await ... _media.generate` 前）：
+- [x] **Step 1**: generate_look 改造（在 `result = await ... _media.generate` 前）：
 
 ```python
     if look.get("locked"):
@@ -450,7 +450,7 @@ async def patch_asset(node_id: str, body: AssetPatch, canvas: str) -> dict[str, 
 ```
 
 并在 request dict 增加条件键 `"references": [ref_path] if ref_path else []`（`GenerateLookArgs` 加 `based_on: str = ""`）。
-- [ ] **Step 2**: lock 路由：
+- [x] **Step 2**: lock 路由：
 
 ```python
 @router.post("/assets/{node_id}/looks/lock")
@@ -460,9 +460,9 @@ async def lock_look(node_id: str, body: LookLock, canvas: str) -> dict[str, Any]
     ...找到 look → look["locked"] = bool(body.locked) → _save
 ```
 
-- [ ] **Step 3**: 批量生成全部形象处（执行时 `grep -n "generate_all\|批量生成" server/studio.py web-vue/src/studio/AssetsView.vue` 定位）：保证循环顺序 looks[0]→后续，且每项传 `based_on=looks[0].id`（首项自身除外）。
-- [ ] **Step 4**: `_PRODUCE_INSTRUCTION` 第 3 步 looks 描述追加：「第二项『正脸特写』生成时以第一项全身图为参考（系统已自动处理，无需在提示词中描述）」。drama_craft §1.3 同步一句。
-- [ ] **Step 5**: 测试脚本 look_chain_invariants.py：构造 asset+looks（look0 有图），调用抽出的 `_look_request` 断言 references==[look0.path]；locked look 断言 HTTPException(409)。PASS 后提交 `feat: 全身定脸→特写参考链；look.locked 落地为真锁`
+- [x] **Step 3**: 批量生成全部形象处（执行时 `grep -n "generate_all\|批量生成" server/studio.py web-vue/src/studio/AssetsView.vue` 定位）：保证循环顺序 looks[0]→后续，且每项传 `based_on=looks[0].id`（首项自身除外）。
+- [x] **Step 4**: `_PRODUCE_INSTRUCTION` 第 3 步 looks 描述追加：「第二项『正脸特写』生成时以第一项全身图为参考（系统已自动处理，无需在提示词中描述）」。drama_craft §1.3 同步一句。
+- [x] **Step 5**: 测试脚本 look_chain_invariants.py：构造 asset+looks（look0 有图），调用抽出的 `_look_request` 断言 references==[look0.path]；locked look 断言 HTTPException(409)。PASS 后提交 `feat: 全身定脸→特写参考链；look.locked 落地为真锁`
 
 ### Task 10: 首帧墙
 
@@ -483,10 +483,10 @@ async def episode_storyboard(episode_no: int, canvas: str) -> dict[str, Any]:
     #  "has_video", "dialogue"(首句 text 或 "")}
 ```
 
-- [ ] **Step 1**: 后端路由落地（复用 `_segments_all`/`_segment_view`，不新查画布）。
-- [ ] **Step 2**: ProductionView 加视图切换（「列表 | 首帧墙」）：墙 = CSS grid 竖屏缩略卡（比例 9/16，图用既有 `<img :src>` 的媒体 URL 约定），格子信息行「S{segment_no} · {duration}s · {dialogue}」，徽标复用 Task 3 样式；点击格子 → 选中该片段滚到详情列（复用现有 selectSegment action）。
-- [ ] **Step 3**: 「补齐缺的 N 张首帧」按钮：对 `thumb==""` 的段循环调既有 keyframe 接口（沿用批量生成的进度提示模式）；全部就绪后「批量出片」按钮高亮（既有批量逻辑，软门不变）。
-- [ ] **Step 4**: `npm run build` + mock 手测截图留档 `docs/canvas-v2/`；提交 `feat: 首帧墙——整集静帧审阅作为批量出片的前置视图`
+- [x] **Step 1**: 后端路由落地（复用 `_segments_all`/`_segment_view`，不新查画布）。
+- [x] **Step 2**: ProductionView 加视图切换（「列表 | 首帧墙」）：墙 = CSS grid 竖屏缩略卡（比例 9/16，图用既有 `<img :src>` 的媒体 URL 约定），格子信息行「S{segment_no} · {duration}s · {dialogue}」，徽标复用 Task 3 样式；点击格子 → 选中该片段滚到详情列（复用现有 selectSegment action）。
+- [x] **Step 3**: 「补齐缺的 N 张首帧」按钮：对 `thumb==""` 的段循环调既有 keyframe 接口（沿用批量生成的进度提示模式）；全部就绪后「批量出片」按钮高亮（既有批量逻辑，软门不变）。
+- [x] **Step 4**: `npm run build` + mock 手测截图留档 `docs/canvas-v2/`；提交 `feat: 首帧墙——整集静帧审阅作为批量出片的前置视图`
 
 ### Task 11: produce 迭代模型（upsert + 孤儿标记）
 
@@ -498,8 +498,8 @@ async def episode_storyboard(episode_no: int, canvas: str) -> dict[str, Any]:
 **Interfaces:**
 - Produces: `_reconcile_produce(graph: Canvas, episode_no: int) -> dict`（返回 `{kept: int, orphaned: [node_id], merged_assets: int}`）；prompt/storyboard 节点可能带 `data.orphaned = true`。
 
-- [ ] **Step 1**: 失败测试：构造画布（第 1 集段 1/2 各一套 storyboard+prompt+video_gen，video_gen 带一个 take），模拟二次 produce 后出现段 1/2/3 两套 → 调 reconcile → 断言：每段号只剩一套非 orphaned 节点；保留方是有 take 的那套；多余套 orphaned=true；资产 (kind,name) 重复时后者 orphaned。
-- [ ] **Step 2**: 实现 `_reconcile_produce`（要点）：
+- [x] **Step 1**: 失败测试：构造画布（第 1 集段 1/2 各一套 storyboard+prompt+video_gen，video_gen 带一个 take），模拟二次 produce 后出现段 1/2/3 两套 → 调 reconcile → 断言：每段号只剩一套非 orphaned 节点；保留方是有 take 的那套；多余套 orphaned=true；资产 (kind,name) 重复时后者 orphaned。
+- [x] **Step 2**: 实现 `_reconcile_produce`（要点）：
 
 ```python
 def _reconcile_produce(graph: Canvas, episode_no: int) -> dict:
@@ -511,9 +511,9 @@ def _reconcile_produce(graph: Canvas, episode_no: int) -> dict:
     # 5) orphaned 节点保留其边与产物，仅打标记
 ```
 
-- [ ] **Step 3**: produce 端点在 `_repair_links` 后调 `_reconcile_produce(graph, episode_no)`；`_segments_all` 对 `data.orphaned` 的 prompt 节点跳过（或加 `"orphaned"` 字段，由前端过滤进「已下线」折叠分组）。
-- [ ] **Step 4**: `_PRODUCE_INSTRUCTION` 顶部加一段：「若该集已有片段（同 episode_no+segment_no 的 storyboard/prompt/video_gen），**原位更新其字段**，不要新建平行节点；系统会在收尾自动归并重复与标记下线」。
-- [ ] **Step 5**: 测试 PASS；mock 手测：同一集跑两次 produce → 无重复段、take 保留；提交 `feat: produce 幂等化——按 集+段号 upsert，重复节点归并/标记下线`
+- [x] **Step 3**: produce 端点在 `_repair_links` 后调 `_reconcile_produce(graph, episode_no)`；`_segments_all` 对 `data.orphaned` 的 prompt 节点跳过（或加 `"orphaned"` 字段，由前端过滤进「已下线」折叠分组）。
+- [x] **Step 4**: `_PRODUCE_INSTRUCTION` 顶部加一段：「若该集已有片段（同 episode_no+segment_no 的 storyboard/prompt/video_gen），**原位更新其字段**，不要新建平行节点；系统会在收尾自动归并重复与标记下线」。
+- [x] **Step 5**: 测试 PASS；mock 手测：同一集跑两次 produce → 无重复段、take 保留；提交 `feat: produce 幂等化——按 集+段号 upsert，重复节点归并/标记下线`
 
 ### Task 12: 裂缝批量修复（7 项）
 
@@ -524,11 +524,11 @@ def _reconcile_produce(graph: Canvas, episode_no: int) -> dict:
 - `docs/制片台方案.md`、`docs/演示脚本.md`（粒度口径）
 - Test: `demo/takes_invariants.py` 追加 + 各项断言
 
-- [ ] **Step 1**: lint 旁路：`SegmentGenerateRequest` 加 `force: bool = False`；`if blocking and not body.duration:` → `if blocking and not body.force:`；前端强制生成按钮 payload 改 `{force: true}`（ProductionView 中搜索「忽略校验」定位）。
-- [ ] **Step 2**: 9:16 硬编码：`_keyframe_prompt(shot, mapping, *, full_prompt="", aspect="9:16")`，首行 `_ASPECT_LABEL = {"9:16": "竖屏 9:16", "16:9": "横屏 16:9", "1:1": "方形 1:1", "4:3": "横屏 4:3", "3:4": "竖屏 3:4"}.get(aspect, "竖屏 9:16")`；调用处传 `project.get("aspect_ratio")`。
-- [ ] **Step 3**: 30s 上限：lint_segment 中 `duration > 30` → error `segment.duration.over_cap`（「单次视频生成上限 30s，请把片段拆短」）；generate 端点在 clamp 前若 `duration > 30` 且非 mock → 422 同文案。
-- [ ] **Step 4**: @regex：三处 `{1,24}` → `{1,64}`（studio.py 两处、studio_rules.py 一处，注释同步）。
-- [ ] **Step 5**: 切集：`_SPLIT_EPISODE` 改
+- [x] **Step 1**: lint 旁路：`SegmentGenerateRequest` 加 `force: bool = False`；`if blocking and not body.duration:` → `if blocking and not body.force:`；前端强制生成按钮 payload 改 `{force: true}`（ProductionView 中搜索「忽略校验」定位）。
+- [x] **Step 2**: 9:16 硬编码：`_keyframe_prompt(shot, mapping, *, full_prompt="", aspect="9:16")`，首行 `_ASPECT_LABEL = {"9:16": "竖屏 9:16", "16:9": "横屏 16:9", "1:1": "方形 1:1", "4:3": "横屏 4:3", "3:4": "竖屏 3:4"}.get(aspect, "竖屏 9:16")`；调用处传 `project.get("aspect_ratio")`。
+- [x] **Step 3**: 30s 上限：lint_segment 中 `duration > 30` → error `segment.duration.over_cap`（「单次视频生成上限 30s，请把片段拆短」）；generate 端点在 clamp 前若 `duration > 30` 且非 mock → 422 同文案。
+- [x] **Step 4**: @regex：三处 `{1,24}` → `{1,64}`（studio.py 两处、studio_rules.py 一处，注释同步）。
+- [x] **Step 5**: 切集：`_SPLIT_EPISODE` 改
 
 ```python
 _SPLIT_EPISODE = re.compile(
@@ -538,7 +538,7 @@ _SPLIT_EPISODE = re.compile(
 ```
 
 （编号捕获分支在 `_split_episodes` 里统一取 `m.group(1) or 中文数字解析`；若原文命中 0/1 个标题但全文 >3000 字，返回结果里附 `"warning": "仅切出 N 集，请检查分集标题格式"`，import-script 响应透传。）
-- [ ] **Step 6**: 审批执行切版：worker `_execute_composition_job` 开头（render 前）：
+- [x] **Step 6**: 审批执行切版：worker `_execute_composition_job` 开头（render 前）：
 
 ```python
         for clip in plan_clips:
@@ -548,11 +548,11 @@ _SPLIT_EPISODE = re.compile(
                 raise CompositionError(f"片段 {clip['node_id']} 的采用版本在审批后已切换；请重新审批后再合成")
 ```
 
-- [ ] **Step 7**: 文档：两份 docs 中「8-15 秒/2-4 个子镜头」表述改为「一镜一段 3-8 秒（常规 4-6）」，注明修订日期。
-- [ ] **Step 8**: 全量回归：`demo/takes_invariants.py`、`dialogue_invariants.py`、`composition_invariants.py`、`look_chain_invariants.py`、`produce_upsert_invariants.py`、`invocation_invariants.py`、`canvas_repository_invariants.py` 全 PASS；`npm run build` 通过；提交 `fix: 链路裂缝批量修复——lint 假门/画幅硬编码/30s 上限/@截断/切集/审批切版/文档口径`
+- [x] **Step 7**: 文档：两份 docs 中「8-15 秒/2-4 个子镜头」表述改为「一镜一段 3-8 秒（常规 4-6）」，注明修订日期。
+- [x] **Step 8**: 全量回归：`demo/takes_invariants.py`、`dialogue_invariants.py`、`composition_invariants.py`、`look_chain_invariants.py`、`produce_upsert_invariants.py`、`invocation_invariants.py`、`canvas_repository_invariants.py` 全 PASS；`npm run build` 通过；提交 `fix: 链路裂缝批量修复——lint 假门/画幅硬编码/30s 上限/@截断/切集/审批切版/文档口径`
 
 ### Task 13: 终验
 
-- [ ] mock 服务起 8000，按 `docs/演示脚本.md` 主线走完：新建→导入→produce→资产图→首帧墙→批量出片→（选版尝试重生成验证不抢占）→assemble→审批→compose
-- [ ] 验收断言：成片 mp4 含音频流（ffprobe）；有字幕；全程无「静默替换/静默截断」；过期徽标在改分镜后出现
-- [ ] 结果（含截图）回报用户；如真实 TTS 端点可用，切 openai-compatible 复验一次
+- [x] mock 服务起 8000，按 `docs/演示脚本.md` 主线走完：新建→导入→produce→资产图→首帧墙→批量出片→（选版尝试重生成验证不抢占）→assemble→审批→compose
+- [x] 验收断言：成片 mp4 含音频流（ffprobe）；有字幕；全程无「静默替换/静默截断」；过期徽标在改分镜后出现
+- [x] 结果（含截图）回报用户；如真实 TTS 端点可用，切 openai-compatible 复验一次
