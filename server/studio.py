@@ -31,6 +31,8 @@ from core.studio_rules import (
     dialogue_from_shots,
     lint_segment,
     parse_dialogue,
+    refs_hash,
+    shots_hash,
 )
 
 router = APIRouter(prefix="/api/studio", tags=["studio"])
@@ -440,6 +442,7 @@ def _segment_view(canvas: Canvas, node: Any, *, fallback_no: int = 0, with_detai
         "tags": list(gen_node.data.get("tags") or []) if gen_node is not None else [],
         "references": refs,
         "storyboard_node_id": storyboard_node.id if storyboard_node is not None else "",
+        **_stale_flags(canvas, gen_node, shots, refs),
     }
 
     if with_detail:
@@ -461,6 +464,60 @@ def _segment_view(canvas: Canvas, node: Any, *, fallback_no: int = 0, with_detai
             }
         )
     return view
+
+
+def _fingerprint_refs(graph: Canvas, refs: list[dict[str, Any]]) -> list[dict[str, str]]:
+    """refs_hash 的输入：资产 id + 当前形象 id + 图路径（换形象/重生成都会变）。"""
+    rows: list[dict[str, str]] = []
+    for ref in refs:
+        asset = graph.nodes.get(str(ref.get("asset_id") or ""))
+        rows.append(
+            {
+                "asset_id": str(ref.get("asset_id") or ""),
+                "active_look_id": str((asset.data.get("active_look_id") if asset is not None else "") or ""),
+                "image_path": str(ref.get("path") or ""),
+            }
+        )
+    return rows
+
+
+def _stale_flags(graph: Canvas, gen_node: Any, shots: list[Any], refs: list[dict[str, Any]]) -> dict[str, Any]:
+    """生成物（首帧/当前采用版）对「当前分镜 + 当前引用」的过期判定。
+
+    None = 产物没有指纹（旧数据），显示「无指纹」而不算过期，避免升级即全体飘红。
+    """
+    cur_shots = shots_hash(shots)
+    cur_refs = refs_hash(_fingerprint_refs(graph, refs))
+    keyframe = dict((gen_node.data.get("keyframe") if gen_node is not None else {}) or {})
+    takes = [t for t in ((gen_node.data.get("takes") if gen_node is not None else []) or []) if isinstance(t, Mapping)]
+    current_take = next(
+        (t for t in takes if t.get("take_id") == (gen_node.data.get("current_take_id") if gen_node is not None else None)),
+        None,
+    )
+
+    def _compare(stored_shots: Any, stored_refs: Any) -> tuple[bool | None, str]:
+        if not stored_shots and not stored_refs:
+            return None, ""
+        reasons: list[str] = []
+        if stored_shots and cur_shots and stored_shots != cur_shots:
+            reasons.append("分镜已变更")
+        if stored_refs and cur_refs and stored_refs != cur_refs:
+            reasons.append("形象已更换")
+        if not reasons:
+            return False, ""
+        return True, "、".join(reasons)
+
+    kf_stale, kf_reason = _compare(keyframe.get("shots_hash"), keyframe.get("refs_hash"))
+    tk_stale, tk_reason = _compare(
+        (current_take or {}).get("shots_hash"), (current_take or {}).get("refs_hash")
+    )
+    latest = str(takes[-1].get("take_id") or "") if takes else ""
+    return {
+        "keyframe_stale": kf_stale,
+        "video_stale": tk_stale,
+        "stale_reason": kf_reason or tk_reason,
+        "latest_take_id": latest,
+    }
 
 
 def _segment_status(gen_node: Any, video: dict[str, Any], takes: list[Any], current_take_id: str) -> str:
@@ -1203,32 +1260,27 @@ async def _run_generation(job_id: str, canvas_name: str, node_id: str, request: 
             gen = _generation_node(graph, prompt_node)
             if gen is None:
                 raise RuntimeError("生成过程中生成节点被删除")
-            take = {
-                "take_id": f"take_{uuid.uuid4().hex[:12]}",
-                "path": result.path,
-                "mime": result.mime,
-                "provider": result.provider,
-                "mock": bool(result.mock),
-                "model": model,
-                "duration_s": request.get("duration"),
-                "shot_no": int(request.get("shot_no") or 1),
-                "mode": str(request.get("mode") or ""),
-                "created_at": time.time(),
-                "rating": "",
-                "note": "",
-            }
-            takes = list(gen.data.get("takes") or [])
-            takes.append(take)
-            gen.data["takes"] = takes
-            gen.data["current_take_id"] = take["take_id"]
+            # 走画布同款 record_generated_media：追加历史 + 「首次才自动采用」的规则只有一份，
+            # outputs 跟随已采用版本；这里不再手写第二份 take 逻辑（两边语义曾经长歪）。
+            take = graph.record_generated_media(
+                gen.id,
+                kind="video",
+                path=result.path,
+                mime=result.mime,
+                provider=result.provider,
+                mock=bool(result.mock),
+                model=model,
+                duration_s=request.get("duration"),
+                take_id=f"take_{uuid.uuid4().hex[:12]}",
+                shot_no=int(request.get("shot_no") or 1),
+                mode=str(request.get("mode") or ""),
+                # 生成凭据：记录「当时看到的分镜与引用」，读取时比对即可判过期
+                extra={
+                    "shots_hash": request.get("shots_hash") or None,
+                    "refs_hash": request.get("refs_hash") or None,
+                },
+            )
             gen.data.pop("active_job_id", None)
-            outputs = dict(gen.outputs)
-            outputs["video"] = {
-                "data_type": "VIDEO",
-                "value": {"path": result.path, "mime": result.mime, "provider": result.provider,
-                          "mock": bool(result.mock)},
-            }
-            gen.outputs = outputs
             gen.status = "done"
             await _save(graph)
         job.update(status="succeeded", finished_at=time.time(), result=take, take=take)
@@ -1323,6 +1375,9 @@ async def generate_segment(node_id: str, canvas: str, body: GenerateRequest) -> 
 
         request["shot_no"] = int(shot.get("no") or body.shot_no or 1)
         request["mode"] = "first_frame" if use_keyframe else "references"
+        # stale 凭据：记下本次生成看到的分镜与引用，之后分镜/形象一变即可判过期
+        request["shots_hash"] = shots_hash(view.get("shots") or [])
+        request["refs_hash"] = refs_hash(_fingerprint_refs(graph, view.get("references") or []))
 
         # 引用闭包：正文引用的名字必须来自本片段的引用入边，否则宁可报错也不静默发出去。
         dangling = _dangling_references(prompt_text, refs)
@@ -1422,6 +1477,9 @@ async def generate_keyframe(node_id: str, canvas: str, body: KeyframeRequest) ->
             "model": model,
             "mock": bool(result.mock),
             "created_at": time.time(),
+            # stale 凭据：首帧记录「按哪份分镜/哪些参考图画的」
+            "shots_hash": shots_hash(view.get("shots") or []),
+            "refs_hash": refs_hash(_fingerprint_refs(graph, view.get("references") or [])),
         }
         gen.data["keyframe"] = keyframe
         if not gen.data.get("thumbnail"):

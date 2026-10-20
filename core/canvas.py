@@ -875,6 +875,7 @@ class Canvas:
         take_id: str | None = None,
         shot_no: int = 1,
         mode: str = "canvas",
+        extra: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         """把一次生成结果写进节点：outputs + takes 历史 + current_take_id + status=done。
 
@@ -884,10 +885,6 @@ class Canvas:
         """
         node = self.require(node_id)
         port = "image" if kind == "image" else "video"
-        node.outputs[port] = {
-            "data_type": port.upper(),
-            "value": {"path": path, "mime": mime, "mock": bool(mock), "provider": provider},
-        }
         take = {
             "take_id": take_id or _new_id("take"),
             "path": path,
@@ -902,11 +899,23 @@ class Canvas:
             "rating": "",
             "note": "",
         }
+        # 调用方可附带额外凭据（如 stale 指纹）；None 值不落库，保持 take 形状干净。
+        if extra:
+            take.update({k: v for k, v in extra.items() if v is not None})
         takes = list(node.data.get("takes") or [])
         takes.append(take)
         # 只保留最近 30 版：历史是给"对比/回退"用的，不是无限增长的存储负担。
         node.data["takes"] = takes[-30:]
-        node.data["current_take_id"] = take["take_id"]
+        # 采用语义：首次生成自动采用（此前什么都没有，无可保护）；重生成永不抢占——
+        # 新版只进历史，等人在制片台/画布显式「采用」。历史是决策记录，不是最新值指针。
+        # 指针丢失的旧画布（有历史但没 current_take_id）由新写入兜底接管。
+        # outputs 必须跟随 current_take_id：采用哪版，下游（时间线/预览）就用哪版。
+        if not node.data.get("current_take_id"):
+            node.data["current_take_id"] = take["take_id"]
+            node.outputs[port] = {
+                "data_type": port.upper(),
+                "value": {"path": path, "mime": mime, "mock": bool(mock), "provider": provider},
+            }
         self.update_node(node_id, status="done")
         return take
 

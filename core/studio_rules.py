@@ -480,3 +480,39 @@ def lint_segment(
         "reference_count": len(list(references or [])),
         "reference_limit": int(THRESHOLDS["reference_limit"]),
     }
+
+
+# ---------------------------------------------------------------------------
+# stale 指纹：生成物记录「生成时看到了什么」，读取时现算比对，落后即过期
+# ---------------------------------------------------------------------------
+
+
+def stable_hash(obj: Any) -> str:
+    """结构化对象的稳定指纹：字段变化必变，键序无关。16 位十六进制足够防撞。"""
+    import hashlib
+    import json
+
+    payload = json.dumps(obj, ensure_ascii=False, sort_keys=True, default=str)
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()[:16]
+
+
+def shots_hash(shots: Sequence[Mapping[str, Any]] | None) -> str:
+    """分镜结构化字段指纹：首帧/视频据此判定「是否已落后于当前分镜」。"""
+    if not shots:
+        return ""
+    return stable_hash(list(shots))
+
+
+def refs_hash(refs: Iterable[Mapping[str, Any]] | None) -> str:
+    """片段引用指纹：资产 id / 当前形象 / 图路径 任一变化即变（换形象=过期）。"""
+    rows = [
+        {
+            "asset_id": str(r.get("asset_id") or ""),
+            "active_look_id": str(r.get("active_look_id") or ""),
+            "image_path": str(r.get("image_path") or ""),
+        }
+        for r in (refs or [])
+    ]
+    if not rows:
+        return ""
+    return stable_hash(rows)
