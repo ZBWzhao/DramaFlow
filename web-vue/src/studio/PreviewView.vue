@@ -224,6 +224,7 @@ async function startCompose() {
     const flat = (approval.plans || []).flatMap((job) =>
       (job.clips || []).map((clip) => ({ ...clip, label: clip.label || job.label })),
     );
+    const dlg = (approval.plans || []).flatMap((job) => job.dialogue || []);
     const duration = flat.reduce((sum, clip) => sum + Number(clip.asset?.duration || 0), 0);
     const project = studio.project?.project || {};
     plan.value = {
@@ -231,7 +232,7 @@ async function startCompose() {
       revision: assembled.revision,
       clips: flat,
       total_duration: Math.round(duration * 10) / 10,
-      spec: `${assembled.clip_count} 段 · ${assembled.duration_s}s · ${project.aspect_ratio || "9:16"} · ${project.quality || "480P"}`,
+      spec: `${assembled.clip_count} 段 · ${assembled.duration_s}s · ${project.aspect_ratio || "9:16"} · ${project.quality || "480P"}${dlg.length ? ` · 对白 ${dlg.length} 句` : ""}`,
     };
   } catch (err) {
     toast(err?.message || "准备拼接失败", 4200);

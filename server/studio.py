@@ -126,6 +126,12 @@ class TakeSelect(BaseModel):
     take_id: str
 
 
+class AssetPatch(BaseModel):
+    """资产字段编辑（本期仅 voice_id）。"""
+
+    voice_id: str | None = None
+
+
 class TagsPatch(BaseModel):
     tags: list[str] = Field(default_factory=list)
 
@@ -831,6 +837,19 @@ async def select_take(node_id: str, canvas: str, body: TakeSelect) -> dict[str, 
     gen.status = "done"
     revision = await _save(graph)
     return {"ok": True, "revision": revision, **_segment_view(graph, prompt_node, with_detail=True)}
+
+
+@router.patch("/assets/{node_id}")
+async def patch_asset(node_id: str, body: AssetPatch, canvas: str) -> dict[str, Any]:
+    """资产字段编辑（本期仅 voice_id）：音色是「声音的参考图」，逐句配音按角色绑定。"""
+    graph = await _load(canvas)
+    node = graph.nodes.get(node_id)
+    if node is None or node.type != "asset":
+        raise HTTPException(status_code=404, detail=f"资产不存在：{node_id}")
+    if body.voice_id is not None:
+        node.data["voice_id"] = str(body.voice_id).strip()
+    revision = await _save(graph)
+    return {"ok": True, "revision": revision, "node_id": node_id}
 
 
 @router.post("/assemble")

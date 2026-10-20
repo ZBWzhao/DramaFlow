@@ -68,6 +68,15 @@
       <div v-if="!active" class="empty">左侧选一个资产</div>
 
       <div v-else class="panel-body" style="display: flex; flex-direction: column; gap: 14px">
+        <!-- 角色音色：声音的「参考图」，逐句对白配音按它绑定嗓音 -->
+        <div v-if="active.kind === 'character'" class="field" style="max-width: 260px">
+          <label>角色音色（对白配音用）</label>
+          <select :value="active.voice_id || ''" :disabled="busy" @change="onVoiceChange($event)">
+            <option value="">默认音色</option>
+            <option v-for="v in voiceList" :key="v" :value="v">{{ v }}</option>
+          </select>
+        </div>
+
         <!-- 形象条 -->
         <div>
           <div class="studio-section-title" style="margin-bottom: 8px">
@@ -204,8 +213,8 @@
 </template>
 
 <script setup>
-import { computed, ref, watch } from "vue";
-import { studio, generateLook, patchLook, createLook, toast } from "./studioStore.js";
+import { computed, onMounted, ref, watch } from "vue";
+import { studio, generateLook, patchLook, createLook, patchAsset, fetchTtsVoices, toast } from "./studioStore.js";
 
 const TABS = [
   { key: "character", label: "角色" },
@@ -256,6 +265,30 @@ const currentList = computed(() => studio.assets[studio.assetTab] || []);
 const active = computed(() => currentList.value.find((a) => a.node_id === studio.activeAssetId) || null);
 const looks = computed(() => active.value?.looks || []);
 const currentLook = computed(() => looks.value.find((l) => l.id === selectedLookId.value) || looks.value[0] || null);
+
+const voiceList = ref([]);
+onMounted(async () => {
+  try {
+    const data = await fetchTtsVoices();
+    voiceList.value = data.voices || [];
+  } catch {
+    /* 音色清单拉不到不挡资产页，配音时会走默认音色 */
+  }
+});
+
+async function onVoiceChange(e) {
+  if (!active.value) return;
+  busy.value = true;
+  try {
+    await patchAsset(active.value.node_id, { voice_id: e.target.value });
+    active.value.voice_id = e.target.value;
+    toast("音色已保存");
+  } catch (err) {
+    toast(err?.message || "保存失败");
+  } finally {
+    busy.value = false;
+  }
+}
 
 function count(key) {
   return (studio.assets[key] || []).length;

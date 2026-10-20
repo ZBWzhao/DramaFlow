@@ -2166,6 +2166,20 @@ async def media_providers() -> dict[str, Any]:
     return {"providers": default_registry.describe(), "active": default_registry.active}
 
 
+@app.get("/api/tts/voices")
+async def list_tts_voices() -> dict[str, Any]:
+    """音色清单：registry 能力 + openai-compatible 的可选音色（TTS_VOICES env，逗号分隔）。
+
+    音色是「声音的参考图」：角色绑固定 voice_id，逐句配音才是同一个嗓音。
+    """
+    voices = [v.strip() for v in os.environ.get("TTS_VOICES", "").split(",") if v.strip()]
+    return {
+        "providers": tts_registry.describe(),
+        "voices": voices or ["alloy", "echo", "fable", "onyx", "nova", "shimmer"],
+        "mock_available": True,
+    }
+
+
 class ActivateProviderRequest(BaseModel):
     provider: str
 

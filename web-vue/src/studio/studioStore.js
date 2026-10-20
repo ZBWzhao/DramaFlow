@@ -160,6 +160,16 @@ async function postJSONPatch(path, body) {
   return res.json();
 }
 
+export async function fetchTtsVoices() {
+  const res = await fetch("/api/tts/voices");
+  if (!res.ok) throw new Error(await res.text());
+  return res.json();
+}
+
+export async function patchAsset(nodeId, patch) {
+  return postJSONPatch(`/api/studio/assets/${nodeId}`, patch);
+}
+
 export async function importScript(text, split = true) {
   const data = await postJSON(`/api/studio/import-script${qs()}`, { text, split });
   await loadAll();
