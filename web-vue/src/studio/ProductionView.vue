@@ -101,6 +101,26 @@
           <span class="q-st" :class="seg.status">{{ statusText(seg.status) }}</span>
         </button>
         <div v-if="!studio.segments.length" class="empty">还没有片段<br />先在剧本页导入剧本</div>
+
+        <!-- 已下线片段：重跑策划后被归并的旧套；只折叠不删除（历史 take 是花过钱的） -->
+        <div v-if="offlineSegments.length" style="padding: 8px 12px 16px">
+          <button class="btn ghost sm wide" @click="showOffline = !showOffline">
+            {{ showOffline ? "收起" : "展开" }}已下线片段（{{ offlineSegments.length }}）
+          </button>
+          <template v-if="showOffline">
+            <button
+              v-for="seg in offlineSegments"
+              :key="seg.node_id"
+              class="q-row offline"
+              @click="pick(seg.node_id)"
+            >
+              <span class="q-main">
+                <span class="q-title">{{ seg.title || "片段" }}</span>
+                <span class="q-meta"><span>{{ seg.take_count || 0 }} 版存档</span></span>
+              </span>
+            </button>
+          </template>
+        </div>
       </div>
       </template>
     </section>
@@ -456,11 +476,14 @@ const qFilters = [
 ];
 const isStale = (s) => s.keyframe_stale === true || s.video_stale === true;
 const staleCount = computed(() => studio.segments.filter(isStale).length);
+const liveSegments = computed(() => studio.segments.filter((s) => !s.orphaned));
+const offlineSegments = computed(() => studio.segments.filter((s) => s.orphaned));
+const showOffline = ref(false);
 const visibleSegments = computed(() => {
-  if (qFilter.value === "stale") return studio.segments.filter(isStale);
-  if (qFilter.value === "pending") return studio.segments.filter((s) => s.status === "pending" || s.status === "no_slot");
-  if (qFilter.value === "done") return studio.segments.filter((s) => s.status === "done");
-  return studio.segments;
+  if (qFilter.value === "stale") return liveSegments.value.filter(isStale);
+  if (qFilter.value === "pending") return liveSegments.value.filter((s) => s.status === "pending" || s.status === "no_slot");
+  if (qFilter.value === "done") return liveSegments.value.filter((s) => s.status === "done");
+  return liveSegments.value;
 });
 
 // ── 首帧墙：整集静帧审阅，批量出片前的全局质检点 ──
@@ -1352,5 +1375,8 @@ onMounted(async () => {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+.q-row.offline {
+  opacity: 0.55;
 }
 </style>

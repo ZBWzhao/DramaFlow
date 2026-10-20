@@ -448,6 +448,7 @@ def _segment_view(canvas: Canvas, node: Any, *, fallback_no: int = 0, with_detai
         "tags": list(gen_node.data.get("tags") or []) if gen_node is not None else [],
         "references": refs,
         "storyboard_node_id": storyboard_node.id if storyboard_node is not None else "",
+        "orphaned": bool(node.data.get("orphaned")),
         **_stale_flags(canvas, gen_node, shots, refs),
     }
 
@@ -2406,6 +2407,7 @@ _PRODUCE_INSTRUCTION = """把第{no}集做成可以进入「制作」的状态�
    人改过的正文标 `rendered_by="human"`，服务端不再覆盖。
 5. 每个 prompt 节点连一个 video_gen 节点（prompt → video_gen，两端句柄都是 `prompt`），并按资产依赖连好边。
    **一条边只连本镜真正出镜的资产**：单人镜头不要连另一个角色的资产；同框两人的镜头最多连两个角色。
+   **若该集已有片段（同 episode_no + segment_no 的 storyboard/prompt/video_gen），原位更新其字段，不要新建平行节点**；系统会在收尾自动归并重复并标记下线。
 6. **必须把每个分镜节点的输出接到对应 prompt 节点的上下文**：storyboard → prompt，
    `source_handle` 写 `shots`、`target_handle` 写 `ctx`（同一片段的两个节点，segment_no 要对上）。
    少了这条边，制作页读不到分镜表和台词。
@@ -2439,7 +2441,7 @@ def _produce_prompt(graph: Canvas, episode: int, extra: str) -> tuple[str, str]:
     return prompt, node_id
 
 
-async def _run_produce(job_id: str, canvas_name: str, prompt: str, session_id: str) -> None:
+async def _run_produce(job_id: str, canvas_name: str, prompt: str, session_id: str, episode: int = 1) -> None:
     job = _jobs[job_id]
     job.update(status="running", started_at=time.time())
     live = None
@@ -2462,7 +2464,12 @@ async def _run_produce(job_id: str, canvas_name: str, prompt: str, session_id: s
         await _agent_runner(live, request, run_id)
 
         graph = await _load(canvas_name)
-        if _repair_links(graph):
+        changed = _repair_links(graph)
+        # 幂等收尾：同集重跑 produce 后按（集, 段号）归并重复片段，多出的标 orphaned
+        reconcile = _reconcile_produce(graph, episode)
+        if reconcile["orphaned"]:
+            changed = True
+        if changed:
             await _save(graph)
         after = _produce_counts(graph)
         job.update(
@@ -2517,11 +2524,17 @@ def _repair_links(graph: Canvas) -> int:
     悄无声息地变空。图上的不变量就该由系统保证，不能指望模型每次都记得连。
     """
     storyboards: dict[tuple[int, int], Any] = {}
+    order = {nid: index for index, nid in enumerate(graph.nodes)}
     for node in graph.nodes.values():
         if node.type != "storyboard":
             continue
+        if node.data.get("orphaned"):
+            continue
         key = (_episode_no(node), int(node.data.get("segment_no") or 0))
-        storyboards.setdefault(key, node)
+        prev = storyboards.get(key)
+        # 同段号多条分镜时取建图最新的：setdefault 静默取第一个，二次 produce 会连到旧表
+        if prev is None or order.get(node.id, 0) > order.get(prev.id, 0):
+            storyboards[key] = node
     added = 0
     for node in list(graph.nodes.values()):
         if node.type != "prompt":
@@ -2539,6 +2552,81 @@ def _repair_links(graph: Canvas) -> int:
     # 重渲染也算改动：只补连线时 added 可能为 0，但正文已经写进画布，
     # 调用方靠返回值决定要不要落盘，漏算就会让 data.prompt 只活在内存里。
     return added + _sync_rendered_prompts(graph)
+
+
+def _reconcile_produce(graph: Canvas, episode_no: int) -> dict[str, Any]:
+    """produce 幂等收尾：同集重跑策划后按（集, 段号）归并重复节点。
+
+    只标记、不删除——历史 take 是花过钱的决策记录。规则：
+    - prompt 按段号分组：保留「生成槽 takes 多 > 建图新」的那套，其余 data.orphaned=true
+    - storyboard 同段号多条：保留最新，其余 orphaned
+    - 资产按 (kind, 清洁名) 分组：同组非首个 orphaned（资产无 take，零成本）
+    """
+    order = {nid: index for index, nid in enumerate(graph.nodes)}
+
+    def _gen_takes(node_id: str) -> int:
+        node = graph.nodes.get(node_id)
+        if node is None:
+            return 0
+        for edge in graph.outgoing(node.id):
+            target = graph.nodes.get(edge.target)
+            if target is not None and target.type in ("video_gen", "image_gen"):
+                return len(target.data.get("takes") or [])
+        return 0
+
+    orphaned: list[str] = []
+
+    # 1) 片段（prompt）按段号归并
+    kept = 0
+    seg_groups: dict[int, list[Any]] = {}
+    for node in graph.nodes.values():
+        if node.type != "prompt" or node.data.get("orphaned") or _episode_no(node) != episode_no:
+            continue
+        seg_groups.setdefault(int(_segment_no(node, 0)), []).append(node)
+    for nodes in seg_groups.values():
+        ranked = sorted(nodes, key=lambda n: (_gen_takes(n.id), order.get(n.id, 0)), reverse=True)
+        kept += 1
+        for extra in ranked[1:]:
+            extra.data["orphaned"] = True
+            orphaned.append(extra.id)
+
+    # 2) 分镜（storyboard）同段号保留最新
+    sb_groups: dict[tuple[int, int], list[Any]] = {}
+    for node in graph.nodes.values():
+        if node.type != "storyboard" or node.data.get("orphaned") or _episode_no(node) != episode_no:
+            continue
+        sb_groups.setdefault((_episode_no(node), int(node.data.get("segment_no") or 0)), []).append(node)
+    for nodes in sb_groups.values():
+        if len(nodes) <= 1:
+            continue
+        ranked = sorted(nodes, key=lambda n: order.get(n.id, 0), reverse=True)
+        for extra in ranked[1:]:
+            extra.data["orphaned"] = True
+            orphaned.append(extra.id)
+
+    # 3) 资产按 (kind, 清洁名) 去重（资产是项目级，跨集去重）
+    #    有形象图的优先保留——重画一张形象图是真金白银，空壳新节点不该顶掉它
+    merged = 0
+    asset_groups: dict[tuple[str, str], list[Any]] = {}
+    for node in graph.nodes.values():
+        if node.type != "asset" or node.data.get("orphaned"):
+            continue
+        name = _clean_asset_name(str(node.data.get("name") or node.label or ""))
+        asset_groups.setdefault((str(node.data.get("kind") or ""), name), []).append(node)
+
+    def _has_look_image(node: Any) -> int:
+        return int(any(look.get("image_path") for look in (node.data.get("looks") or []) if isinstance(look, dict)))
+
+    for nodes in asset_groups.values():
+        if len(nodes) <= 1:
+            continue
+        ranked = sorted(nodes, key=lambda n: (_has_look_image(n), order.get(n.id, 0)), reverse=True)
+        for extra in ranked[1:]:
+            extra.data["orphaned"] = True
+            orphaned.append(extra.id)
+            merged += 1
+
+    return {"kept": kept, "orphaned": orphaned, "merged_assets": merged}
 
 
 def _produce_counts(graph: Canvas) -> dict[str, int]:
@@ -2574,7 +2662,7 @@ async def produce(body: ProduceRequest) -> dict[str, Any]:
         "error": "",
     }
     _tasks[job_id] = asyncio.create_task(
-        _run_produce(job_id, graph.name, prompt, _produce_session_id(graph.name))
+        _run_produce(job_id, graph.name, prompt, _produce_session_id(graph.name), int(body.episode or 1))
     )
     return {"ok": True, "job": _jobs[job_id]}
 
