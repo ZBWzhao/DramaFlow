@@ -2256,7 +2256,7 @@ _PRODUCE_INSTRUCTION = """把第{no}集做成可以进入「制作」的状态�
 4. 为每个片段建一个 prompt 节点：只写 `data.episode_no`、`data.segment_no`、`data.duration_s`（= 这一镜的 duration_s）。
    **正文不要手写**——服务端会按第 2 步的字段渲染 `data.prompt` 并置 `rendered_by="server"`；
    人改过的正文标 `rendered_by="human"`，服务端不再覆盖。
-5. 每个 prompt 节点连一个 video_gen 节点（prompt → video_gen，句柄都用 media），并按资产依赖连好边。
+5. 每个 prompt 节点连一个 video_gen 节点（prompt → video_gen，两端句柄都是 `prompt`），并按资产依赖连好边。
    **一条边只连本镜真正出镜的资产**：单人镜头不要连另一个角色的资产；同框两人的镜头最多连两个角色。
 6. **必须把每个分镜节点的输出接到对应 prompt 节点的上下文**：storyboard → prompt，
    `source_handle` 写 `shots`、`target_handle` 写 `ctx`（同一片段的两个节点，segment_no 要对上）。

@@ -517,15 +517,18 @@ def build_tools(ctx: ToolContext) -> list[Any]:
         define_tool(
             name="set_storyboard",
             description=(
-                "把分镜以**结构化**方式写入（每个镜头 6 字段：主体/动作/景别/运动/声音/时长）；"
-                "时间范围与总时长由系统算出，填了 target_duration 就会校验时长预算"
+                "把分镜以**结构化字段**写入（一镜一段：duration_s 3-8s、shot_size、camera{height,angle,movement}、"
+                "subjects[{id,name,screen_pos,gaze,start_state,end_state}]、props、action、focus、light、sound、"
+                "dialogue、forbidden）；正文与时间范围由服务端按字段渲染，不要手写长提示词；"
+                "填了 target_duration 就会校验时长预算"
             ),
             args_model=SetStoryboardArgs,
             execute=_set_storyboard,
             side_effect=True,
             prompt_guidelines=[
-                "分镜一律用 set_storyboard 写（不要用 set_text 手写分镜表，那样时长无法校验）",
-                "每镜必须能拍到：主体、动作、景别、运动、声音、时长缺一不可",
+                "分镜一律用 set_storyboard 写结构化字段（不要用 set_text 手写分镜表，那样时长与字段都无法校验）",
+                "一镜一段：每段只写一个镜头、单镜 3-8 秒，不要在一段里写「0-3 秒…3-7 秒…」这种时间轴",
+                "同框 ≥2 个主体时必须写 screen_pos 与 gaze；action 里的 @名字 必须在 subjects/props 里声明",
             ],
         ),
         define_tool(

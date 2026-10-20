@@ -204,7 +204,12 @@ class SessionRegistry:
             cancel=cancel,
             invocations=self.invocations,
         )
-        manager = DelegationManager(parent=agent, llm=self.llm, cwd=self.workspace)
+        manager = DelegationManager(
+            parent=agent,
+            llm=self.llm,
+            cwd=self.workspace,
+            skills=self.skills,
+        )
         questions = QuestionBroker(
             session,
             bus,
