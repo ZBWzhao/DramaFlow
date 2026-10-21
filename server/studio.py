@@ -26,6 +26,7 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 
 from core.canvas import Canvas, CanvasError
+from core.skills import discover_skills
 from core.studio_rules import (
     THRESHOLDS,
     dialogue_from_shots,
@@ -288,6 +289,30 @@ DEFAULT_PROJECT: dict[str, Any] = {
     "video_model": "mock-video-v1",
     "quality": "480P",
 }
+
+
+# 角色名（连字符）→ 项目选择键（下划线）：meta.project.skills = {script_analysis, director, asset}
+_ROLE_KEYS = {"script-analysis": "script_analysis", "director": "director", "asset": "asset"}
+
+
+def _validated_skills(skills: dict[str, str]) -> dict[str, str]:
+    """只接受真实存在的 "name@version"，且 role 必须匹配——防止弹窗/接口塞进任意字符串。"""
+    entries, _ = discover_skills()
+    known: dict[str, tuple[str, str]] = {}
+    for entry in entries:
+        if entry.role in _ROLE_KEYS:
+            known[f"{entry.name}@{entry.version}"] = (entry.role, _ROLE_KEYS[entry.role])
+    out: dict[str, str] = {}
+    for key, value in (skills or {}).items():
+        if not str(value).strip():
+            continue
+        if str(value) not in known:
+            raise HTTPException(status_code=400, detail=f"未知技能：{value}")
+        _role, canonical_key = known[str(value)]
+        if key in out and out[key] != value:  # pragma: no cover - 同键双值仅在脏输入出现
+            raise HTTPException(status_code=400, detail=f"技能角色冲突：{key}")
+        out[canonical_key] = str(value)
+    return out
 
 
 def _project_meta(canvas: Canvas) -> dict[str, Any]:
@@ -696,6 +721,9 @@ async def get_project(canvas: str) -> dict[str, Any]:
         "pipeline": _pipeline(node),
         "counts": counts,
         "thresholds": dict(THRESHOLDS),
+        "story_analysis": dict((node.meta or {}).get("story_analysis") or {}),
+        "asset_tables": dict((node.meta or {}).get("asset_tables") or {}),
+        "skills": dict(_project_meta(node).get("skills") or {}),
     }
 
 
@@ -713,6 +741,24 @@ async def patch_project(canvas: str, body: ProjectPatch) -> dict[str, Any]:
     node.meta = meta
     revision = await _save(node)
     return {"ok": True, "revision": revision, "project": _project_meta(node)}
+
+
+class SkillsRequest(BaseModel):
+    canvas: str
+    skills: dict[str, str]
+
+
+@router.post("/project/skills")
+async def set_project_skills(body: SkillsRequest) -> dict[str, Any]:
+    """保存项目的 Skill 选择（新建弹窗或项目设置提交）。"""
+    node = await _load(body.canvas)
+    meta = dict(node.meta or {})
+    project = dict(meta.get("project") or {})
+    project["skills"] = _validated_skills(body.skills)
+    meta["project"] = project
+    node.meta = meta
+    revision = await _save(node)
+    return {"ok": True, "revision": revision, "skills": project["skills"]}
 
 
 @router.get("/assets")
@@ -2267,6 +2313,8 @@ class NewProjectRequest(BaseModel):
     video_model: str = ""
     script: str = ""
     split: bool = True
+    skills: dict[str, str] = Field(default_factory=dict)  # {script_analysis, director, asset} → "name@version"
+    auto_asset_table: bool = False  # 首次导入剧本后自动跑「剧本理解+资产解析」
 
 
 def _slug_name(title: str) -> str:
@@ -2360,10 +2408,13 @@ async def create_project(body: NewProjectRequest) -> dict[str, Any]:
             "style_preset": str(body.style_preset or "").strip(),
             "aspect_ratio": _normalise_ratio(body.aspect_ratio),
             "quality": _normalise_quality(body.quality),
+            "auto_asset_table": bool(body.auto_asset_table),
         }
     )
     if body.video_model.strip():
         project["video_model"] = body.video_model.strip()
+    if body.skills:
+        project["skills"] = _validated_skills(body.skills)
 
     canvas = Canvas(_slug_name(title))
     canvas.meta = {

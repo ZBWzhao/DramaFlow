@@ -40,6 +40,7 @@ from core.config import Settings  # noqa: E402
 from core.agent import AgentAborted, build_system_prompt  # noqa: E402
 from core.llm import LLM  # noqa: E402
 from core.loader import list_tools  # noqa: E402
+from core.skills import discover_skills  # noqa: E402
 from core.canvas import NODE_SPEC, Canvas, CanvasError, build_media_request  # noqa: E402
 from core.canvas_repository import CanvasConflictError, mutate_canvas_with_retry  # noqa: E402
 from core.media import default_registry  # noqa: E402
@@ -804,6 +805,25 @@ async def resume_events(session_id: str, run_id: str, last_event_id: str = "0-0"
                 live.bus.unsubscribe(queue)
 
     return StreamingResponse(replay(), media_type="application/x-ndjson")
+
+
+@app.get("/api/skills")
+async def skills() -> dict[str, Any]:
+    """Skill 清单：新建项目弹窗与项目设置用（role/name/version/description）。"""
+    entries, errors = discover_skills()
+    return {
+        "skills": [
+            {
+                "role": e.role,
+                "name": e.name,
+                "version": e.version,
+                "description": e.description,
+                "allowed_tools": e.allowed_tools,
+            }
+            for e in entries
+        ],
+        "errors": errors,
+    }
 
 
 @app.get("/api/teams")
