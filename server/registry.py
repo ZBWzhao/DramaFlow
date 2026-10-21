@@ -72,11 +72,22 @@ class LiveSession:
     # 之后的每次请求都变成"没有 subagent 工具"（开关粘住）。
     full_tools: list[Any] = field(default_factory=list)
 
-    def tools_for(self, include_sub_agent: bool = True, allow_media_generation: bool = False) -> list[Any]:
-        """按本次请求的需要给出工具列表（不修改任何会话状态）。"""
+    def tools_for(
+        self,
+        include_sub_agent: bool = True,
+        allow_media_generation: bool = False,
+        allowed_tools: list[str] | None = None,
+    ) -> list[Any]:
+        """按本次请求的需要给出工具列表（不修改任何会话状态）。
+
+        allowed_tools（Skill 白名单）给出时只保留清单内的工具——结构性边界，
+        装载期已校验清单里的名字都真实存在。
+        """
         tools = list(self.full_tools) if include_sub_agent else [t for t in self.full_tools if t.name != "subagent"]
         if not allow_media_generation:
             tools = [t for t in tools if t.name not in {"generate_media", "run_canvas"}]
+        if allowed_tools is not None:
+            tools = [t for t in tools if t.name in set(allowed_tools)]
         return tools
 
 

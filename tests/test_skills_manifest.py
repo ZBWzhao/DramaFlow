@@ -60,3 +60,85 @@ def test_three_role_skills_exist_and_referenced_skill_names_valid() -> None:
         for member in manifest["members"].values():
             for skill in member.get("skills", []):
                 assert skill in by_name, f"{team_file.name}: 引用了不存在的技能 {skill}"
+
+
+def test_update_story_analysis_tool_registered_and_whitelist_valid(tmp_path) -> None:
+    """新工具已注册；三个角色 Skill 的白名单引用的工具全部真实存在（幽灵引用零容忍）。"""
+    import asyncio
+
+    from core.loader import create_agent_tools
+    from core.skills import SKILLS_ROOT, discover_skills, validate_skill_tools
+
+    # 校验域 = 插件工具 + skill 系统自带的 read_skill（registry/subagent 运行时会合并它们）
+    from core.skills import build_skill_tools
+
+    tools, _entries, _ctx = asyncio.run(create_agent_tools(cwd=str(tmp_path)))
+    names = {t.name for t in tools} | {t.name for t in build_skill_tools()}
+    assert "update_story_analysis" in names
+    entries, _ = discover_skills(SKILLS_ROOT)
+    assert validate_skill_tools(entries, names) == []
+
+
+def test_update_story_analysis_writes_schema_validated_field(tmp_path) -> None:
+    """字段写入前过 StoryAnalysis schema；episode_outline 的 JSON 字符串会被解析。"""
+    import asyncio
+
+    from core.canvas import Canvas
+    from core.canvas_repository import FileCanvasRepository
+    from core.context import ToolContext
+    from core.loader import create_agent_tools
+
+    async def scenario():
+        repo = FileCanvasRepository(tmp_path)
+        canvas = Canvas("main", path=tmp_path / "main.canvas.json")
+        canvas.meta["story_analysis"] = {"worldview": "旧"}
+        await repo.save(canvas)
+
+        tools, _entries, _ctx = await create_agent_tools(cwd=str(tmp_path), canvas_repository=repo)
+        tools = {t.name: t for t in tools}
+        ctx = ToolContext(
+            cwd=str(tmp_path),
+            config={"default_canvas": "main"},
+            canvas_repository=repo,
+        )
+        tool = tools["update_story_analysis"]
+        await tool.execute({"field": "synopsis", "value": "新梗概"}, ctx)
+        await tool.execute({"field": "episode_outline", "value": json_str}, ctx)
+        saved = await repo.load("main")
+        analysis = saved.meta["story_analysis"]
+        assert analysis["worldview"] == "旧"  # 未指名的字段原样保留
+        assert analysis["synopsis"] == "新梗概"
+        assert analysis["episode_outline"][0]["no"] == 1  # JSON 字符串被解析成数组
+        assert analysis["updated_at"] > 0
+        return tool
+
+    json_str = '[{"no": 1, "title": "第1集", "hook": "h", "beats": []}]'
+    asyncio.run(scenario())
+
+
+def test_update_story_analysis_rejects_bad_outline(tmp_path) -> None:
+    """episode_outline 不是数组时 Pydantic 校验拦截，画布不被改。"""
+    import asyncio
+
+    from core.canvas import Canvas
+    from core.canvas_repository import FileCanvasRepository
+    from core.context import ToolContext
+    from core.loader import create_agent_tools
+
+    async def scenario():
+        repo = FileCanvasRepository(tmp_path)
+        canvas = Canvas("main", path=tmp_path / "main.canvas.json")
+        canvas.meta["story_analysis"] = {"worldview": "旧"}
+        await repo.save(canvas)
+        tools, _entries, _ctx = await create_agent_tools(cwd=str(tmp_path), canvas_repository=repo)
+        tools = {t.name: t for t in tools}
+        ctx = ToolContext(cwd=str(tmp_path), config={"default_canvas": "main"}, canvas_repository=repo)
+        tool = tools["update_story_analysis"]
+        try:
+            await tool.execute({"field": "episode_outline", "value": '{"not": "array"}'}, ctx)
+        except Exception:
+            pass
+        saved = await repo.load("main")
+        assert "episode_outline" not in saved.meta["story_analysis"]  # 校验失败不落盘
+
+    asyncio.run(scenario())
