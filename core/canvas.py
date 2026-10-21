@@ -1288,14 +1288,25 @@ class Canvas:
     # ------------------------------------------------------------------
     # 布局：按拓扑分层摆位（同一步在同一列，从左到右就是执行顺序）
     # ------------------------------------------------------------------
-    # 间距要容得下**最高的节点**（生成节点带缩略图约 240px），否则会互相压住。
-    ARRANGE_X_GAP = 380
-    ARRANGE_Y_GAP = 360
+    # 卡片高宽按前端 geometry.js 的固定几何估算（文本 300×3:2、图片 360×16:9、
+    # 视频 420×16:9，含标签行 28px）：同一列的节点高矮不一，按各自高度累加行距，
+    # 列宽取该列最宽卡片——固定间距容不下 400px+ 的文本卡，必然互相压住。
+    ARRANGE_X_GAP = 120  # 列间空隙（列宽另算）
+    ARRANGE_Y_GAP = 96  # 行间空隙
+    ARRANGE_NODE_W: dict[str, int] = {
+        "video": 420, "video_gen": 420, "timeline": 420,
+        "image": 360, "image_gen": 360, "asset": 360, "audio": 360, "tts_gen": 360,
+    }
+    ARRANGE_NODE_H: dict[str, int] = {
+        "text": 228, "prompt": 228, "storyboard": 228,
+        "video": 264, "video_gen": 264, "timeline": 264,
+        "image": 231, "image_gen": 231, "asset": 231, "audio": 231, "tts_gen": 231,
+    }
 
     def arrange(self, x_gap: int | None = None, y_gap: int | None = None) -> int:
         """按拓扑序分层重排所有节点，返回被移动的节点数。"""
-        x_gap = x_gap or self.ARRANGE_X_GAP
-        y_gap = y_gap or self.ARRANGE_Y_GAP
+        x_gap = self.ARRANGE_X_GAP if x_gap is None else x_gap
+        y_gap = self.ARRANGE_Y_GAP if y_gap is None else y_gap
         level: dict[str, int] = {node_id: 0 for node_id in self.nodes}
         for node_id in self.topo_order():
             for edge in self.outgoing(node_id):
@@ -1316,13 +1327,19 @@ class Canvas:
             return (type_order.get(node.type, 99), segment, node.label, node.id)
 
         moved = 0
-        for lv, ids in sorted(buckets.items()):
-            for index, node_id in enumerate(sorted(ids, key=visual_order)):
+        x = 80.0
+        for lv in sorted(buckets):
+            ids = sorted(buckets[lv], key=visual_order)
+            col_w = max(self.ARRANGE_NODE_W.get(self.nodes[nid].type, 300) for nid in ids)
+            y = 80.0
+            for node_id in ids:
                 node = self.nodes[node_id]
-                new_position = {"x": 80.0 + lv * x_gap, "y": 80.0 + index * y_gap}
+                new_position = {"x": x, "y": y}
                 if node.position != new_position:
                     node.position = new_position
                     moved += 1
+                y += self.ARRANGE_NODE_H.get(node.type, 231) + y_gap
+            x += col_w + x_gap
         return moved
 
     # ------------------------------------------------------------------

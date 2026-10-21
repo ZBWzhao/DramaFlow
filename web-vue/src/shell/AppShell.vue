@@ -20,7 +20,12 @@ const route = useRoute();
 
 /* 项目态：/project/:name/* 下才显示项目导航与工具区 */
 const inproj = computed(() => route.path.startsWith("/project/"));
+/* 画布页是整屏工作台，自带完整顶栏（返回/项目/视图切换/模型/导出），
+ * 外壳顶栏再叠一层只会双份导航——画布态直接隐藏。 */
+const isCanvas = computed(() => route.path.endsWith("/canvas"));
 const pname = computed(() => String(route.params.name || ""));
+/* 顶栏展示项目标题；画布 key 只用于 URL 与 API */
+const ptitle = computed(() => studio.project?.title || pname.value);
 
 /* 剧本/画布页自带停靠 AI，浮球只在这些页面之外出现 */
 const fabVisible = computed(
@@ -67,12 +72,12 @@ const tabs = [
 
 <template>
   <div class="df-shell">
-    <header class="topbar">
+    <header v-if="!isCanvas" class="topbar">
       <div class="brand">
         <span class="wd">DRAMA<i>FLOW</i></span>
         <router-link v-if="inproj" class="home-link" to="/">‹ 项目</router-link>
       </div>
-      <span v-if="inproj" class="pname">{{ pname }}</span>
+      <span v-if="inproj" class="pname">{{ ptitle }}</span>
       <nav v-if="inproj" class="top-tabs">
         <router-link v-for="t in tabs" :key="t.label" :to="t.to(pname)" class="tab" :class="{ cur: t.match(route.path) }">{{ t.label }}</router-link>
       </nav>
@@ -158,7 +163,7 @@ const tabs = [
 .tab.cur { color: var(--text); }
 .tab.cur::after { content: ""; position: absolute; left: 26px; right: 26px; bottom: 0; height: 2px; background: var(--accent); }
 .top-utils { display: flex; align-items: center; gap: var(--sp-4); }
-.util { color: var(--text-3); font-size: var(--fs-13); padding: 5px 3px; text-decoration: none; }
+.util { color: var(--text-3); font-size: var(--fs-13); padding: 5px 3px; text-decoration: none; background: none; border: none; font-family: inherit; cursor: pointer; }
 .util:hover { color: var(--text); }
 .util.cur { color: var(--text); }
 .sep { width: 1px; height: 16px; background: var(--line-2); }

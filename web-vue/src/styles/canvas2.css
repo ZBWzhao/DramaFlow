@@ -1144,11 +1144,17 @@ textarea {
   top: auto;
   right: 22px;
   bottom: 14px;
+  z-index: 101;
   width: 46px;
   height: 46px;
+  display: grid;
+  place-items: center;
+  padding: 0;
   border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 50%;
   background: rgba(30, 30, 30, 0.9);
   box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
+  cursor: pointer;
 }
 
 .canvas-app .cv2-agent-launcher .agent-orb {
@@ -1689,6 +1695,8 @@ textarea {
 
 .cv2-agent .floating-agent-head {
   flex: none;
+  display: flex;
+  align-items: center;
   height: 48px;
   padding: 0 8px 0 12px;
   gap: 8px;
@@ -1711,6 +1719,7 @@ textarea {
 }
 
 .cv2-agent .agent-title {
+  flex: none;
   min-width: 0;
   display: flex;
   flex-direction: column;
@@ -1722,6 +1731,7 @@ textarea {
   font-weight: 600;
   line-height: 1.2;
   color: var(--tx-1);
+  white-space: nowrap;
 }
 
 .cv2-agent .agent-title span {
@@ -1750,11 +1760,13 @@ textarea {
 }
 
 .cv2-agent .agent-canvas-state {
-  margin-left: auto;
+  flex: 1;
+  min-width: 0;
   max-width: 132px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  text-align: right;
   color: var(--tx-3);
   font-size: 11px;
 }
@@ -1809,6 +1821,8 @@ textarea {
 
 /* 会话条：比原来矮一档，只做「当前会话 + 上下文占用」 */
 .cv2-agent .session-strip {
+  display: flex;
+  align-items: center;
   flex: none;
   gap: 6px;
   padding: 8px 12px;
@@ -1886,6 +1900,8 @@ textarea {
 }
 
 .cv2-agent .chat-stream {
+  display: flex;
+  flex-direction: column;
   flex: 1;
   min-height: 0;
   overflow-y: auto;
@@ -1920,6 +1936,7 @@ textarea {
 
 .cv2-agent .chat-empty {
   margin: auto;
+  text-align: center;
   color: var(--tx-3);
 }
 
@@ -2080,6 +2097,8 @@ textarea {
 }
 
 .cv2-agent .message-actions {
+  display: flex;
+  align-items: center;
   justify-content: flex-end;
   gap: 2px;
 }
@@ -2144,16 +2163,31 @@ textarea {
 }
 
 .cv2-agent .composer-bar {
+  display: flex;
+  align-items: center;
   gap: 6px;
   padding: 6px 8px 8px;
 }
 
 .cv2-agent .composer-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
   color: var(--tx-3);
   font-size: 11px;
 }
 
 .cv2-agent .composer-status::before {
+  content: "";
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  flex: none;
   background: var(--tx-3);
 }
 
@@ -2267,6 +2301,32 @@ textarea {
   margin: 6px 2px;
   color: var(--tx-3);
   font-size: 12px;
+}
+
+/* 设置弹层内容的基础排版（teleport 到 body，不能挂在 .cv2-agent 作用域下） */
+.agent-settings-popover {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+}
+
+.agent-settings-popover > b {
+  margin-bottom: 2px;
+  font-size: 13px;
+}
+
+.agent-settings-popover > label {
+  margin-top: 3px;
+  font-size: 11px;
+}
+
+.agent-settings-popover > p {
+  margin: 4px 0 0;
+  font-size: 11px;
+}
+
+.agent-settings-popover .el-select {
+  width: 100%;
 }
 
 .cv2-agent-pop {

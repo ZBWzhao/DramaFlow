@@ -1294,6 +1294,7 @@ function onStageContextMenu(event) {
       { key: "add-image_gen", label: "新建图片生成卡" },
       { key: "add-video_gen", label: "新建视频生成卡" },
       { key: "add-prompt", label: "新建提示词卡" },
+      { key: "arrange", label: "整理布局", hint: "按执行顺序重排" },
       { key: "search", label: "搜索节点", hint: "Ctrl/⌘ K" },
       { key: "fit", label: "适应窗口" },
     ],
@@ -1318,6 +1319,14 @@ async function handleMenu(key) {
     await deleteNodes([nodeIdOf(current)]);
   } else if (key.startsWith("add-")) {
     await addNode(undefined, undefined, key.slice(4));
+  } else if (key === "arrange") {
+    try {
+      const res = await actions.arrangeCanvas();
+      fit();
+      showToast(res?.moved ? `已重排 ${res.moved} 个节点` : "布局已经是整齐的");
+    } catch (err) {
+      ElMessage.error({ message: `整理失败：${err?.message || err}`, duration: 4000 });
+    }
   } else if (key === "search") searchOpen.value = true;
   else if (key === "fit") fit();
 }
