@@ -9,10 +9,12 @@
 import { computed, ref } from "vue";
 import { useRoute } from "vue-router";
 import TaskCenter from "./TaskCenter.vue";
+import NewProjectDialog from "./NewProjectDialog.vue";
 import AiPanel from "../ai/AiPanel.vue";
 import { applyField } from "../ai/diff.js";
 import { getJSON } from "../api.js";
 import { savePrompt, studio } from "../studio/studioStore.js";
+import { shell } from "./shellStore.js";
 
 const route = useRoute();
 
@@ -77,8 +79,10 @@ const tabs = [
         <span class="spec num">9:16 · 480P</span>
         <TaskCenter />
       </div>
-      <!-- NEW-PROJECT：Task 6 挂 NewProjectDialog（首页态右上的「新建项目」按钮） -->
-      <div v-else class="home-right"></div>
+      <!-- NEW-PROJECT：首页态右上按钮 + 全局弹窗 -->
+      <div v-if="!inproj" class="home-right">
+        <button class="btn primary" type="button" @click="shell.newOpen = true">新建项目</button>
+      </div>
     </header>
 
     <main class="df-main">
@@ -86,6 +90,7 @@ const tabs = [
     </main>
 
     <!-- AI 全局抽屉 + 浮球（剧本/画布页停靠面板之外的全局入口） -->
+    <NewProjectDialog v-if="shell.newOpen" @close="shell.newOpen = false" />
     <button v-if="fabVisible" class="ai-fab" type="button" title="AI 助手" @click="drawerOpen = true">AI</button>
     <Transition name="drawer">
       <AiPanel
@@ -170,4 +175,9 @@ const tabs = [
 .drawer-enter-from, .drawer-leave-to { transform: translateX(100%); }
 .cls { color: var(--text-3); font-size: var(--fs-12); }
 .cls:hover { color: var(--text); }
+
+.btn { display: inline-flex; align-items: center; justify-content: center; gap: 7px; padding: 9px 20px; border-radius: var(--r-1); font-size: var(--fs-14); color: var(--text-2); cursor: pointer; background: none; border: none; }
+.btn:hover { color: var(--text); background: var(--card-2); }
+.btn.primary { background: var(--accent); color: #FFF7F0; }
+.btn.primary:hover { background: var(--accent-hi); }
 </style>
