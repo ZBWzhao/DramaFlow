@@ -26,6 +26,28 @@ const isCanvas = computed(() => route.path.endsWith("/canvas"));
 const pname = computed(() => String(route.params.name || ""));
 /* 顶栏展示项目标题；画布 key 只用于 URL 与 API */
 const ptitle = computed(() => studio.project?.title || pname.value);
+/* 画幅/画质来自项目 meta（新建时选的值），没加载到就不显示，不编默认值 */
+const specText = computed(() => {
+  const meta = studio.project?.project || {};
+  if (!meta.aspect_ratio) return "";
+  return `${meta.aspect_ratio} · ${String(meta.quality || "").toUpperCase()}`;
+});
+
+/* 项目信息弹窗：项目身份与规格一览 */
+const infoOpen = ref(false);
+const infoRows = computed(() => {
+  const p = studio.project;
+  const meta = p?.project || {};
+  if (!p) return [];
+  return [
+    ["项目", ptitle.value],
+    ["画布", pname.value],
+    ["当前集", p.episode ? `第 ${p.episode} 集` : "—"],
+    ["视觉风格", meta.style_preset || "—"],
+    ["画幅 / 画质", specText.value || "—"],
+    ["片段", `${(studio.segments || []).length} 段`],
+  ];
+});
 
 /* 剧本/画布页自带停靠 AI，浮球只在这些页面之外出现 */
 const fabVisible = computed(
@@ -84,11 +106,9 @@ const tabs = [
       <div v-if="inproj" class="top-utils">
         <router-link class="util" :to="`/project/${pname}/assets`" :class="{ cur: route.path.endsWith('/assets') }">项目资产</router-link>
         <router-link class="util" :to="`/project/${pname}/dashboard`" :class="{ cur: route.path.endsWith('/dashboard') }">数据看板</router-link>
-        <!-- 项目信息弹窗：Task 6 接 NewProjectDialog 同款壳 -->
-        <button class="util" type="button" title="项目信息（施工中）">项目信息</button>
+        <button class="util" type="button" @click="infoOpen = true">项目信息</button>
         <span class="sep"></span>
-        <!-- 规格：Task 8 从 studio.project 读真实值 -->
-        <span class="spec num">9:16 · 480P</span>
+        <span v-if="specText" class="spec num">{{ specText }}</span>
         <TaskCenter />
       </div>
       <!-- NEW-PROJECT：首页态右上按钮 + 全局弹窗 -->
@@ -100,6 +120,21 @@ const tabs = [
     <main class="df-main">
       <router-view />
     </main>
+
+    <!-- 项目信息 -->
+    <div v-if="infoOpen" class="mask" @click.self="infoOpen = false">
+      <div class="box">
+        <h3>项目信息</h3>
+        <div v-for="([k, v]) in infoRows" :key="k" class="irow">
+          <span class="k">{{ k }}</span>
+          <span class="v" :class="{ num: k !== '项目' }">{{ v }}</span>
+        </div>
+        <div class="box-foot">
+          <span class="tip">数据看板 / 资产库顶栏同源</span>
+          <button class="btn sm" type="button" @click="infoOpen = false">关闭</button>
+        </div>
+      </div>
+    </div>
 
     <!-- AI 全局抽屉 + 浮球（剧本/画布页停靠面板之外的全局入口） -->
     <NewProjectDialog v-if="shell.newOpen" @close="shell.newOpen = false" />
@@ -169,7 +204,16 @@ const tabs = [
 .sep { width: 1px; height: 16px; background: var(--line-2); }
 .spec { font-family: var(--mono); font-size: var(--fs-11); color: var(--text-3); }
 .home-right { margin-left: auto; display: flex; align-items: center; }
-.top-utils + .home-right { display: none; }
+
+/* ---------- 项目信息弹窗 ---------- */
+.mask { position: fixed; inset: 0; background: rgba(5, 4, 3, .7); z-index: 80; display: grid; place-items: center; }
+.box { background: var(--panel); border: 1px solid var(--line-2); border-radius: var(--r-3); width: 420px; max-width: 92vw; padding: var(--sp-5); }
+.box h3 { font-family: var(--serif); font-size: var(--fs-16); margin-bottom: var(--sp-3); }
+.irow { display: flex; justify-content: space-between; gap: var(--sp-4); padding: 9px 0; border-bottom: 1px solid var(--line); font-size: var(--fs-13); }
+.irow .k { color: var(--text-3); flex: none; }
+.irow .v { color: var(--text-2); text-align: right; word-break: break-all; }
+.box-foot { display: flex; align-items: center; gap: var(--sp-2); margin-top: var(--sp-4); }
+.box-foot .tip { margin-right: auto; color: var(--text-3); font-size: var(--fs-11); }
 
 /* ---------- 全局 AI 抽屉（demo v4 · .ai-fab/.ai-drawer） ---------- */
 .ai-fab {

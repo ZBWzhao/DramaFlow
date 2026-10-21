@@ -6,6 +6,7 @@
 import { computed, onMounted } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import { loadAll, studio } from "../studio/studioStore.js";
+import { assetUrl as mediaUrl } from "../utils.js";
 
 const route = useRoute();
 const router = useRouter();
@@ -27,14 +28,9 @@ const missing = computed(() => segments.value.filter((s) => !s.has_video));
 const staleCount = computed(() => segments.value.filter((s) => s.keyframe_stale || s.video_stale).length);
 const renders = computed(() => studio.preview?.rendered || []);
 
-function mediaUrl(p) {
-  if (!p) return "";
-  const clean = String(p).replace(/^\/+/, "");
-  return /^(https?:|data:)/.test(clean) ? clean : clean.startsWith("assets/") ? "/" + clean : "/assets/" + clean;
-}
-
 onMounted(async () => {
-  if (!studio.canvas) studio.canvas = String(route.params.name);
+  const name = String(route.params.name || "");
+  if (name && studio.canvas !== name) studio.canvas = name;
   await loadAll();
 });
 </script>

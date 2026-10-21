@@ -10,6 +10,8 @@
 import { computed, inject, onMounted, ref, watch } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import { applyField } from "../ai/diff.js";
+import { errorText } from "../api.js";
+import { assetUrl as mediaUrl } from "../utils.js";
 import {
   generateKeyframe,
   generateSegment,
@@ -79,7 +81,7 @@ async function saveField() {
     await savePrompt(detail.value.node_id, applyField(detail.value.prompt || "", k, editValue.value));
     toast(`已保存 ·【${k}】转为人改，服务端不再覆盖`);
   } catch (err) {
-    toast(err?.message || String(err));
+    toast(errorText(err));
   } finally {
     busy.value = false;
   }
@@ -90,7 +92,7 @@ async function saveRaw() {
     await savePrompt(detail.value.node_id, rawText.value);
     toast("已保存 · 提示词转为人改，服务端不再覆盖");
   } catch (err) {
-    toast(err?.message || String(err));
+    toast(errorText(err));
   } finally {
     busy.value = false;
   }
@@ -119,7 +121,7 @@ async function generate(force = false) {
     if (job.status === "succeeded") toast("已出片 · 新版本进入迭代列表，当前采用版不变");
     else toast(`生成未完成：${job.status}`);
   } catch (err) {
-    lintBlock.value = err?.message || String(err);
+    lintBlock.value = errorText(err);
   } finally {
     busy.value = false;
   }
@@ -138,7 +140,7 @@ async function batchGenerate() {
         if (job.status === "succeeded") ok += 1;
         else failed.push(`${s.segment_no}(${job.status})`);
       } catch (err) {
-        failed.push(`${s.segment_no}(${String(err.message).slice(0, 24)})`);
+        failed.push(`${s.segment_no}(${errorText(err).slice(0, 24)})`);
       }
     }
     toast(`批量出片：成功 ${ok}/${todo.length}${failed.length ? `；未过：${failed.join("、")}` : ""}`);
@@ -156,7 +158,7 @@ async function toggleTag(t) {
   try {
     await saveTags(detail.value.node_id, next);
   } catch (err) {
-    toast(err?.message || String(err));
+    toast(errorText(err));
   }
 }
 async function redoKeyframe() {
@@ -165,7 +167,7 @@ async function redoKeyframe() {
     await generateKeyframe(detail.value.node_id, { shotNo: 1 });
     toast("首帧已重出 · 构图以新首帧为准");
   } catch (err) {
-    toast(err?.message || String(err));
+    toast(errorText(err));
   } finally {
     busy.value = false;
   }
@@ -174,7 +176,7 @@ async function redoKeyframe() {
 /* ---------- 选择与切换 ---------- */
 function pick(s) {
   studio.activeSegmentId = s.node_id;
-  loadDetail(s.node_id).catch((err) => toast(err?.message));
+  loadDetail(s.node_id).catch((err) => toast(errorText(err)));
 }
 watch(
   () => studio.activeSegmentId,
@@ -194,14 +196,9 @@ async function switchEpisode(no) {
     busy.value = false;
   }
 }
-function mediaUrl(path) {
-  const v = String(path || "");
-  if (!v) return "";
-  return /^(https?:|data:)/.test(v) ? v : v.startsWith("assets/") ? `/${v}` : `/assets/${v}`;
-}
-
 onMounted(async () => {
-  if (!studio.canvas) studio.canvas = String(route.params.name);
+  const name = String(route.params.name || "");
+  if (name && studio.canvas !== name) studio.canvas = name;
   busy.value = true;
   try {
     await loadAll();

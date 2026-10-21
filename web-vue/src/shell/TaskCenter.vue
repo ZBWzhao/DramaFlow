@@ -2,11 +2,11 @@
 /* 任务中心：顶栏「N 任务 ▾」+ 下拉面板。
  *
  * 数据只读 studioStore：studio.jobs（生成/合成等 media/studio job，轮询时写入）
- * 与 studio.produceJob（Agent 制作）。本组件不发起新轮询——job 状态由触发它的
- * 动作负责更新，这里只做聚合展示：运行中在上，已结束置灰在下。
+ * 与 studio.produceJob（Agent 制作）。轮询超时的残留任务由 sweepJobs 每 6s
+ * 兜底补查一次（只查已在跑的 id，不发起新任务），其余只做聚合展示：运行中在上，已结束置灰在下。
  */
 import { computed, onBeforeUnmount, onMounted, ref } from "vue";
-import { studio } from "../studio/studioStore.js";
+import { studio, sweepJobs } from "../studio/studioStore.js";
 
 const open = ref(false);
 const rootEl = ref(null);
@@ -47,8 +47,15 @@ const activeCount = computed(
 function onDocClick(e) {
   if (open.value && rootEl.value && !rootEl.value.contains(e.target)) open.value = false;
 }
-onMounted(() => document.addEventListener("click", onDocClick));
-onBeforeUnmount(() => document.removeEventListener("click", onDocClick));
+let sweepTimer = 0;
+onMounted(() => {
+  document.addEventListener("click", onDocClick);
+  sweepTimer = window.setInterval(() => { sweepJobs().catch(() => {}); }, 6000);
+});
+onBeforeUnmount(() => {
+  document.removeEventListener("click", onDocClick);
+  window.clearInterval(sweepTimer);
+});
 </script>
 
 <template>

@@ -7,6 +7,21 @@
 
 const BASE = "";
 
+/** detail 的可读化：可能是字符串、{message, findings} 对象（硬校验 422）
+ * 或 FastAPI 校验数组——直接进 Error 会得到 "[object Object]"。 */
+function detailText(detail) {
+  if (Array.isArray(detail)) {
+    return detail.map((d) => d?.msg || JSON.stringify(d)).filter(Boolean).join("；");
+  }
+  if (detail && typeof detail === "object") {
+    const findings = (detail.findings || [])
+      .map((f) => (typeof f === "string" ? f : f?.message))
+      .filter(Boolean);
+    return [detail.message || detail.msg, ...findings].filter(Boolean).join("；");
+  }
+  return typeof detail === "string" ? detail : "";
+}
+
 async function toError(res) {
   let detail = `${res.status} ${res.statusText}`;
   let payload = null;
@@ -16,11 +31,16 @@ async function toError(res) {
   } catch {
     /* 非 JSON 响应就用状态行 */
   }
-  const error = new Error(detail);
+  const error = new Error(detailText(detail) || detail);
   error.status = res.status;
   error.code = payload?.code || "";
   error.payload = payload;
   return error;
+}
+
+/** 供调用方在 catch 里复用同一套可读化（err 可能不来自 toError）。 */
+export function errorText(err) {
+  return detailText(err?.payload?.detail) || err?.message || String(err ?? "未知错误");
 }
 
 export async function getJSON(path) {

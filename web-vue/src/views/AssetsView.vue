@@ -18,6 +18,7 @@ import {
   studio,
   toast,
 } from "../studio/studioStore.js";
+import { assetUrl as mediaUrl } from "../utils.js";
 
 const route = useRoute();
 const busy = ref(false);
@@ -165,12 +166,6 @@ function kindText(k) {
 function roleText(r) {
   return { protagonist: "主角", supporting: "配角", extra: "龙套", lead: "主角" }[r] || r;
 }
-function mediaUrl(p) {
-  if (!p) return "";
-  if (/^(https?:|data:|blob:)/.test(p)) return p;
-  const clean = String(p).replace(/^\/+/, "");
-  return clean.startsWith("assets/") ? "/" + clean : "/assets/" + clean;
-}
 function syncDraft() {
   selectedLookId.value = currentLook.value?.id || "";
   lookDraft.value = {
@@ -182,7 +177,8 @@ function syncDraft() {
 watch([active, selectedLookId], syncDraft, { immediate: true });
 
 onMounted(async () => {
-  if (!studio.canvas) studio.canvas = String(route.params.name);
+  const name = String(route.params.name || "");
+  if (name && studio.canvas !== name) studio.canvas = name;
   busy.value = true;
   try {
     await loadAll();

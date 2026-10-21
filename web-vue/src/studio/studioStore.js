@@ -351,6 +351,30 @@ export async function loadStoryboard(episodeNo) {
 
 let toastTimer = 0;
 /** 顶部/底部一闪而过的提示。比 window.alert 少一次点击。 */
+/* 兜底轮询：pollJob / pollMediaJob 都有 180s 截止，超时后没有谁再更新这些
+ * job——任务中心不补查就会永远"运行中"。这里把仍在跑的 job 每几秒补查一次
+ * （studio 与 media 两个 job 存放处都试；两处都 404 才判任务丢失）。 */
+export async function sweepJobs() {
+  const active = Object.entries(studio.jobs)
+    .filter(([, job]) => job && ["queued", "running"].includes(job.status))
+    .map(([id]) => id);
+  for (const id of active) {
+    let job = null;
+    let gone = true;
+    for (const path of [`/api/studio/jobs/${id}`, `/api/media/jobs/${id}`]) {
+      try {
+        job = await getJSON(path);
+        gone = false;
+        break;
+      } catch (err) {
+        if (err?.status !== 404) { gone = false; break; } // 暂时性错误：保持原状
+      }
+    }
+    if (job) studio.jobs[id] = job;
+    else if (gone) studio.jobs[id] = { ...studio.jobs[id], status: "failed", error: "查询不到该任务（可能已过期）" };
+  }
+}
+
 export function toast(message, ms = 2200) {
   studio.notice = message;
   clearTimeout(toastTimer);

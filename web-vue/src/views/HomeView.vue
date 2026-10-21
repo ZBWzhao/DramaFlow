@@ -4,9 +4,11 @@
  * 数据沿用 shellStore.loadProjects（/api/studio/projects）；
  * 进入项目 = openProject 的状态重置 + 路由跳转（旧 shell.view 字段留 Legacy 不再读）。
  */
-import { computed, onMounted } from "vue";
+import { computed, onMounted, ref } from "vue";
 import { useRouter } from "vue-router";
+import { deleteJSON, errorText } from "../api.js";
 import { loadProjects, openProject, shell } from "../shell/shellStore.js";
+import { assetUrl as mediaUrl } from "../utils.js";
 
 const router = useRouter();
 
@@ -14,14 +16,6 @@ const FX = ["fx-a", "fx-b", "fx-c", "fx-d"];
 
 const totalSegments = computed(() => shell.projects.reduce((n, p) => n + (p.segments_total || 0), 0));
 const making = computed(() => shell.projects.filter((p) => (p.segments_done || 0) > 0).length);
-
-function mediaUrl(path) {
-  const value = String(path || "");
-  if (!value) return "";
-  if (/^(https?:|data:)/.test(value)) return value;
-  if (value.startsWith("assets/")) return `/${value}`;
-  return `/assets/${value}`;
-}
 
 function percent(p) {
   const total = Number(p.segments_total || 0);
@@ -34,10 +28,17 @@ function enter(p) {
   router.push(`/project/${p.canvas}/script`);
 }
 
+const delError = ref("");
+
 async function remove(p) {
   if (!window.confirm(`删除项目「${p.title}」？画面数据会一起删掉。`)) return;
-  await fetch(`/api/studio/projects/${encodeURIComponent(p.canvas)}`, { method: "DELETE" });
-  await loadProjects();
+  delError.value = "";
+  try {
+    await deleteJSON(`/api/studio/projects/${encodeURIComponent(p.canvas)}`);
+    await loadProjects();
+  } catch (err) {
+    delError.value = `删除失败：${errorText(err)}`;
+  }
 }
 
 onMounted(loadProjects);
@@ -52,6 +53,7 @@ onMounted(loadProjects);
         <div class="grow"></div>
       </div>
 
+      <div v-if="delError" class="home-error">{{ delError }}</div>
       <div v-if="shell.error" class="home-error">
         {{ shell.error }}
         <button class="btn sm" type="button" @click="loadProjects">重试</button>

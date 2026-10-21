@@ -8,7 +8,10 @@
 
 export function assetUrl(path) {
   if (!path) return "";
-  return "/assets/" + String(path).replace(/^\/?assets\//, "").replace(/^\//, "");
+  const clean = String(path);
+  // 已经是绝对地址（远端产物 / mock data URL / blob 预览）：原样返回
+  if (/^(https?:|data:|blob:)/.test(clean)) return clean;
+  return "/assets/" + clean.replace(/^\/?assets\//, "").replace(/^\//, "");
 }
 
 /** 从节点的 outputs 里取媒体产物（有就是有，没有返回 null）。

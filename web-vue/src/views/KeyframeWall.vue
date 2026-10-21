@@ -8,6 +8,7 @@
 import { computed, onMounted, ref } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import { generateKeyframe, loadStoryboard, studio, toast } from "../studio/studioStore.js";
+import { assetUrl } from "../utils.js";
 
 const route = useRoute();
 const router = useRouter();
@@ -22,7 +23,8 @@ const currentEp = computed(() => Number(studio.project?.episode || episodes.valu
 const count = (k) => cells.value.filter((c) => c.staleness === k).length;
 
 async function reload() {
-  if (!studio.canvas) studio.canvas = String(route.params.name);
+  const name = String(route.params.name || "");
+  if (name && studio.canvas !== name) studio.canvas = name;
   loading.value = true;
   error.value = "";
   try {
@@ -98,7 +100,7 @@ onMounted(reload);
         @click="onCell(c)"
         @dblclick="open(c)"
       >
-        <img v-if="c.thumb" class="ph" :src="c.thumb.startsWith('assets/') ? `/${c.thumb}` : `/assets/${c.thumb}`" :alt="`片段 ${c.segment_no}`" loading="lazy" />
+        <img v-if="c.thumb" class="ph" :src="assetUrl(c.thumb)" :alt="`片段 ${c.segment_no}`" loading="lazy" />
         <span class="no num">{{ String(c.segment_no).padStart(2, "0") }}</span>
         <span v-if="busyNode === c.node_id" class="gen">生成中…</span>
         <div class="dlg">

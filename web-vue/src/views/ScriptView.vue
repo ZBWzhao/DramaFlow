@@ -8,6 +8,7 @@
 import { computed, onMounted, ref } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import AiPanel from "../ai/AiPanel.vue";
+import { errorText } from "../api.js";
 import { importScript, loadAll, loadScript, loadSegments, produceEpisode, studio } from "../studio/studioStore.js";
 
 const route = useRoute();
@@ -53,7 +54,7 @@ function pickEpisode(no) {
   busy.value = true;
   Promise.all([loadScript(), loadSegments()])
     .then(() => (notice.value = ""))
-    .catch((err) => (notice.value = err?.message || String(err)))
+    .catch((err) => (notice.value = errorText(err)))
     .finally(() => (busy.value = false));
 }
 
@@ -72,7 +73,7 @@ async function saveViaResplit() {
     notice.value = warnings.length ? `已重新分集：${warnings.join("；")}` : "已保存并重新分集";
     editing.value = false;
   } catch (err) {
-    notice.value = err?.message || String(err);
+    notice.value = errorText(err);
   } finally {
     busy.value = false;
   }
@@ -87,13 +88,15 @@ async function doProduce() {
     notice.value = job.status === "succeeded" ? `第 ${currentEp.value} 集制作完成，共 ${segTotal.value} 段` : `制作未完成：${job.status}`;
     produceInstruction.value = "";
   } catch (err) {
-    notice.value = err?.message || String(err);
+    notice.value = errorText(err);
   } finally {
     busy.value = false;
   }
 }
 
 async function refresh() {
+  const name = String(route.params.name || "");
+  if (name && studio.canvas !== name) studio.canvas = name;
   busy.value = true;
   try {
     await loadAll();

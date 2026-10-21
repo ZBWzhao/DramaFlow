@@ -6,6 +6,7 @@
 import { computed, onMounted, ref } from "vue";
 import { useRoute } from "vue-router";
 import { loadAll, pollMediaJob, prepareComposition, runComposition, studio, toast } from "../studio/studioStore.js";
+import { assetUrl as mediaUrl } from "../utils.js";
 
 const route = useRoute();
 const plan = ref(null);
@@ -15,12 +16,6 @@ const clips = computed(() => studio.preview?.clips || []);
 const rendered = computed(() => studio.preview?.rendered || []);
 const playable = computed(() => clips.value.filter((c) => c.video_path));
 const latest = computed(() => rendered.value[0] || null);
-
-function mediaUrl(p) {
-  if (!p) return "";
-  const clean = String(p).replace(/^\/+/, "");
-  return /^(https?:|data:|blob:)/.test(clean) ? clean : clean.startsWith("assets/") ? "/" + clean : "/assets/" + clean;
-}
 
 async function startCompose() {
   composing.value = true;
@@ -71,7 +66,8 @@ async function confirmCompose() {
 }
 
 onMounted(async () => {
-  if (!studio.canvas) studio.canvas = String(route.params.name);
+  const name = String(route.params.name || "");
+  if (name && studio.canvas !== name) studio.canvas = name;
   await loadAll();
 });
 </script>

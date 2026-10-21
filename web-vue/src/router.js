@@ -20,7 +20,7 @@ export const router = createRouter({
         { path: "project/:name/assets", name: "assets", component: () => import("./views/AssetsView.vue") },
         { path: "project/:name/dashboard", name: "dashboard", component: () => import("./views/DashboardView.vue") },
         { path: "project/:name/preview", name: "preview", component: () => import("./views/PreviewView.vue") },
-        { path: "project/:name/canvas", name: "canvas", component: () => import("./CanvasWorkspace.vue") },
+        { path: "project/:name/canvas", name: "canvas", component: () => import("./views/CanvasView.vue") },
       ],
     },
     { path: "/:pathMatch(.*)*", redirect: "/" },

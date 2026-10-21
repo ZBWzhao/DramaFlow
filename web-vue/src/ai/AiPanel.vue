@@ -73,7 +73,7 @@ async function reply(prompt) {
     bot.error = err?.message || String(err);
   } finally {
     const { plain, diffs } = parseDiffs(bot.text);
-    bot.text = plain || bot.text;
+    bot.text = plain;
     bot.diffs = diffs;
     bot.streaming = false;
     running.value = false;
@@ -89,10 +89,10 @@ async function cancel() {
   }
 }
 
-async function apply(diff, idx) {
+async function apply(message, diff, idx) {
   if (!props.applyHandler) return;
   try {
-    if (await props.applyHandler(diff)) messages.at(-1)?.applied.add(idx);
+    if (await props.applyHandler(diff)) message.applied.add(idx);
   } catch (err) {
     /* 失败保持未应用状态；宿主负责提示 */
     console.warn("[AiPanel] apply failed:", err);
@@ -122,7 +122,7 @@ defineExpose({ send });
           <div class="d-old">{{ d.old }}</div>
           <div class="d-new">{{ d.new }}</div>
           <div class="d-acts">
-            <button class="btn sm primary" type="button" @click="apply(d, di)">应用修改</button>
+            <button class="btn sm primary" type="button" @click="apply(m, d, di)">应用修改</button>
             <button class="btn sm" type="button" @click="m.dismissed.add(di)">放弃</button>
           </div>
         </div>

@@ -18,8 +18,8 @@ const STYLE_CARDS = [
   { value: "日系动漫", label: "日漫清亮", small: "动漫 2D", fx: "fx-b" },
   { value: "水墨国风", label: "古风水墨", small: "国风 / 修饰", fx: "fx-c" },
   { value: "真人写实", label: "真人写实", small: "实拍质感", fx: "fx-d" },
-  { value: "3D CG", label: "3D CG", small: "三维渲染", fx: "fx-a" },
-  { value: "赛博霓虹", label: "港风霓虹", small: "都市夜色", fx: "fx-b" },
+  { value: "3D CG", label: "3D CG", small: "三维渲染", fx: "fx-a", planned: true },
+  { value: "赛博霓虹", label: "港风霓虹", small: "都市夜色", fx: "fx-b", planned: true },
 ];
 const RATIOS = [
   { value: "9:16", label: "9:16 竖屏 · 短剧" },
@@ -147,10 +147,12 @@ onMounted(async () => {
               class="style-card"
               :class="{ on: form.style_preset === c.value }"
               type="button"
+              :disabled="c.planned"
+              :title="c.planned ? '该风格在规划中：管线尚未验证，暂不可选' : ''"
               @click="pickStyle(c)"
             >
               <span class="im" :class="c.fx"></span>
-              <span class="nm">{{ c.label }}<small>{{ c.small }}</small></span>
+              <span class="nm">{{ c.label }}<small>{{ c.planned ? "规划" : c.small }}</small></span>
             </button>
           </div>
         </div>
@@ -229,6 +231,7 @@ select.inp option { background: var(--panel); }
 .style-cards { display: grid; grid-template-columns: repeat(6, 1fr); gap: 10px; }
 .style-card { border: 1px solid var(--line); border-radius: var(--r-2); overflow: hidden; cursor: pointer; background: none; text-align: left; }
 .style-card.on { border-color: var(--accent); }
+.style-card:disabled { cursor: not-allowed; opacity: .45; }
 .style-card .im { display: block; height: 64px; }
 .fx-a { background: linear-gradient(165deg, #2A2622, #171310 55%, #1F1A14); }
 .fx-b { background: linear-gradient(195deg, #241F2B, #131017 60%, #191420); }
