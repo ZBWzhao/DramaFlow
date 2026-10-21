@@ -11,37 +11,37 @@
       "instructions": "members/director.md",
       "delegates": ["screenwriter", "asset_designer", "storyboarder", "prompt_writer", "reviewer"],
       "tools": ["get_canvas", "read_file", "list_dir", "export_prompt"],
-      "skills": ["workflow", "drama_craft"]
+      "skills": ["director", "asset"]
     },
     "screenwriter": {
       "description": "写剧本正文：场次、人物、动作、台词，落到画布的 text 节点。",
       "instructions": "members/screenwriter.md",
       "tools": ["get_canvas", "add_nodes", "update_node", "connect_nodes", "set_text", "read_file"],
-      "skills": ["workflow"]
+      "skills": ["director"]
     },
     "asset_designer": {
       "description": "给角色/场景/道具建设定节点：kind/name/anchors/forbidden/consistency_tags/spec/looks，供分镜与渲染引用。",
       "instructions": "members/asset_designer.md",
       "tools": ["get_canvas", "add_nodes", "update_node", "connect_nodes", "set_text", "read_file"],
-      "skills": ["drama_craft"]
+      "skills": ["asset"]
     },
     "storyboarder": {
       "description": "把剧本拆成一镜一段的结构化镜头（duration_s/shot_size/camera/subjects/props/action/focus/light/sound/dialogue/forbidden），用 set_storyboard 写入。",
       "instructions": "members/storyboarder.md",
       "tools": ["get_canvas", "add_nodes", "update_node", "connect_nodes", "set_storyboard", "read_file"],
-      "skills": ["workflow", "drama_craft"]
+      "skills": ["director", "asset"]
     },
     "prompt_writer": {
       "description": "为每个片段建 prompt 节点并连好 shots/ref/media 三类边；不手写提示词正文，正文由服务端按字段渲染。",
       "instructions": "members/prompt_writer.md",
       "tools": ["get_canvas", "add_nodes", "update_node", "connect_nodes", "export_prompt", "read_file"],
-      "skills": ["drama_craft"]
+      "skills": ["asset"]
     },
     "reviewer": {
       "description": "只读核验：单镜 3-8 秒、景别与机位字段、主体与引用闭包、资产字段、提示词节点与三类边；只报问题不改图。",
       "instructions": "members/reviewer.md",
       "tools": ["get_canvas", "read_file", "export_prompt"],
-      "skills": ["workflow", "drama_craft"]
+      "skills": ["director", "asset"]
     }
   }
 }

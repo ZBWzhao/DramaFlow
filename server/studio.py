@@ -994,7 +994,7 @@ _SHOT_SIZE_CODE = {
 
 
 def _shot_size_text(size: str) -> str:
-    """景别写成「代码 + 中文」，模型两头都认（skills/drama_craft 第三节）。"""
+    """景别写成「代码 + 中文」，模型两头都认（skills/director 第三节）。"""
     size = (size or "").strip()
     if not size:
         return ""
@@ -1117,7 +1117,7 @@ def _shot_prompt(
 ) -> str:
     """把这一镜的结构化字段渲染成视频段正文（服务端渲染，人不再手写）。
 
-    视频层铁律（skills/drama_craft/SKILL.md 第三节）：
+    视频层铁律（skills/director/SKILL.md 第三节）：
     - 只写动作，不重描外貌——ref 与文字是权重冲突，重描会让参考图失效、角色换脸；
     - 动作要写「起点 → 可见末态」，「他很愤怒」不算末态，「下颌绷紧、手背青筋」才算；
     - 否定式要写成正面陈述，被禁词根留在提示词里就会被当画面词渲染。
@@ -1186,7 +1186,7 @@ def _keyframe_prompt(
     name_by_id: dict[str, str] | None = None,
     aspect: str = "9:16",
 ) -> str:
-    """为首帧生成写的提示词：一张静止剧照，按 8 段式写（skills/drama_craft/SKILL.md 第二节）。
+    """为首帧生成写的提示词：一张静止剧照，按 8 段式写（skills/director/SKILL.md 第二节）。
 
     首帧是三层里最便宜也最要紧的一层：构图错了，视频再重跑一百次都是错的。
     """
@@ -1752,7 +1752,7 @@ async def create_look(node_id: str, canvas: str, body: NewLookRequest) -> dict[s
 # 资产形象生成
 # ---------------------------------------------------------------------------
 
-# 素材图 = 身份证，不是首帧（skills/drama_craft/SKILL.md 第零节）。
+# 素材图 = 身份证，不是首帧（skills/asset/SKILL.md 第一节）。
 # 素材层只回答「长什么样」，所以：平光、无强阴影、单角度、纯底、信息优先。
 # 两条实测教训写在这里，别再犯：
 # 1. 正/侧/背并排的三视图，图片模型画得对，视频模型却会读成「三个不同的人」——
@@ -2411,7 +2411,7 @@ _PRODUCE_INSTRUCTION = """把第{no}集做成可以进入「制作」的状态�
 也不要改画布标题；直接在当前画布上写节点和连线。
 
 剧本正文在 `assets/{node_id}/content.md`（也用 read_node 读一次，不要凭标题猜）。
-流程与门禁见技能 `workflow`（正文是路由表，按阶段指到 references），提示词工艺见技能 `drama_craft`
+流程与门禁、首帧与视频提示词工艺见技能 `director`，资产抽取与素材图工艺见技能 `asset`
 （三层工艺分离：素材图=身份证 / 首帧=画面 / 视频段=动作）。**先读它们再动手。**
 
 请依次完成：

@@ -11,19 +11,19 @@
       "instructions": "members/director.md",
       "delegates": ["writer", "reviewer"],
       "tools": ["get_canvas", "read_file", "list_dir"],
-      "skills": ["workflow"]
+      "skills": ["director"]
     },
     "writer": {
       "description": "建立剧本与分镜节点，用 set_storyboard 写入一镜一段的结构化镜头数据。",
       "instructions": "members/writer.md",
       "tools": ["get_canvas", "add_nodes", "update_node", "connect_nodes", "set_text", "set_storyboard", "read_file", "word_count"],
-      "skills": ["workflow", "drama_craft"]
+      "skills": ["director", "asset"]
     },
     "reviewer": {
       "description": "核查镜头字段完整性、引用闭包、可执行性与连续性，提出可操作的修改项。",
       "instructions": "members/reviewer.md",
       "tools": ["get_canvas", "read_file"],
-      "skills": ["workflow"]
+      "skills": ["director"]
     }
   }
 }

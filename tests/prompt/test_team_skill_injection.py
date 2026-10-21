@@ -5,7 +5,7 @@
 这组测试锁住三件事：
 1. team.json 声明的 `skills` 真存在；成员提示词文件存在且非空壳；
 2. 带技能的子会话会补上 `read_skill` 工具，并拿到 `<available_skills>` 清单与角色段；
-3. 白名单能真的裁掉技能（写 workflow 的成员看不到 drama_craft），旧会话会被重建。
+3. 白名单能真的裁掉技能（写 director 的成员看不到 asset），旧会话会被重建。
 
 运行：``python -m pytest tests/prompt/test_team_skill_injection.py -q``
 """
@@ -80,28 +80,28 @@ def test_child_tools_get_read_skill_added_once():
 
 def test_child_prompt_carries_catalog_and_role():
     manager = _manager()
-    skills = manager._skills_for(["workflow", "drama_craft"])
+    skills = manager._skills_for(["director", "asset"])
     tools = manager._ensure_skill_reader([], skills)
     prompt = manager._child_system_prompt("", tools, skills, "# 你的角色：分镜师\n\n一镜一段")
     assert "<available_skills>" in prompt
-    assert "workflow" in prompt and "drama_craft" in prompt
+    assert "director" in prompt and "asset" in prompt
     assert "<role>" in prompt and "分镜师" in prompt
 
 
 def test_skill_whitelist_really_filters_catalog():
     manager = _manager()
-    only_workflow = manager._skills_for(["workflow"])
-    assert [entry.name for entry in only_workflow] == ["workflow"]
+    only_workflow = manager._skills_for(["director"])
+    assert [entry.name for entry in only_workflow] == ["director"]
     prompt = manager._child_system_prompt("", [], only_workflow, None)
-    # 只看技能清单段：<rules> 里固定会提到 drama_craft（分层分工），不算注入
+    # 只看技能清单段：<rules> 里固定会提到 asset（分层分工），不算注入
     catalog = prompt.split("<available_skills>")[1].split("</available_skills>")[0]
-    assert "workflow" in catalog
-    assert "drama_craft" not in catalog
+    assert "director" in catalog
+    assert "asset" not in catalog
 
 
 def test_stale_child_prompt_is_rebuilt_fresh_prompt_reused():
     manager = _manager()
-    skills = manager._skills_for(["workflow"])
+    skills = manager._skills_for(["director"])
     stale = manager._child_system_prompt("旧的系统提示词，没有技能段", [], skills, None)
     assert "<available_skills>" in stale
     assert "旧的系统提示词" not in stale
@@ -162,7 +162,7 @@ def test_delegate_builds_child_prompt_with_catalog_and_tools(monkeypatch):
             task="按技能拆镜",
             tool_names=["read_file"],
             role_prompt="# 你的角色：分镜师\n\n一镜一段",
-            skill_names=["workflow", "drama_craft"],
+            skill_names=["director", "asset"],
         )
     )
 
@@ -170,7 +170,7 @@ def test_delegate_builds_child_prompt_with_catalog_and_tools(monkeypatch):
     record = manager.registry["分镜测试"]
     prompt = record.session.system_prompt
     assert "<available_skills>" in prompt
-    assert "workflow" in prompt and "drama_craft" in prompt
+    assert "director" in prompt and "asset" in prompt
     assert "<role>" in prompt and "分镜师" in prompt
     # tools 白名单里没有 read_skill，也要自动补上（否则提示词让它读、它却读不了）
     assert "read_skill" in captured[0]
@@ -178,7 +178,7 @@ def test_delegate_builds_child_prompt_with_catalog_and_tools(monkeypatch):
 
     # 同名再委派：复用同一个子会话，提示词不重建
     before = record.session.system_prompt
-    asyncio.run(manager.delegate(name="分镜测试", task="再拆一次", tool_names=["read_file"], skill_names=["workflow"]))
+    asyncio.run(manager.delegate(name="分镜测试", task="再拆一次", tool_names=["read_file"], skill_names=["director"]))
     assert manager.registry["分镜测试"] is record
     assert record.session.system_prompt == before
 
@@ -214,5 +214,5 @@ def test_team_runner_passes_member_skill_whitelist():
     by_member = {call["name"].removeprefix("dramaTeam_"): call for call in manager.calls}
     for name, member in manifest.members.items():
         assert by_member[name]["skill_names"] == (member.skills or None)
-    # reviewer 不该拿到 drama_craft？—— 它要核对工艺字段，所以拿到才对；这条锁住"按声明走"
-    assert "drama_craft" in by_member["storyboarder"]["skill_names"]
+    # reviewer 不该拿到 asset？—— 它要核对工艺字段，所以拿到才对；这条锁住"按声明走"
+    assert "asset" in by_member["storyboarder"]["skill_names"]
