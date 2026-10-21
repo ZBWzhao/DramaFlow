@@ -6,15 +6,46 @@
  * AI 助手是全局件：剧本页与画布页停靠（页面自挂 AiPanel mode="dock"），
  * 其余页面用右下浮球唤起全局抽屉（AiPanel mode="drawer"）。
  */
-import { computed } from "vue";
+import { computed, ref } from "vue";
 import { useRoute } from "vue-router";
 import TaskCenter from "./TaskCenter.vue";
+import AiPanel from "../ai/AiPanel.vue";
+import { applyField } from "../ai/diff.js";
+import { getJSON } from "../api.js";
+import { savePrompt, studio } from "../studio/studioStore.js";
 
 const route = useRoute();
 
 /* 项目态：/project/:name/* 下才显示项目导航与工具区 */
 const inproj = computed(() => route.path.startsWith("/project/"));
 const pname = computed(() => String(route.params.name || ""));
+
+/* 剧本/画布页自带停靠 AI，浮球只在这些页面之外出现 */
+const fabVisible = computed(
+  () => inproj.value && !route.path.endsWith("/script") && !route.path.endsWith("/canvas"),
+);
+const drawerOpen = ref(false);
+
+/* 快捷指令按所在页注入 */
+const chips = computed(() => {
+  const p = route.path;
+  if (p.endsWith("/production") || p.endsWith("/wall"))
+    return ["这段提示词换个机位", "1-7 为什么过期", "第二集拆分镜"];
+  if (p.endsWith("/assets")) return ["检查全片形象一致性", "给苏晚换个更冷的音色"];
+  if (p.endsWith("/dashboard") || p.endsWith("/preview")) return ["总结本集进度", "下一段最该做什么"];
+  return [];
+});
+
+/* 全局抽屉的 diff 应用：拉详情 → 字段写回 → 人改保存（转 Task 9 同一动作） */
+async function applyDiff(d) {
+  if (!d.segmentId) return false;
+  studio.canvas = pname.value;
+  const detail = await getJSON(
+    `/api/studio/segments/${encodeURIComponent(d.segmentId)}?canvas=${encodeURIComponent(pname.value)}`,
+  );
+  await savePrompt(d.segmentId, applyField(detail.prompt || "", d.field, d.new));
+  return true;
+}
 
 /* 主导航：制作 tab 覆盖 production 与 wall（首帧墙是制作的子页） */
 const tabs = [
@@ -54,7 +85,23 @@ const tabs = [
       <router-view />
     </main>
 
-    <!-- AI-FAB：Task 5 挂全局 AI 浮球 + 抽屉 -->
+    <!-- AI 全局抽屉 + 浮球（剧本/画布页停靠面板之外的全局入口） -->
+    <button v-if="fabVisible" class="ai-fab" type="button" title="AI 助手" @click="drawerOpen = true">AI</button>
+    <Transition name="drawer">
+      <AiPanel
+        v-if="drawerOpen"
+        class="ai-drawer"
+        mode="drawer"
+        :canvas="pname"
+        :chips="chips"
+        :apply-handler="applyDiff"
+        @canvas-changed="() => {}"
+      >
+        <template #head-extra>
+          <button class="cls" type="button" @click="drawerOpen = false">收起 ›</button>
+        </template>
+      </AiPanel>
+    </Transition>
   </div>
 </template>
 
@@ -105,4 +152,22 @@ const tabs = [
 .spec { font-family: var(--mono); font-size: var(--fs-11); color: var(--text-3); }
 .home-right { margin-left: auto; display: flex; align-items: center; }
 .top-utils + .home-right { display: none; }
+
+/* ---------- 全局 AI 抽屉（demo v4 · .ai-fab/.ai-drawer） ---------- */
+.ai-fab {
+  position: fixed; right: 22px; bottom: 74px; z-index: 70;
+  width: 44px; height: 44px; border-radius: 50%;
+  background: var(--panel); border: 1px solid var(--line-2);
+  color: var(--gold); font-family: var(--serif); font-size: var(--fs-14);
+  box-shadow: 0 8px 30px rgba(0, 0, 0, .5);
+}
+.ai-fab:hover { border-color: rgba(194, 163, 107, .5); }
+.ai-drawer {
+  position: fixed; top: 0; right: 0; bottom: 0; width: 380px; z-index: 65;
+  border-left: 1px solid var(--line-2); box-shadow: -16px 0 48px rgba(0, 0, 0, .45);
+}
+.drawer-enter-active, .drawer-leave-active { transition: transform 240ms var(--ease); }
+.drawer-enter-from, .drawer-leave-to { transform: translateX(100%); }
+.cls { color: var(--text-3); font-size: var(--fs-12); }
+.cls:hover { color: var(--text); }
 </style>
