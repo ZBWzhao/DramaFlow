@@ -3,7 +3,7 @@ name: asset
 version: 2.0.0
 role: asset
 description: 从剧本抽取角色/场景/道具三表（草稿）；素材层身份证工艺（锚点法、consistency_tags、素材提示词形状）
-allowed_tools: [read_file, list_dir, get_canvas, read_skill, add_nodes, update_node, set_text]
+allowed_tools: [read_file, list_dir, get_canvas, read_skill, add_nodes, update_node, set_text, update_asset_tables, run_pipeline]
 ---
 
 # asset：资产抽取 + 素材层身份证工艺

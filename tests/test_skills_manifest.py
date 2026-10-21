@@ -142,3 +142,17 @@ def test_update_story_analysis_rejects_bad_outline(tmp_path) -> None:
         assert "episode_outline" not in saved.meta["story_analysis"]  # 校验失败不落盘
 
     asyncio.run(scenario())
+
+
+def test_asset_tables_tools_registered_and_whitelist_valid(tmp_path) -> None:
+    """聊天改表/触发解析两个新工具已注册，白名单仍然零幽灵引用。"""
+    import asyncio
+
+    from core.skills import SKILLS_ROOT, build_skill_tools, discover_skills, validate_skill_tools
+    from core.loader import create_agent_tools
+
+    tools, _entries, _ctx = asyncio.run(create_agent_tools(cwd=str(tmp_path)))
+    names = {t.name for t in tools} | {t.name for t in build_skill_tools()}
+    assert {"update_asset_tables", "run_pipeline"} <= names
+    entries, _ = discover_skills(SKILLS_ROOT)
+    assert validate_skill_tools(entries, names) == []

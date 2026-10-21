@@ -3,7 +3,7 @@ name: script-analysis
 version: 1.0.0
 role: script-analysis
 description: 通读全剧本，产出世界观/故事梗概/分集大纲/视听风格四件套，供资产表与单集制作引用
-allowed_tools: [read_file, list_dir, get_canvas, update_story_analysis]
+allowed_tools: [read_file, list_dir, get_canvas, update_story_analysis, run_pipeline]
 ---
 
 # 角色：剧本理解

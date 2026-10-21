@@ -32,6 +32,7 @@ from core.canvas import Canvas, CanvasError
 from core.canvas_repository import mutate_canvas_with_retry
 from core.asset_tables import AssetTables, merge_asset_tables, parse_asset_tables
 from core.skills import discover_skills
+from core.pipelines import register_spawner
 from core.story_analysis import CARDS, StoryAnalysis, run_story_analysis
 from core.studio_rules import (
     THRESHOLDS,
@@ -991,16 +992,36 @@ def _write_asset_tables(graph: Canvas, tables: dict[str, Any]) -> bool:
     return True
 
 
-def _spawn_auto_pipeline(canvas_name: str) -> None:
-    """auto_asset_table 的后台任务：剧本理解全卡 + 资产解析，停在表不生图。
-
-    已有分析/解析在跑就让位（用户手动触发优先）；失败写进 meta 里可诊断，
-    不打断导入本身的响应。
-    """
+def _spawn_pipeline(canvas_name: str, which: str) -> dict:
+    """后台触发单条 pipeline（story_analysis / asset_parse）；单飞冲突返回 ok=False。"""
     active = _story_runs.get(canvas_name)
     if active is not None and not active["task"].done():
-        return
+        return {"ok": False, "detail": "这个项目正在解析中，等它跑完或先取消"}
+    try:
+        _spawn_pipeline_task(canvas_name, which)
+    except RuntimeError:
+        return {"ok": False, "detail": "当前没有运行中的事件循环，无法后台执行"}
+    return {"ok": True, "detail": "已开始后台执行"}
 
+
+def _spawn_pipeline_task(canvas_name: str, which: str) -> None:
+    if which == "story_analysis":
+        _spawn_analysis_job(canvas_name)
+    elif which == "asset_parse":
+        _spawn_parse_job(canvas_name)
+    else:  # auto：理解 + 解析，停在表不生图
+        _spawn_auto_job(canvas_name)
+
+
+def _spawn_auto_pipeline(canvas_name: str) -> None:
+    """auto_asset_table 入口：剧本理解全卡 + 资产解析，停在表不生图。"""
+    active = _story_runs.get(canvas_name)
+    if active is not None and not active["task"].done():
+        return  # 已有分析/解析在跑就让位（用户手动触发优先）
+    _spawn_auto_job(canvas_name)
+
+
+def _spawn_auto_job(canvas_name: str) -> None:
     async def job() -> None:
         try:
             graph = await _load(canvas_name)
@@ -1034,6 +1055,45 @@ def _spawn_auto_pipeline(canvas_name: str) -> None:
                 await mutate_canvas_with_retry(_registry.canvas_repository, canvas_name, note_error)
             except Exception:  # pragma: no cover - 连错误都写不进去时只能放弃
                 pass
+
+    _story_runs[canvas_name] = {"task": asyncio.create_task(job()), "cancel": asyncio.Event()}
+
+
+def _spawn_analysis_job(canvas_name: str) -> None:
+    """只跑剧本理解四卡（聊天触发 / 手动重跑共用）。"""
+
+    async def job() -> None:
+        graph = await _load(canvas_name)
+        version = _skill_version(graph, "script_analysis", "1.0.0")
+        script_text = _story_script_text(graph)
+        if not script_text.strip():
+            return
+        analysis = await run_story_analysis(
+            script_text,
+            _registry.llm,
+            skill_tag={"name": "script-analysis", "version": version},
+        )
+        await _merge_story_analysis(canvas_name, analysis)
+
+    _story_runs[canvas_name] = {"task": asyncio.create_task(job()), "cancel": asyncio.Event()}
+
+
+def _spawn_parse_job(canvas_name: str) -> None:
+    """只跑资产表解析（聊天触发 / 手动重跑共用）。"""
+
+    async def job() -> None:
+        graph = await _load(canvas_name)
+        episodes = _episodes_texts(graph)
+        if not episodes:
+            return
+        version = _skill_version(graph, "asset", "2.0.0")
+        known = [str(c.get("name") or "") for c in ((graph.meta or {}).get("asset_tables") or {}).get("characters", [])]
+        tables = await parse_asset_tables(episodes, _registry.llm, known=known)
+        tables["skill"] = {"name": "asset", "version": version}
+        tables["updated_at"] = int(time.time())
+        await mutate_canvas_with_retry(
+            _registry.canvas_repository, canvas_name, lambda g: _write_asset_tables(g, tables)
+        )
 
     _story_runs[canvas_name] = {"task": asyncio.create_task(job()), "cancel": asyncio.Event()}
 
@@ -3160,3 +3220,10 @@ async def produce(body: ProduceRequest) -> dict[str, Any]:
     )
     return {"ok": True, "job": _jobs[job_id]}
 
+
+
+def _pipeline_spawner(canvas_name: str, which: str) -> dict:
+    return _spawn_pipeline(canvas_name, which)
+
+
+register_spawner(_pipeline_spawner)
