@@ -14,9 +14,11 @@ import "./styles/tokens.css";
 // 画布视图专用暗色主题（作用域 .canvas-app，不影响首页/制片台）
 import "./styles/canvas.css";
 import "./styles/canvas2.css";
+import { router } from "./router.js";
 import App from "./App.vue";
 
 const app = createApp(App);
 app.use(ElementPlus, { locale: zhCn });
+app.use(router);
 for (const [name, comp] of Object.entries(ElIcons)) app.component(name, comp);
 app.mount("#app");
