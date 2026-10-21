@@ -1,86 +1,115 @@
 /* ============================================================
- * Design tokens — 单一视觉真源（阶段 0）
+ * Design tokens — 单一视觉真源（暖墨重设计 · 2026-10-21 spec）
  *
- * 只做两件事：
- *   1) 把调色板/间距/圆角/字体/层级固化到 :root，禁止组件再写裸值；
- *   2) 提供少量基础层规则（焦点环、等宽数字、减动效降级）。
- *
- * 不覆盖 canvas2.css 已有的 --bg/--panel/--text 等同名变量（值相同），
- * 只补充新变量，因此首页/制片台/画布三种视图可以平滑迁移。
+ * 结构：
+ *   1) :root 新 token —— 值与 docs/design-demo/2026-10-20-redesign-demo-v4.html
+ *      的 :root 逐字一致（暖墨底 / 朱砂 / 鎏金 / 宋体栈 / 发丝线）；
+ *   2) 画布专属变量与旧名兼容层 —— 画布（canvas.css / canvas2.css）尚未换皮，
+ *      旧名解析到旧值保证观感不变；旧 studio 视图替换完成后兼容段随之清零；
+ *   3) Element Plus 表现层对齐。
  * ============================================================ */
 
 :root {
-  /* ---------- 表面：越靠上越亮，靠「差 2~4 级灰」而不是阴影区分 ---------- */
-  --bg: #08090b;              /* 画布底：全系统最暗，内容浮起来 */
-  --bg-2: #0b0d10;            /* 次级底：左栏、状态栏 */
-  --panel: #101318;           /* 面板/顶栏 */
-  --card: #14171d;            /* 卡片默认面 */
-  --card-2: #171b22;          /* 卡片悬停/内嵌块 */
-  --card-3: #1c212a;          /* 卡片内浮层、输入框填充 */
+  /* ---------- 表面：暖墨，靠亮度差分楼层级 ---------- */
+  --bg: #0B0A09;
+  --bg-2: #0F0E0C;
+  --panel: #121110;
+  --card: #161513;
+  --card-2: #1B1917;
+  --card-3: #211F1C;
 
-  /* ---------- 描边：深色底不能靠阴影堆层级，靠 1px 描边 ---------- */
-  --line: rgba(255, 255, 255, 0.07);   /* 分隔线、卡片默认边框 */
-  --line-2: rgba(255, 255, 255, 0.12); /* 悬停边框、重要分隔 */
-  --line-3: rgba(255, 255, 255, 0.18); /* 聚焦/选中边框 */
+  /* ---------- 描边：发丝线代替阴影体系 ---------- */
+  --line: rgba(255, 251, 243, .06);
+  --line-2: rgba(255, 251, 243, .11);
+  --line-3: rgba(255, 251, 243, .17);
 
-  /* ---------- 文字：4 级，够用且不糊 ---------- */
-  --text: #e9edf4;            /* 主文字 15.3:1 */
-  --text-2: #a7b0bf;          /* 次文字 8.2:1 */
-  --text-3: #6d7787;          /* muted 3.96:1 —— 只用于单位/占位/禁用，不做正文 */
-  --text-3-strong: #7e8899;   /* 可读的次要正文 5.16:1（--text-3 不达标时的替代） */
-  --text-on-accent: #06101f;  /* 强调色底上的文字 */
+  /* ---------- 文字 ---------- */
+  --text: #EDE8DF;
+  --text-2: #A89F91;
+  --text-3: #6F685D;
 
-  /* ---------- 强调色：全局唯一，只给「可操作/当前」 ---------- */
-  --accent: #6ea8ff;
-  --accent-soft: rgba(110, 168, 255, 0.16);
-  --accent-line: rgba(110, 168, 255, 0.42);
+  /* ---------- 强调色：朱砂，全局唯一可操作色 ---------- */
+  --accent: #C9553D;
+  --accent-hi: #DD6A50;
+  --accent-soft: rgba(201, 85, 61, .13);
 
-  /* ---------- 状态色：只表达状态，不做装饰 ---------- */
-  --ok: #45c08a;              /* 成功/已完成 */
-  --ok-soft: rgba(69, 192, 138, 0.14);
-  --warn: #ff8a5c;            /* 警示/待处理（沿用 --warm） */
-  --warn-soft: rgba(255, 138, 92, 0.14);
-  --bad: #ff6b7e;             /* 失败/非法 */
-  --bad-soft: rgba(255, 107, 126, 0.14);
+  /* ---------- 鎏金：只给对白/台词/音色/试听 ---------- */
+  --gold: #C2A36B;
+  --gold-soft: rgba(194, 163, 107, .12);
 
-  /* ---------- 数据家族色：只给 2px 类型条 / 端口 / 连线 ---------- */
-  --fam-string: #8b94a5;      /* text / prompt / storyboard */
-  --fam-image: #6ea8ff;       /* image / image_gen / asset */
-  --fam-video: #45bfae;       /* video / video_gen */
-  --fam-audio: #cfa050;       /* audio / tts_gen */
-  --fam-mixed: #a7b0bf;       /* timeline */
+  /* ---------- 状态：低饱和 ---------- */
+  --ok: #6FA284;
+  --ok-soft: rgba(111, 162, 132, .12);
+  --warn: #C98A4B;
+  --warn-soft: rgba(201, 138, 75, .12);
+  --bad: #C25B54;
 
-  /* ---------- 字体 ---------- */
-  --font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC",
-    "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
-  --font-mono: ui-monospace, SFMono-Regular, "SF Mono", Consolas,
-    "Liberation Mono", monospace;
-  --fs-11: 11px;   /* 单位/参数/角标 */
-  --fs-12: 12px;   /* 正文、卡片标题 */
-  --fs-13: 13px;   /* 面板标题 */
-  --fs-15: 15px;   /* 区块标题 */
-  --fs-20: 20px;   /* 页面标题 */
-  --fs-28: 28px;   /* 首页主标题 */
-  --lh-tight: 1.25;
-  --lh-base: 1.5;
+  /* ---------- 间距 / 圆角 / 字号 ---------- */
+  --sp-1: 4px; --sp-2: 8px; --sp-3: 12px; --sp-4: 16px; --sp-5: 24px; --sp-6: 32px;
+  --r-1: 4px; --r-2: 6px; --r-3: 8px;
+  --fs-11: 11px; --fs-12: 12px; --fs-13: 13px; --fs-14: 14px; --fs-16: 16px; --fs-20: 20px;
+  --dur: 160ms;
+  --ease: cubic-bezier(.25, .6, .3, 1);
+  --sans: "PingFang SC", "MiSans", "HarmonyOS Sans SC", "Microsoft YaHei", -apple-system, sans-serif;
+  --serif: "Noto Serif SC", "Source Han Serif SC", "Songti SC", STSong, SimSun, serif;
+  --mono: "SF Mono", ui-monospace, Consolas, monospace;
+}
 
-  /* ---------- 间距：4 基准；组件内用 4/6/8，面板用 8/12/16，页面用 16/24 ---------- */
-  --sp-1: 4px;
-  --sp-2: 6px;
-  --sp-3: 8px;
-  --sp-4: 12px;
-  --sp-5: 16px;
-  --sp-6: 24px;
-  --sp-7: 32px;
+/* ---------- 基础层（来自 demo v4） ---------- */
+* { box-sizing: border-box; }
+html, body { height: 100%; }
+body {
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--sans);
+  font-size: var(--fs-13);
+  line-height: 1.6;
+  -webkit-font-smoothing: antialiased;
+}
+button { font: inherit; color: inherit; cursor: pointer; }
+.num { font-variant-numeric: tabular-nums; }
+.cap { font-size: var(--fs-11); letter-spacing: .14em; color: var(--text-3); font-weight: 500; }
+::-webkit-scrollbar { width: 8px; height: 8px; }
+::-webkit-scrollbar-thumb { background: #26231f; border-radius: 4px; }
+::-webkit-scrollbar-track { background: transparent; }
 
-  /* ---------- 圆角：卡 12、卡内嵌 10、按钮 8、徽标 999 ---------- */
-  --r-card: 12px;
-  --r-nest: 10px;
-  --r-btn: 8px;
-  --r-pill: 999px;
+/* ============================================================
+ * 画布专属变量 + 旧名兼容层
+ * 画布视图（canvas.css / canvas2.css，作用域 .canvas-app / .cv2）
+ * 尚未换皮：下面这些名字保持旧值，画布观感零漂移。
+ * ============================================================ */
+:root {
+  /* —— 视觉规格 v2（画布作用域消费，值保持不变） —— */
+  --bg-canvas: #141414;
+  --bg-panel: #161616;
+  --bg-s1: #1e1e1e;
+  --bg-s2: #262626;
+  --bg-s3: #2b2b2b;
+  --bg-s4: #383838;
+  --bg-input: #202020;
+  --bd-subtle: #232323;
+  --bd-default: #2a2a2a;
+  --bd-strong: #3a3a3a;
+  --tx-1: #f8f8f8;
+  --tx-2: #a8a8a8;
+  --tx-3: #808080;
+  --tx-4: #525252;
+  --tx-card: #dcdcdc;
+  --accent-solid: #22ebe5;
+  --danger: #f03838;
+  --warning: #daa717;
+  --r-xs: 4px; --r-sm: 8px; --r-md: 10px; --r-lg: 12px; --r-xl: 16px;
+  --lh-body: 1.75;
+  --wire: #4a4a4a;
 
-  /* ---------- 布局 ---------- */
-  --h-topbar: 56px;
+  /* —— 数据家族色（画布类型条 / 端口 / 连线），保持旧值 —— */
+  --fam-string: #8b94a5;
+  --fam-image: #6ea8ff;
+  --fam-video: #45bfae;
+  --fam-audio: #cfa050;
+  --fam-mixed: #a7b0bf;
+
+  /* —— 画布布局常量，保持旧值 —— */
   --h-statusbar: 28px;
   --w-rail: 260px;
   --card-w: 248px;
@@ -89,57 +118,63 @@
   --card-h: 164px;
   --port: 8px;
   --grid: 22px;
+  --grid-dot: rgba(255, 255, 255, 0.09);
+  --edge: rgba(150, 165, 190, 0.28);
+  --node-w: var(--card-w);
 
-  /* ---------- 层级：只有 6 层，超出说明设计有问题 ---------- */
-  --z-edge: 10;
-  --z-node: 20;
-  --z-node-ui: 30;
-  --z-chrome: 40;
-  --z-popover: 60;
-  --z-modal: 80;
+  /* —— 顶栏统一到 demo 高度（新 AppShell 用 50px） —— */
+  --h-topbar: 50px;
 
-  /* ---------- 阴影：深色底上用「描边 + 微光 + 小阴影」表达层级 ---------- */
+  /* —— 层级 —— */
+  --z-edge: 10; --z-node: 20; --z-node-ui: 30; --z-chrome: 40; --z-popover: 60; --z-modal: 80;
+
+  /* —— 画布阴影（画布换皮前保留） —— */
   --elev-1: 0 1px 2px rgba(0, 0, 0, 0.4);
   --elev-2: 0 8px 24px -8px rgba(0, 0, 0, 0.65), 0 0 0 1px var(--line);
   --elev-3: 0 24px 64px -16px rgba(0, 0, 0, 0.72), 0 0 0 1px var(--line);
   --hairline-top: inset 0 1px 0 rgba(255, 255, 255, 0.06);
 
-  /* ---------- 动效：只动 opacity / transform / border-color ---------- */
-  --dur-fast: 120ms;
-  --dur-base: 180ms;
-  --dur-slow: 300ms;
-  --ease: cubic-bezier(0.2, 0.8, 0.2, 1);
-
-  /* ---------- 旧变量兼容层 ----------
-   * theme.css 的浅色变量名仍被 home/studio/legacy 画布消费；
-   * 这里统一映射到新 token，保证「画布 / 侧栏 / 首页」只有一套明暗。
-   * 不删除旧名 = 不动任何组件逻辑，只是让旧名解析到新值。 */
+  /* —— 旧名 → 新值映射（旧 studio 视图替换完成后清零） —— */
+  --text-3-strong: #8A8175;            /* 可读的次要正文（暖化旧 #7e8899） */
+  --text-on-accent: #FFF7F0;           /* 朱砂底上的文字 */
+  --accent-line: rgba(221, 106, 80, 0.42);
+  --bad-soft: rgba(194, 91, 84, 0.14);
   --bg-overlay: var(--panel);
   --bg-elevated: var(--card);
   --card-strong: var(--card-3);
-  --line-strong: var(--line-2);
+  --line-strong: var(--line-3);
   --primary: var(--accent);
   --success: var(--ok);
-  --warning: var(--warn);
-  --danger: var(--bad);
-  --violet: var(--accent); /* 去紫：全局只保留一个强调色 */
-  --grid-dot: rgba(255, 255, 255, 0.09);
-  --edge: rgba(150, 165, 190, 0.28);
-  --node-w: var(--card-w);
-  --ui-radius: var(--r-btn);
-  --ui-radius-small: 6px;
-  --ui-radius-large: var(--r-card);
-  --ui-radius-l: var(--r-card);
-  --ui-radius-m: var(--r-btn);
-  --ui-radius-medium: var(--r-btn);
+  --violet: var(--accent);             /* 去紫：全局只保留一个强调色 */
+  --ease-out: var(--ease);
+  --dur-fast: var(--dur);
+  --dur-base: var(--dur);
+  --dur-slow: 300ms;
+  --font-sans: var(--sans);
+  --font-mono: var(--mono);
+  --fs-15: 15px;
+  --fs-28: 28px;
+  --lh-tight: 1.25;
+  --lh-base: 1.5;
+  --sp-7: var(--sp-6);
+  --r-card: var(--r-3);
+  --r-nest: var(--r-2);
+  --r-btn: var(--r-3);
+  --r-pill: 999px;
   --radius-pill: var(--r-pill);
+  --ui-radius: var(--r-2);
+  --ui-radius-small: var(--r-2);
+  --ui-radius-large: var(--r-3);
+  --ui-radius-l: var(--r-3);
+  --ui-radius-m: var(--r-2);
+  --ui-radius-medium: var(--r-2);
   --ctl-sm: 28px;
   --ctl-md: 32px;
   --ctl-lg: 40px;
 
   /* ---------- Element Plus 表现层对齐（只改观感，不动组件行为） ---------- */
-  --el-border-radius-base: var(--r-btn);
-  --el-border-radius-small: 6px;
+  --el-border-radius-base: var(--r-2);
+  --el-border-radius-small: var(--r-1);
   --el-font-size-base: var(--fs-12);
   --el-font-size-small: var(--fs-11);
   --el-box-shadow-light: var(--elev-2);
@@ -150,6 +185,7 @@
   --el-color-primary-light-7: color-mix(in srgb, var(--accent) 34%, var(--bg));
   --el-color-primary-light-8: color-mix(in srgb, var(--accent) 24%, var(--bg));
   --el-color-primary-light-9: color-mix(in srgb, var(--accent) 14%, var(--bg));
+  --el-color-primary-dark-2: var(--accent-hi);
   --el-color-success-light-9: color-mix(in srgb, var(--ok) 14%, var(--bg));
   --el-color-warning-light-9: color-mix(in srgb, var(--warn) 14%, var(--bg));
   --el-color-danger-light-9: color-mix(in srgb, var(--bad) 14%, var(--bg));
@@ -167,71 +203,17 @@
   --el-fill-color-blank: var(--card);
 }
 
-/* ---------- 基础层 ---------- */
-
-/* 键盘焦点：只在键盘导航时出现，鼠标点击不闪 */
+/* ---------- 键盘焦点：只在键盘导航时出现 ---------- */
 :focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: 2px;
-  border-radius: 4px;
+  border-radius: var(--r-1);
 }
 
 /* 数字（尺寸/时长/版本/成本）一律等宽，避免跳动 */
 .tabular,
 .cv2 [data-num] {
   font-variant-numeric: tabular-nums;
-}
-
-/* ============================================================
- * 视觉规格 v2（01-visual-spec.md）——画布视图先落地（阶段 B）
- *
- * 只新增「不与旧变量同名」的规格变量；同名但语义不同的
- * （--accent / --sp-* / --fs-* / --lh-* / --r-*）在 .cv2 作用域内覆盖，
- * 见 canvas2.css 顶部映射块。这样本轮「只做画布」，首页/制片台不被波及。
- * ============================================================ */
-:root {
-  /* 表面：靠亮度差分楼层级（spec §1） */
-  --bg-canvas: #141414;
-  --bg-panel: #161616;
-  --bg-s1: #1e1e1e;
-  --bg-s2: #262626;
-  --bg-s3: #2b2b2b;
-  --bg-s4: #383838;
-  --bg-input: #202020;   /* 提示词/输入区（03-card-inspector-spec） */
-
-  /* 描边：极少用，仅需硬边时 */
-  --bd-subtle: #232323;
-  --bd-default: #2a2a2a;
-  --bd-strong: #3a3a3a;
-
-  /* 文字：4 级；--tx-4 仅图标/分隔线，禁止承载正文 */
-  --tx-1: #f8f8f8;
-  --tx-2: #a8a8a8;
-  --tx-3: #808080;
-  --tx-4: #525252;
-  --tx-card: #dcdcdc;    /* 卡片正文（03-card-inspector-spec §一.4） */
-
-  /* 语义色：画布内只允许 accent / danger / warning 三类 */
-  --accent-solid: #22ebe5;
-  --danger: #f03838;
-  --warning: #daa717;
-
-  /* 圆角：按尺度命名（旧 --r-card/--r-nest/--r-btn 是角色名，迁移时映射） */
-  --r-xs: 4px;
-  --r-sm: 8px;
-  --r-md: 10px;
-  --r-lg: 12px;
-  --r-xl: 16px;
-
-  /* 字体：沿用系统中文黑体栈，不引入新字体 */
-  --font-sans: "PingFang SC", "HarmonyOS Sans SC", "Source Han Sans SC",
-    "Microsoft YaHei", system-ui, sans-serif;
-  --fs-14: 14px;
-  --fs-16: 16px;
-  --lh-body: 1.75;
-
-  /* 连线：画布内唯一允许的"光效"只给选中链路 */
-  --wire: #4a4a4a;
 }
 
 /* 减动效：所有动画/过渡停掉，界面必须仍然完整可读 */
@@ -245,4 +227,3 @@
     scroll-behavior: auto !important;
   }
 }
-
