@@ -9,7 +9,7 @@ import { computed, onMounted, ref } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import AiPanel from "../ai/AiPanel.vue";
 import { errorText } from "../api.js";
-import { importScript, loadAll, loadScript, loadSegments, produceEpisode, studio } from "../studio/studioStore.js";
+import { importScript, loadAll, loadProject, loadScript, loadSegments, produceEpisode, studio } from "../studio/studioStore.js";
 import StoryAnalysisCards from "./script/StoryAnalysisCards.vue";
 import AssetTablesPanel from "./script/AssetTablesPanel.vue";
 
@@ -22,7 +22,7 @@ const editText = ref("");
 const tab = ref("script");
 async function switchTab(next) {
   tab.value = next;
-  if (next !== "script" && !studio.storyAnalysis) await loadScript();
+  if (next !== "script" && !studio.storyAnalysis) await loadProject(); // 产物随 project 下发
 }
 const busy = ref(false);
 const notice = ref("");
