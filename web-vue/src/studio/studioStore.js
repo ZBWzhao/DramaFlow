@@ -34,6 +34,13 @@ export const studio = reactive({
   generating: {}, // node_id -> true
   uploading: {},
   produceJob: null, // 让 Agent 开始制作的任务态
+
+  // 剧本理解四卡 + 资产表（草稿区）。产物归一后的全形状由后端保证。
+  storyAnalysis: null,
+  assetTables: null,
+  analysis: { running: false, cards: {} }, // cards[key] = {status, text, error}
+  parsing: { running: false, episodeNo: 0 },
+  syncing: false,
 });
 
 const qs = () => {
@@ -75,6 +82,8 @@ export async function loadProject() {
   studio.loading = true;
   try {
     studio.project = await getJSON(`/api/studio/project${qs()}`);
+    studio.storyAnalysis = studio.project.story_analysis || null;
+    studio.assetTables = studio.project.asset_tables || null;
     studio.error = "";
   } catch (err) {
     fail(err);
@@ -175,6 +184,130 @@ export async function importScript(text, split = true) {
   await loadAll();
   return data;
 }
+
+/* ---------------------------------------------------------- 剧本理解 / 资产表 pipeline */
+
+/* pipeline 专用流式消费：不需要会话恢复，比 streamNDJSON 少一层重连机制 */
+async function streamPipeline(path, body, onEvent) {
+  const res = await fetch(path, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body ?? {}),
+  });
+  if (!res.ok) {
+    const detail = (await res.json().catch(() => ({}))).detail || res.statusText;
+    throw new Error(detail);
+  }
+  const reader = res.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+  const events = [];
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+    const lines = buffer.split("\n");
+    buffer = lines.pop() ?? "";
+    for (const line of lines) {
+      if (!line.trim()) continue;
+      try {
+        const event = JSON.parse(line);
+        events.push(event);
+        onEvent?.(event);
+      } catch {
+        console.warn("坏事件（已跳过）", line.slice(0, 120));
+      }
+    }
+  }
+  return events;
+}
+
+export async function runStoryAnalysis({ cards, onEvent } = {}) {
+  if (studio.analysis.running) throw new Error("已经在解析中");
+  studio.analysis.running = true;
+  studio.analysis.cards = {};
+  try {
+    const events = await streamPipeline(
+      "/api/studio/story-analysis/run",
+      { canvas: studio.canvas, cards: cards?.length ? cards : undefined },
+      (event) => {
+        if (event.type === "card_start") {
+          studio.analysis.cards[event.key] = { status: "running", text: "" };
+        } else if (event.type === "card_delta") {
+          const card = studio.analysis.cards[event.key] || (studio.analysis.cards[event.key] = { status: "running", text: "" });
+          card.text += event.text || "";
+        } else if (event.type === "card_done") {
+          studio.analysis.cards[event.key] = { status: "done", text: "" };
+        } else if (event.type === "card_failed") {
+          studio.analysis.cards[event.key] = { status: "failed", text: "", error: event.error };
+        }
+        onEvent?.(event);
+      },
+    );
+    const done = events[events.length - 1];
+    studio.storyAnalysis = done?.analysis || studio.storyAnalysis;
+    return done;
+  } finally {
+    studio.analysis.running = false;
+  }
+}
+
+export async function cancelStoryAnalysis() {
+  return postJSON("/api/studio/story-analysis/cancel", { canvas: studio.canvas });
+}
+
+export async function parseAssetTables(onEvent) {
+  if (studio.parsing.running) throw new Error("已经在解析中");
+  studio.parsing.running = true;
+  studio.parsing.episodeNo = 0;
+  try {
+    const events = await streamPipeline("/api/studio/asset-tables/parse", { canvas: studio.canvas }, (event) => {
+      if (event.type === "parse_progress") studio.parsing.episodeNo = event.episode_no;
+      onEvent?.(event);
+    });
+    const done = events[events.length - 1];
+    studio.assetTables = done?.tables || studio.assetTables;
+    return done;
+  } finally {
+    studio.parsing.running = false;
+    studio.parsing.episodeNo = 0;
+  }
+}
+
+export async function saveAssetTables(tables) {
+  const data = await putJSON("/api/studio/asset-tables", { canvas: studio.canvas, tables });
+  studio.assetTables = data.tables;
+  return data;
+}
+
+async function putJSON(path, body) {
+  const res = await fetch(path, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body ?? {}),
+  });
+  if (!res.ok) throw new Error((await res.json().catch(() => ({}))).detail || res.statusText);
+  return res.json();
+}
+
+export async function syncAssetTables() {
+  if (studio.syncing) throw new Error("正在同步");
+  studio.syncing = true;
+  try {
+    const report = await postJSON("/api/studio/asset-tables/sync", { canvas: studio.canvas });
+    studio.assetTables = { ...(studio.assetTables || {}), synced_at: report.synced_at };
+    await loadAssets();
+    return report;
+  } finally {
+    studio.syncing = false;
+  }
+}
+
+/* 生图占位：不接 API，返回提示词导出地址，浏览器直接下载 */
+export function exportLookPromptUrl(nodeId, lookId) {
+  return `/api/studio/looks/export-prompt?canvas=${encodeURIComponent(studio.canvas)}&asset=${encodeURIComponent(nodeId)}&look=${encodeURIComponent(lookId)}`;
+}
+
 
 /* ── 让 Agent 开始制作：剧本 → 分镜 / 资产 / 提示词 ─────────────
  * 这是唯一允许 Agent 在制片台里主动写节点的入口。
