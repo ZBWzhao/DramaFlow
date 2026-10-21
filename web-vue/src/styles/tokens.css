@@ -44,9 +44,11 @@
   --warn-soft: rgba(201, 138, 75, .12);
   --bad: #C25B54;
 
-  /* ---------- 间距 / 圆角 / 字号 ---------- */
+  /* ---------- 间距 / 圆角 / 字号 ----------
+   * 圆角取"温和"档（用户反馈：棱角分明 → 8/12/16 三级）；
+   * 画布兼容段的旧名不跟随，见下方锁定值。 */
   --sp-1: 4px; --sp-2: 8px; --sp-3: 12px; --sp-4: 16px; --sp-5: 24px; --sp-6: 32px;
-  --r-1: 4px; --r-2: 6px; --r-3: 8px;
+  --r-1: 8px; --r-2: 12px; --r-3: 16px;
   --fs-11: 11px; --fs-12: 12px; --fs-13: 13px; --fs-14: 14px; --fs-16: 16px; --fs-20: 20px;
   --dur: 160ms;
   --ease: cubic-bezier(.25, .6, .3, 1);
@@ -157,23 +159,24 @@ button { font: inherit; color: inherit; cursor: pointer; }
   --lh-tight: 1.25;
   --lh-base: 1.5;
   --sp-7: var(--sp-6);
-  --r-card: var(--r-3);
-  --r-nest: var(--r-2);
-  --r-btn: var(--r-3);
+  /* 画布圆角锁旧值（4/6/8 时代）：画布尚未换皮，不跟随基础 token 变温和 */
+  --r-card: 8px;
+  --r-nest: 6px;
+  --r-btn: 8px;
   --r-pill: 999px;
   --radius-pill: var(--r-pill);
-  --ui-radius: var(--r-2);
-  --ui-radius-small: var(--r-2);
-  --ui-radius-large: var(--r-3);
-  --ui-radius-l: var(--r-3);
-  --ui-radius-m: var(--r-2);
-  --ui-radius-medium: var(--r-2);
+  --ui-radius: 6px;
+  --ui-radius-small: 6px;
+  --ui-radius-large: 8px;
+  --ui-radius-l: 8px;
+  --ui-radius-m: 6px;
+  --ui-radius-medium: 6px;
   --ctl-sm: 28px;
   --ctl-md: 32px;
   --ctl-lg: 40px;
 
   /* ---------- Element Plus 表现层对齐（只改观感，不动组件行为） ---------- */
-  --el-border-radius-base: var(--r-2);
+  --el-border-radius-base: 10px; /* EP 控件偏小，跟随 --r-2(12px) 会过圆，取中间档 */
   --el-border-radius-small: var(--r-1);
   --el-font-size-base: var(--fs-12);
   --el-font-size-small: var(--fs-11);

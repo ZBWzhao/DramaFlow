@@ -225,7 +225,7 @@ onMounted(async () => {
 
     <div class="prod4">
       <!-- ── 概要 ── -->
-      <div class="col">
+      <div class="col col-overview">
         <div class="col-cap cap">第 {{ currentEp }} 集 · 概要</div>
         <div class="summary">
           <b>{{ studio.project?.title }}</b>
@@ -408,7 +408,10 @@ onMounted(async () => {
 .prod { display: flex; flex-direction: column; height: 100%; min-height: 0; }
 .prod, .prod * { box-sizing: border-box; }
 
-.prod-top { display: flex; align-items: center; gap: var(--sp-4); padding: 0 var(--sp-5); height: 46px; border-bottom: 1px solid var(--line); flex: none; }
+.prod-top {
+  display: flex; align-items: center; flex-wrap: wrap; gap: var(--sp-2) var(--sp-4);
+  padding: 6px var(--sp-5); min-height: 46px; border-bottom: 1px solid var(--line); flex: none;
+}
 .ep-sel { font-size: var(--fs-13); color: var(--text-2); padding: 7px 12px; border-radius: var(--r-1); background: var(--card); border: 1px solid var(--line); }
 .ep-sel option { background: var(--panel); }
 .count { font-size: var(--fs-12); color: var(--text-2); }
@@ -417,7 +420,8 @@ onMounted(async () => {
 .notice { color: var(--warn); font-size: var(--fs-12); max-width: 40%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .grow { flex: 1; }
 
-.prod4 { display: grid; grid-template-columns: 190px 236px 1fr 330px; flex: 1; overflow: hidden; min-height: 0; }
+/* 四列工作台：给每列下限，窄视口宁可让 1fr 到下限也不压成 1px（断点见样式表末尾） */
+.prod4 { display: grid; grid-template-columns: minmax(150px, 190px) minmax(200px, 236px) minmax(340px, 1fr) minmax(270px, 330px); flex: 1; overflow: hidden; min-height: 0; }
 .col { overflow-y: auto; display: flex; flex-direction: column; min-height: 0; }
 .col + .col { border-left: 1px solid var(--line); }
 .col-cap { padding: var(--sp-3) var(--sp-4); position: sticky; top: 0; background: var(--bg); z-index: 2; display: flex; align-items: baseline; gap: 8px; }
@@ -525,4 +529,17 @@ onMounted(async () => {
 .btn.primary:hover { background: var(--accent-hi); }
 .btn.sm { padding: 6px 14px; font-size: var(--fs-13); }
 .btn:disabled { opacity: .5; pointer-events: none; }
+
+/* 断点降级（必须在基础规则之后：同特异性时靠源码顺序取胜）：
+ * ≤1200 撤概要列（信息顶栏/项目信息弹窗都有），≤940 单列纵向滚动。 */
+@media (max-width: 1200px) {
+  .prod4 { grid-template-columns: minmax(200px, 236px) minmax(400px, 1fr) minmax(260px, 300px); }
+  .col-overview { display: none; }
+}
+@media (max-width: 940px) {
+  .prod4 { display: flex; flex-direction: column; overflow-y: auto; }
+  .col { overflow: visible; flex: none; }
+  .col + .col { border-left: none; border-top: 1px solid var(--line); }
+  .seg-scroll { overflow-y: auto; max-height: 320px; }
+}
 </style>
