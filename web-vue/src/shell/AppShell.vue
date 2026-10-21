@@ -6,7 +6,7 @@
  * AI 助手是全局件：剧本页与画布页停靠（页面自挂 AiPanel mode="dock"），
  * 其余页面用右下浮球唤起全局抽屉（AiPanel mode="drawer"）。
  */
-import { computed, ref } from "vue";
+import { computed, nextTick, provide, ref } from "vue";
 import { useRoute } from "vue-router";
 import TaskCenter from "./TaskCenter.vue";
 import NewProjectDialog from "./NewProjectDialog.vue";
@@ -27,6 +27,13 @@ const fabVisible = computed(
   () => inproj.value && !route.path.endsWith("/script") && !route.path.endsWith("/canvas"),
 );
 const drawerOpen = ref(false);
+const drawerPanel = ref(null);
+
+/* 页面组件 inject("ai-open") 可唤起全局抽屉并直接发一句话（「让 AI 改」入口） */
+provide("ai-open", (text) => {
+  drawerOpen.value = true;
+  if (text) nextTick(() => drawerPanel.value?.send(text));
+});
 
 /* 快捷指令按所在页注入 */
 const chips = computed(() => {
@@ -95,6 +102,7 @@ const tabs = [
     <Transition name="drawer">
       <AiPanel
         v-if="drawerOpen"
+        ref="drawerPanel"
         class="ai-drawer"
         mode="drawer"
         :canvas="pname"
