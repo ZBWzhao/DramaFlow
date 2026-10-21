@@ -10,12 +10,20 @@ import { useRoute, useRouter } from "vue-router";
 import AiPanel from "../ai/AiPanel.vue";
 import { errorText } from "../api.js";
 import { importScript, loadAll, loadScript, loadSegments, produceEpisode, studio } from "../studio/studioStore.js";
+import StoryAnalysisCards from "./script/StoryAnalysisCards.vue";
+import AssetTablesPanel from "./script/AssetTablesPanel.vue";
 
 const route = useRoute();
 const router = useRouter();
 
 const editing = ref(false);
 const editText = ref("");
+/* 中列 tab：剧本正文 / 项目设定（四件套）/ 资产表（草稿区） */
+const tab = ref("script");
+async function switchTab(next) {
+  tab.value = next;
+  if (next !== "script" && !studio.storyAnalysis) await loadScript();
+}
 const busy = ref(false);
 const notice = ref("");
 const produceOpen = ref(false);
@@ -141,12 +149,22 @@ onMounted(refresh);
     <!-- ── 中：正文 ── -->
     <div class="script-main">
       <div class="script-head">
-        <h2>{{ episodes.find((e) => Number(e.no) === currentEp)?.title || `第 ${currentEp} 集` }}</h2>
-        <div class="grow"></div>
-        <span class="vm num">{{ script?.chars || 0 }} 字 · {{ segTotal }} 段 · {{ script?.dialogue_count || 0 }} 句对白</span>
+        <div class="doc-tabs">
+          <button class="dt" :class="{ on: tab === 'script' }" type="button" @click="switchTab('script')">剧本</button>
+          <button class="dt" :class="{ on: tab === 'analysis' }" type="button" @click="switchTab('analysis')">项目设定</button>
+          <button class="dt" :class="{ on: tab === 'tables' }" type="button" @click="switchTab('tables')">资产表</button>
+        </div>
+        <template v-if="tab === 'script'">
+          <h2>{{ episodes.find((e) => Number(e.no) === currentEp)?.title || `第 ${currentEp} 集` }}</h2>
+          <div class="grow"></div>
+          <span class="vm num">{{ script?.chars || 0 }} 字 · {{ segTotal }} 段 · {{ script?.dialogue_count || 0 }} 句对白</span>
+        </template>
       </div>
 
       <div class="script-scroll">
+        <StoryAnalysisCards v-if="tab === 'analysis'" />
+        <AssetTablesPanel v-else-if="tab === 'tables'" />
+        <template v-else>
         <div v-if="editing" class="script-doc editing">
           <textarea v-model="editText" class="edit-area" spellcheck="false"></textarea>
           <div class="edit-tip">保存 = 按新全文重新分集（单集异常会告警）</div>
@@ -159,9 +177,10 @@ onMounted(refresh);
           </template>
           <div v-if="!paragraphs.length" class="empty">这一集还没有正文</div>
         </article>
+        </template>
       </div>
 
-      <div class="script-foot">
+      <div v-if="tab === 'script'" class="script-foot">
         <template v-if="editing">
           <button class="btn sm" :disabled="busy" @click="editing = false">取消</button>
           <button class="btn primary sm" :disabled="busy" @click="saveViaResplit">保存并重新分集</button>
@@ -209,6 +228,10 @@ onMounted(refresh);
 </template>
 
 <style scoped>
+.doc-tabs { display: flex; gap: var(--sp-1); }
+.dt { border: none; background: none; color: var(--text-3); font-size: var(--fs-14); font-family: var(--serif); letter-spacing: .05em; padding: 5px 14px; cursor: pointer; border-radius: var(--r-1); }
+.dt:hover { color: var(--text-2); }
+.dt.on { color: var(--text); background: var(--card-2); }
 .script-lay { display: grid; grid-template-columns: 232px 1fr 340px; height: 100%; min-height: 0; }
 .script-lay, .script-lay * { box-sizing: border-box; }
 
