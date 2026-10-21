@@ -1,0 +1,725 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>DramaFlow 前端重设计 · 视觉 Demo</title>
+<style>
+/* ============================================================
+   DramaFlow 重设计 Demo — 单文件静态原型
+   token 体系与 specs/2026-10-20-frontend-redesign-design.md 一致
+   ============================================================ */
+:root {
+  /* 表面：靠灰阶差分层，不靠阴影 */
+  --bg: #08090b; --bg-2: #0b0d10; --panel: #101318;
+  --card: #14171d; --card-2: #171b22; --card-3: #1c212a;
+  /* 描边 */
+  --line: rgba(255,255,255,.07); --line-2: rgba(255,255,255,.12); --line-3: rgba(255,255,255,.18);
+  /* 文字 4 级 */
+  --text: #e9edf4; --text-2: #a7b0bf; --text-3: #6d7787; --text-on-accent: #06101f;
+  /* 强调色：只给可操作/当前 */
+  --accent: #6ea8ff; --accent-soft: rgba(110,168,255,.16); --accent-line: rgba(110,168,255,.42);
+  /* 状态色 */
+  --ok: #45c08a; --ok-soft: rgba(69,192,138,.14);
+  --warn: #ff8a5c; --warn-soft: rgba(255,138,92,.14);
+  --bad: #ff6b7e; --bad-soft: rgba(255,107,126,.14);
+  /* 数据家族色 */
+  --fam-image: #6ea8ff; --fam-video: #45bfae; --fam-audio: #cfa050;
+  /* 尺度 */
+  --sp-1: 4px; --sp-2: 8px; --sp-3: 12px; --sp-4: 16px; --sp-5: 24px; --sp-6: 32px; --sp-7: 48px;
+  --r-1: 6px; --r-2: 10px; --r-3: 14px;
+  --fs-11: 11px; --fs-12: 12px; --fs-13: 13px; --fs-15: 15px; --fs-18: 18px; --fs-22: 22px; --fs-28: 28px;
+  --dur-1: 150ms; --dur-2: 250ms;
+  --ease: cubic-bezier(.2,.7,.3,1);
+  --font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
+  --font-mono: ui-monospace, SFMono-Regular, Consolas, monospace;
+}
+* { box-sizing: border-box; margin: 0; padding: 0; }
+html, body { height: 100%; }
+body {
+  background: var(--bg); color: var(--text);
+  font-family: var(--font-sans); font-size: var(--fs-13); line-height: 1.55;
+  -webkit-font-smoothing: antialiased;
+}
+button { font: inherit; color: inherit; background: none; border: none; cursor: pointer; }
+num, .num { font-variant-numeric: tabular-nums; }
+
+/* ---------- 应用壳 ---------- */
+.app { display: flex; flex-direction: column; height: 100vh; }
+.topbar {
+  display: flex; align-items: center; gap: var(--sp-4);
+  height: 52px; padding: 0 var(--sp-5);
+  background: var(--panel); border-bottom: 1px solid var(--line);
+  flex: none;
+}
+.logo { display: flex; align-items: center; gap: var(--sp-2); font-weight: 600; font-size: var(--fs-15); letter-spacing: .5px; }
+.logo-mark {
+  width: 22px; height: 22px; border-radius: var(--r-1);
+  background: linear-gradient(135deg, var(--accent) 0%, #45bfae 100%);
+  display: grid; place-items: center; color: var(--text-on-accent); font-size: 13px; font-weight: 800;
+}
+.pswitch {
+  display: flex; align-items: center; gap: var(--sp-2);
+  padding: 5px 10px; border: 1px solid var(--line); border-radius: var(--r-1);
+  color: var(--text-2); font-size: var(--fs-12);
+}
+.pswitch b { color: var(--text); font-weight: 500; }
+.pswitch:hover { border-color: var(--line-2); }
+.pswitch .caret { color: var(--text-3); font-size: 10px; }
+
+.nav { display: flex; gap: 2px; margin-left: var(--sp-5); }
+.nav a {
+  position: relative; padding: 7px 14px; border-radius: var(--r-1);
+  color: var(--text-2); font-size: var(--fs-13); text-decoration: none;
+  transition: color var(--dur-1) var(--ease), background var(--dur-1) var(--ease);
+}
+.nav a:hover { color: var(--text); background: var(--card-2); }
+.nav a.cur { color: var(--text); }
+.nav a.cur::after {
+  content: ""; position: absolute; left: 14px; right: 14px; bottom: -8px;
+  height: 2px; border-radius: 1px; background: var(--accent);
+}
+.topbar .grow { flex: 1; }
+.spec-badge {
+  display: flex; gap: var(--sp-2); align-items: center;
+  font-family: var(--font-mono); font-size: var(--fs-11); color: var(--text-3);
+  padding: 4px 10px; border: 1px solid var(--line); border-radius: 999px;
+}
+.spec-badge em { font-style: normal; color: var(--text-2); }
+.tasks {
+  display: flex; align-items: center; gap: var(--sp-2);
+  padding: 4px 12px; border-radius: 999px; font-size: var(--fs-12);
+  border: 1px solid var(--ok-soft); color: var(--ok); background: var(--ok-soft);
+}
+.tasks .spin {
+  width: 10px; height: 10px; border-radius: 50%;
+  border: 2px solid var(--ok); border-top-color: transparent;
+  animation: spin 1s linear infinite;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+
+.main { flex: 1; overflow-y: auto; }
+.screen { display: none; max-width: 1240px; margin: 0 auto; padding: var(--sp-6) var(--sp-6) 96px; }
+.screen.on { display: block; }
+.page-head { display: flex; align-items: baseline; gap: var(--sp-4); margin-bottom: var(--sp-5); }
+.page-head h1 { font-size: var(--fs-22); font-weight: 600; }
+.page-head .sub { color: var(--text-3); font-size: var(--fs-12); }
+.page-head .grow { flex: 1; }
+
+/* ---------- 通用元件 ---------- */
+.btn {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 7px 16px; border-radius: var(--r-1);
+  font-size: var(--fs-13); font-weight: 500;
+  border: 1px solid var(--line-2); color: var(--text); background: var(--card-2);
+  transition: border-color var(--dur-1) var(--ease), background var(--dur-1) var(--ease);
+}
+.btn:hover { border-color: var(--line-3); background: var(--card-3); }
+.btn.primary {
+  background: var(--accent); border-color: var(--accent); color: var(--text-on-accent);
+}
+.btn.primary:hover { background: #7fb2ff; }
+.btn.ghost { background: transparent; border-color: transparent; color: var(--text-2); }
+.btn.ghost:hover { color: var(--text); background: var(--card-2); }
+.btn.sm { padding: 4px 10px; font-size: var(--fs-12); }
+
+.badge {
+  display: inline-flex; align-items: center; gap: 4px;
+  padding: 1px 8px; border-radius: 999px; font-size: var(--fs-11); line-height: 1.7;
+}
+.badge.ok   { color: var(--ok);   background: var(--ok-soft); }
+.badge.warn { color: var(--warn); background: var(--warn-soft); }
+.badge.bad  { color: var(--bad);  background: var(--bad-soft); }
+.badge.acc  { color: var(--accent); background: var(--accent-soft); }
+.badge.mute { color: var(--text-3); background: var(--card-3); }
+
+.card {
+  background: var(--card); border: 1px solid var(--line); border-radius: var(--r-2);
+  transition: border-color var(--dur-1) var(--ease);
+}
+.card:hover { border-color: var(--line-2); }
+.card.clickable { cursor: pointer; }
+.card.clickable:hover { border-color: var(--accent-line); }
+
+.bar { height: 4px; border-radius: 2px; background: var(--card-3); overflow: hidden; }
+.bar i { display: block; height: 100%; border-radius: 2px; background: var(--accent); }
+.bar.ok i { background: var(--ok); }
+
+.dot { width: 7px; height: 7px; border-radius: 50%; flex: none; }
+.dot.ok { background: var(--ok); } .dot.warn { background: var(--warn); }
+.dot.bad { background: var(--bad); } .dot.mute { background: var(--text-3); }
+
+/* ---------- 屏1 · 项目列表 ---------- */
+.proj-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(340px, 1fr)); gap: var(--sp-4); }
+.proj-card { padding: var(--sp-5); display: flex; flex-direction: column; gap: var(--sp-3); }
+.proj-card .t { display: flex; align-items: center; gap: var(--sp-2); }
+.proj-card .t h3 { font-size: var(--fs-15); font-weight: 600; flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.proj-stats { display: flex; gap: var(--sp-4); color: var(--text-3); font-size: var(--fs-12); }
+.proj-stats b { color: var(--text-2); font-weight: 500; }
+.proj-card .bar { margin-top: 2px; }
+.proj-foot { display: flex; align-items: center; gap: var(--sp-2); color: var(--text-3); font-size: var(--fs-11); }
+
+/* ---------- 屏2 · 概览 ---------- */
+.tiles { display: grid; grid-template-columns: repeat(4, 1fr); gap: var(--sp-4); margin-bottom: var(--sp-5); }
+.tile { padding: var(--sp-4); }
+.tile .k { color: var(--text-3); font-size: var(--fs-12); margin-bottom: var(--sp-2); display: flex; align-items: center; gap: 6px; }
+.tile .v { font-size: var(--fs-28); font-weight: 600; font-variant-numeric: tabular-nums; line-height: 1.2; }
+.tile .v small { font-size: var(--fs-13); color: var(--text-3); font-weight: 400; }
+.tile .d { margin-top: var(--sp-2); color: var(--text-3); font-size: var(--fs-11); }
+.tile.alert { border-color: var(--warn-soft); }
+.tile.alert .v { color: var(--warn); }
+.two-col { display: grid; grid-template-columns: 1fr 1fr; gap: var(--sp-4); }
+.panel { padding: var(--sp-4); }
+.panel h2 { font-size: var(--fs-13); font-weight: 600; color: var(--text-2); margin-bottom: var(--sp-3); }
+.act { display: flex; align-items: center; gap: var(--sp-3); padding: var(--sp-3) 0; border-top: 1px solid var(--line); }
+.act:first-of-type { border-top: none; }
+.act .time { color: var(--text-3); font-size: var(--fs-11); font-family: var(--font-mono); flex: none; width: 76px; }
+.act .what { flex: 1; color: var(--text-2); }
+.act .what b { color: var(--text); font-weight: 500; }
+.breakpoint {
+  display: flex; align-items: center; gap: var(--sp-3);
+  padding: var(--sp-3) var(--sp-4); border-radius: var(--r-1);
+  background: var(--warn-soft); margin-top: var(--sp-3);
+}
+.breakpoint .msg { flex: 1; color: var(--warn); font-size: var(--fs-12); }
+
+/* ---------- 屏3 · 制作三栏 ---------- */
+.prod { display: grid; grid-template-columns: 324px 1fr 280px; gap: var(--sp-4); align-items: start; }
+.queue { background: var(--bg-2); border: 1px solid var(--line); border-radius: var(--r-2); overflow: hidden; }
+.queue-head { display: flex; align-items: center; gap: var(--sp-2); padding: var(--sp-3) var(--sp-4); border-bottom: 1px solid var(--line); }
+.queue-head .title { font-weight: 600; font-size: var(--fs-13); flex: 1; }
+.chips { display: flex; gap: 4px; padding: var(--sp-2) var(--sp-3); border-bottom: 1px solid var(--line); flex-wrap: wrap; }
+.chip {
+  padding: 2px 10px; border-radius: 999px; font-size: var(--fs-11); color: var(--text-3);
+  border: 1px solid transparent;
+}
+.chip:hover { color: var(--text-2); background: var(--card-2); }
+.chip.on { color: var(--accent); background: var(--accent-soft); }
+.seg-row {
+  display: flex; align-items: center; gap: var(--sp-2);
+  padding: 9px var(--sp-3) 9px var(--sp-4); border-bottom: 1px solid var(--line);
+  cursor: pointer; transition: background var(--dur-1) var(--ease);
+  border-left: 2px solid transparent;
+}
+.seg-row:hover { background: var(--card); }
+.seg-row.cur { background: var(--card-2); border-left-color: var(--accent); }
+.seg-row .no { font-family: var(--font-mono); font-size: var(--fs-11); color: var(--text-3); width: 26px; flex: none; }
+.seg-row .tt { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-size: var(--fs-12); }
+.seg-row .du { font-family: var(--font-mono); font-size: var(--fs-11); color: var(--text-3); }
+
+.inspector { background: var(--card); border: 1px solid var(--line); border-radius: var(--r-2); padding: var(--sp-5); }
+.insp-head { display: flex; align-items: center; gap: var(--sp-3); margin-bottom: var(--sp-4); }
+.insp-head h2 { font-size: var(--fs-18); font-weight: 600; flex: 1; }
+.insp-sec { margin-top: var(--sp-4); }
+.insp-sec > h4 { font-size: var(--fs-11); color: var(--text-3); font-weight: 600; letter-spacing: .5px; margin-bottom: var(--sp-2); text-transform: uppercase; }
+.prompt-block {
+  background: var(--bg-2); border: 1px solid var(--line); border-radius: var(--r-1);
+  padding: var(--sp-3) var(--sp-4); font-size: var(--fs-12); color: var(--text-2); line-height: 1.7;
+}
+.prompt-block b { color: var(--text); font-weight: 500; }
+.prompt-block .dlg { color: var(--fam-audio); }
+table.sb { width: 100%; border-collapse: collapse; font-size: var(--fs-12); }
+table.sb th { text-align: left; color: var(--text-3); font-weight: 500; font-size: var(--fs-11); padding: 6px 10px; border-bottom: 1px solid var(--line); }
+table.sb td { padding: 7px 10px; border-bottom: 1px solid var(--line); color: var(--text-2); }
+table.sb tr:last-child td { border-bottom: none; }
+table.sb td:first-child { color: var(--text); }
+.lint {
+  display: flex; align-items: center; gap: var(--sp-2);
+  padding: var(--sp-2) var(--sp-3); border-radius: var(--r-1); font-size: var(--fs-12);
+}
+.lint.pass { background: var(--ok-soft); color: var(--ok); }
+.lint.fail { background: var(--bad-soft); color: var(--bad); }
+.take {
+  display: flex; align-items: center; gap: var(--sp-3);
+  padding: var(--sp-2) var(--sp-3); border: 1px solid var(--line); border-radius: var(--r-1);
+  margin-bottom: var(--sp-2); font-size: var(--fs-12);
+}
+.take .th {
+  width: 64px; height: 36px; border-radius: 4px; flex: none;
+  background: linear-gradient(135deg, #1a2536, #12202c);
+}
+.take .meta { flex: 1; color: var(--text-2); }
+.take .meta .tid { font-family: var(--font-mono); font-size: var(--fs-11); color: var(--text-3); }
+.take.cur { border-color: var(--ok); background: var(--ok-soft); }
+.gen-row { display: flex; gap: var(--sp-2); align-items: center; margin-top: var(--sp-4); }
+.gen-row .hint { color: var(--text-3); font-size: var(--fs-11); flex: 1; }
+
+.refs { background: var(--bg-2); border: 1px solid var(--line); border-radius: var(--r-2); padding: var(--sp-4); }
+.refs h3 { font-size: var(--fs-13); font-weight: 600; margin-bottom: var(--sp-3); color: var(--text-2); }
+.ref-card { display: flex; gap: var(--sp-3); align-items: center; padding: var(--sp-2); border-radius: var(--r-1); }
+.ref-card:hover { background: var(--card); }
+.ref-thumb {
+  width: 44px; height: 44px; border-radius: var(--r-1); flex: none;
+  border: 1px solid var(--line);
+}
+.ref-card .rn { font-size: var(--fs-12); }
+.ref-card .rt { font-size: var(--fs-11); color: var(--text-3); }
+
+/* ---------- 屏4 · 首帧墙 ---------- */
+.wall-head { display: flex; align-items: center; gap: var(--sp-3); margin-bottom: var(--sp-4); }
+.wall-head h2 { font-size: var(--fs-18); font-weight: 600; flex: 1; }
+.wall { display: grid; grid-template-columns: repeat(8, 1fr); gap: var(--sp-3); }
+.kf {
+  aspect-ratio: 9/16; border-radius: var(--r-1); border: 1px solid var(--line);
+  position: relative; overflow: hidden; background: var(--card);
+  transition: border-color var(--dur-1) var(--ease);
+}
+.kf:hover { border-color: var(--line-3); }
+.kf.fresh { border-color: rgba(69,192,138,.35); }
+.kf.stale { border-color: rgba(255,138,92,.5); }
+.kf.miss { background: repeating-linear-gradient(45deg, var(--card) 0 8px, var(--bg-2) 8px 16px); }
+.kf .ph { position: absolute; inset: 0; }
+.kf .ph.a { background: linear-gradient(160deg, #17202e 0%, #0d141d 70%, #101c22 100%); }
+.kf .ph.b { background: linear-gradient(200deg, #1c1a2e 0%, #0e1118 60%, #161d2a 100%); }
+.kf .ph.c { background: linear-gradient(140deg, #12202a 0%, #0c1016 75%, #1a2030 100%); }
+.kf .no {
+  position: absolute; top: 6px; left: 6px; font-family: var(--font-mono); font-size: 10px;
+  color: var(--text-2); background: rgba(0,0,0,.45); padding: 0 5px; border-radius: 3px;
+}
+.kf .st { position: absolute; top: 6px; right: 6px; }
+.kf .dlg {
+  position: absolute; left: 0; right: 0; bottom: 0; padding: 14px 7px 6px;
+  background: linear-gradient(transparent, rgba(0,0,0,.72));
+  font-size: 10.5px; color: var(--text-2); line-height: 1.4;
+}
+.kf .vtag {
+  position: absolute; right: 6px; bottom: 6px; width: 16px; height: 16px; border-radius: 4px;
+  display: grid; place-items: center; background: rgba(0,0,0,.5); color: var(--fam-video); font-size: 9px;
+}
+
+/* ---------- 屏5 · 资产 ---------- */
+.asset-group { margin-bottom: var(--sp-5); }
+.asset-group > h2 { font-size: var(--fs-13); color: var(--text-3); font-weight: 600; margin-bottom: var(--sp-3); letter-spacing: .5px; }
+.asset-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(250px, 1fr)); gap: var(--sp-4); }
+.asset-card { padding: var(--sp-4); display: flex; flex-direction: column; gap: var(--sp-3); }
+.look-strip { display: flex; gap: var(--sp-2); }
+.look {
+  width: 72px; border-radius: var(--r-1); overflow: hidden; border: 1px solid var(--line);
+  cursor: pointer; transition: border-color var(--dur-1) var(--ease);
+}
+.look:hover { border-color: var(--line-3); }
+.look.cur { border-color: var(--accent); }
+.look .im { aspect-ratio: 3/4; background: linear-gradient(150deg, #1b2534, #0f151d 80%); }
+.look .nm { font-size: 10px; color: var(--text-3); padding: 3px 6px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.asset-meta { display: flex; flex-wrap: wrap; gap: 4px; }
+.tag {
+  font-size: var(--fs-11); color: var(--text-3); background: var(--card-3);
+  padding: 1px 8px; border-radius: 4px;
+}
+.voice-row { display: flex; align-items: center; gap: var(--sp-2); font-size: var(--fs-12); color: var(--text-3); }
+.voice-row select {
+  background: var(--card-3); color: var(--text-2); border: 1px solid var(--line);
+  border-radius: var(--r-1); padding: 3px 8px; font: inherit; font-size: var(--fs-12);
+}
+
+/* ---------- Demo 切换器 ---------- */
+.demo-ctl {
+  position: fixed; right: 20px; bottom: 20px; z-index: 99;
+  display: flex; align-items: center; gap: 4px;
+  background: var(--panel); border: 1px solid var(--line-2); border-radius: 999px;
+  padding: 6px 8px 6px 14px; box-shadow: 0 8px 32px rgba(0,0,0,.5);
+}
+.demo-ctl .lbl { font-size: var(--fs-11); color: var(--text-3); margin-right: 4px; }
+.demo-ctl button {
+  padding: 3px 12px; border-radius: 999px; font-size: var(--fs-12); color: var(--text-2);
+}
+.demo-ctl button:hover { color: var(--text); background: var(--card-2); }
+.demo-ctl button.on { color: var(--text-on-accent); background: var(--accent); }
+.demo-note {
+  position: fixed; left: 20px; bottom: 20px; z-index: 99;
+  font-size: var(--fs-11); color: var(--text-3);
+  background: var(--panel); border: 1px solid var(--line); border-radius: 999px; padding: 6px 14px;
+}
+</style>
+</head>
+<body>
+<div class="app">
+
+  <!-- ═══ 顶部导航壳 ═══ -->
+  <header class="topbar">
+    <div class="logo"><span class="logo-mark">D</span>DramaFlow</div>
+    <button class="pswitch" onclick="go(0)"><b>便利店夜班</b><span class="caret">▼</span></button>
+    <nav class="nav">
+      <a href="#" onclick="go(1);return false">概览</a>
+      <a href="#" onclick="go(2);return false">剧本</a>
+      <a href="#" onclick="go(5);return false">资产</a>
+      <a href="#" onclick="go(3);return false">制作</a>
+      <a href="#" onclick="go(6);return false">预览</a>
+      <a href="#" onclick="go(6);return false">结构视图</a>
+    </nav>
+    <div class="grow"></div>
+    <div class="spec-badge">9:16 <em>·</em> 480P <em>·</em> mock</div>
+    <div class="tasks"><span class="spin"></span>生成中 2</div>
+  </header>
+
+  <main class="main">
+
+  <!-- ═══ 屏 0 · 项目列表 ═══ -->
+  <section class="screen" id="s0">
+    <div class="page-head">
+      <h1>项目</h1><span class="sub">短剧 AI 生产 · 全部项目</span>
+      <div class="grow"></div>
+      <button class="btn primary">＋ 新建项目</button>
+    </div>
+    <div class="proj-grid">
+      <div class="card clickable proj-card" onclick="go(1)">
+        <div class="t"><h3>便利店夜班·林越与苏晚的303夜宵</h3><span class="badge ok">制作中</span></div>
+        <div class="proj-stats"><span><b class="num">1</b> 集</span><span><b class="num">7/15</b> 段出片</span><span><b class="num">6/6</b> 资产就绪</span><span><b class="num">1</b> 成片</span></div>
+        <div class="bar ok"><i style="width:47%"></i></div>
+        <div class="proj-foot"><span>9:16 · 480P · mock</span><span style="flex:1"></span><span>对白音轨 ✓ · 68s</span></div>
+      </div>
+      <div class="card clickable proj-card" onclick="go(1)">
+        <div class="t"><h3>外卖员深夜送单认出失散多年的姐姐</h3><span class="badge acc">可预览</span></div>
+        <div class="proj-stats"><span><b class="num">3</b> 集</span><span><b class="num">4/4</b> 段出片</span><span><b class="num">5/5</b> 资产就绪</span><span><b class="num">1</b> 成片</span></div>
+        <div class="bar"><i style="width:33%"></i></div>
+        <div class="proj-foot"><span>9:16 · 480P · mock</span><span style="flex:1"></span><span>第 1 集 4 段全出片</span></div>
+      </div>
+      <div class="card clickable proj-card">
+        <div class="t"><h3>钟声·工艺版</h3><span class="badge mute">草稿</span></div>
+        <div class="proj-stats"><span><b class="num">1</b> 集</span><span><b class="num">0/3</b> 段出片</span><span><b class="num">1/3</b> 资产就绪</span></div>
+        <div class="bar"><i style="width:0%"></i></div>
+        <div class="proj-foot"><span>16:9 · 720P · mock</span><span style="flex:1"></span><span>3 天前</span></div>
+      </div>
+      <div class="card proj-card" style="display:grid;place-items:center;min-height:150px;border-style:dashed;color:var(--text-3);cursor:pointer">
+        ＋ 新建短剧项目
+      </div>
+    </div>
+  </section>
+
+  <!-- ═══ 屏 1 · 概览 ═══ -->
+  <section class="screen" id="s1">
+    <div class="page-head">
+      <h1>概览</h1><span class="sub">便利店夜班·林越与苏晚的303夜宵</span>
+    </div>
+    <div class="tiles">
+      <div class="card tile">
+        <div class="k">集进度</div>
+        <div class="v">7<small> / 15 段</small></div>
+        <div class="bar ok"><i style="width:47%"></i></div>
+        <div class="d">第 1 集 · 一镜一段 3-8s</div>
+      </div>
+      <div class="card tile">
+        <div class="k">资产就绪</div>
+        <div class="v">6<small> / 6 有图</small></div>
+        <div class="bar ok"><i style="width:100%"></i></div>
+        <div class="d">角色 2 · 场景 1 · 道具 2 · 画风 1</div>
+      </div>
+      <div class="card tile alert">
+        <div class="k">制作断点</div>
+        <div class="v">8</div>
+        <div class="d">段未建生成槽（分镜已拆好）</div>
+      </div>
+      <div class="card tile">
+        <div class="k">成片</div>
+        <div class="v">1</div>
+        <div class="d">68s · 480×854 · 含对白音轨 + 字幕</div>
+      </div>
+    </div>
+    <div class="breakpoint">
+      <span class="dot warn"></span>
+      <span class="msg"><b>8 段未建生成槽</b>——分镜已就绪，先批量出首帧再做质检</span>
+      <button class="btn sm" onclick="go(4)">去补首帧</button>
+      <button class="btn sm primary" onclick="go(3)">去制作</button>
+    </div>
+    <div class="two-col" style="margin-top:var(--sp-4)">
+      <div class="card panel">
+        <h2>最近动态</h2>
+        <div class="act"><span class="time">14:32</span><span class="what"><b>produce 完成</b>——第 1 集重拆为 15 个一镜一段，7 个旧片段原位保留</span></div>
+        <div class="act"><span class="time">14:40</span><span class="what"><b>片段 2 重出片</b>——新 take 已采用，过期标记清除</span></div>
+        <div class="act"><span class="time">14:51</span><span class="what"><b>音色绑定</b>——林越 → onyx，苏晚 → nova</span></div>
+        <div class="act"><span class="time">14:58</span><span class="what"><b>成片合成</b>——68s，5 句对白全部对齐，无告警</span></div>
+      </div>
+      <div class="card panel">
+        <h2>成片</h2>
+        <div class="act" style="cursor:pointer">
+          <div style="width:52px;height:64px;border-radius:6px;background:linear-gradient(160deg,#17202e,#0d141d);border:1px solid var(--line);flex:none"></div>
+          <span class="what"><b>第 1 集 · 整集</b><br><span style="color:var(--text-3);font-size:11px">480×854 · 68s · h264+aac · 2 分钟前</span></span>
+          <span class="badge ok">含对白</span>
+          <button class="btn sm">下载</button>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ═══ 屏 2 · 剧本 ═══ -->
+  <section class="screen" id="s2">
+    <div class="page-head">
+      <h1>剧本</h1><span class="sub">导入即分集 · Agent 制作</span>
+      <div class="grow"></div>
+      <button class="btn">导入剧本</button>
+      <button class="btn primary">开始制作（第 1 集）</button>
+    </div>
+    <div class="two-col">
+      <div class="card panel">
+        <h2>第 1 集 · 原文</h2>
+        <div class="prompt-block" style="max-height:340px;overflow:auto">
+          <b>场1｜深夜便利店｜林越、苏晚</b><br>
+          深夜的便利店像一座亮着的孤岛。林越推门进来，肩头落着雪，手里拎着外卖袋。<br>
+          林越：<span class="dlg">303 的，夜宵到了。</span><br>
+          苏晚头也不抬：<span class="dlg">放这儿，我核一下。</span><br>
+          林越等在收银台前。苏晚找零时瞥见他手腕上的红绳手环，动作停了半秒。<br>
+          苏晚：<span class="dlg">凉的，重新拿一杯。</span>她转身去了冷柜，其实那杯豆浆还冒着热气。<br>
+          林越看了看表：<span class="dlg">没事，我赶时间。</span><br>
+          苏晚把热豆浆换成一杯凉的放到台面上，声音很轻：<span class="dlg">手伸出来。</span><br>
+          ……（共 1216 字 · 15 段 · 9 句台词）
+        </div>
+      </div>
+      <div class="card panel">
+        <h2>分集</h2>
+        <div class="act">
+          <span class="badge acc">第 1 集</span>
+          <span class="what"><b>303 夜宵</b><br><span style="color:var(--text-3);font-size:11px">1216 字 · 15 段 · 9 句对白 · 7 段出片</span></span>
+          <span class="badge warn">8 段未出片</span>
+        </div>
+        <div class="act" style="opacity:.55">
+          <span class="badge mute">＋</span>
+          <span class="what">粘贴或拖入 .txt / .docx 自动分集<br><span style="color:var(--text-3);font-size:11px">按「第N集 / Episode N」切分，单集异常会告警</span></span>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ═══ 屏 3 · 制作（三栏） ═══ -->
+  <section class="screen" id="s3">
+    <div class="page-head">
+      <h1>制作</h1><span class="sub">第 1 集 · 15 段 · 批量只跑未出片</span>
+      <div class="grow"></div>
+      <button class="btn" onclick="go(4)">首帧墙</button>
+      <button class="btn primary">批量生成 (8)</button>
+    </div>
+    <div class="prod">
+      <!-- 左：队列 -->
+      <div class="queue">
+        <div class="queue-head"><span class="title">片段队列</span><span style="color:var(--text-3);font-size:11px" class="num">7/15</span></div>
+        <div class="chips">
+          <span class="chip on">全部</span><span class="chip">未出片</span><span class="chip">已出片</span><span class="chip">过期</span><span class="chip">已下线</span>
+        </div>
+        <div class="seg-row"><span class="dot ok"></span><span class="no">01</span><span class="tt">推门进店</span><span class="du num">4.2s</span></div>
+        <div class="seg-row cur"><span class="dot ok"></span><span class="no">02</span><span class="tt">报单·核一下</span><span class="du num">3.8s</span></div>
+        <div class="seg-row"><span class="dot ok"></span><span class="no">03</span><span class="tt">凉的豆浆</span><span class="du num">4.1s</span></div>
+        <div class="seg-row"><span class="dot ok"></span><span class="no">04</span><span class="tt">手伸出来</span><span class="du num">3.6s</span></div>
+        <div class="seg-row"><span class="dot ok"></span><span class="no">05</span><span class="tt">手环哪儿来的</span><span class="du num">3.4s</span></div>
+        <div class="seg-row"><span class="dot ok"></span><span class="no">06</span><span class="tt">摘下来</span><span class="du num">2.9s</span></div>
+        <div class="seg-row"><span class="dot ok"></span><span class="no">07</span><span class="tt">隔着收银台对峙</span><span class="du num">4.0s</span></div>
+        <div class="seg-row"><span class="dot mute"></span><span class="no">08</span><span class="tt">手背到身后</span><span class="du num">3.2s</span></div>
+        <div class="seg-row"><span class="dot mute"></span><span class="no">09</span><span class="tt">你这手环哪儿来的</span><span class="du num">3.5s</span></div>
+        <div class="seg-row"><span class="dot mute"></span><span class="no">10</span><span class="tt">捡的</span><span class="du num">2.6s</span></div>
+        <div class="seg-row" style="opacity:.4"><span class="dot mute"></span><span class="no">11</span><span class="tt">摘下来（旧）</span><span class="badge mute">已下线</span></div>
+      </div>
+      <!-- 中：检查器 -->
+      <div class="inspector">
+        <div class="insp-head">
+          <span class="badge mute num">镜 2</span>
+          <h2>报单·核一下</h2>
+          <span class="badge ok">已出片</span>
+          <button class="btn ghost sm">在结构视图中查看</button>
+        </div>
+        <div class="insp-sec">
+          <h4>提示词（服务端渲染 · 结构化）</h4>
+          <div class="prompt-block">
+            <b>场景：</b>深夜便利店收银台，冷柜嗡嗡声，暖白灯带。<br>
+            <b>画风：</b>电影感写实，浅景深，24mm 略仰。<br>
+            <b>站位：</b>林越立在台前递外卖袋，苏晚低头核单。<br>
+            <b>画面：</b>① 林越把外卖袋放上台面 ② 苏晚指尖敲核单 ③ 抬眼半秒<br>
+            <b>台词：</b><span class="dlg">（林越，同期声，原文一字不改）：303 的，夜宵到了。</span>
+          </div>
+        </div>
+        <div class="insp-sec">
+          <h4>分镜表</h4>
+          <table class="sb">
+            <tr><th>镜</th><th>景别</th><th>运镜</th><th>时长</th><th>声音</th></tr>
+            <tr><td>2</td><td>中景</td><td>固定，微仰</td><td class="num">3.8s</td><td>对白 · 林越「303 的，夜宵到了。」</td></tr>
+          </table>
+        </div>
+        <div class="insp-sec">
+          <h4>校验</h4>
+          <div class="lint pass"><span>✓</span> 硬校验通过——时长在 3-8s 区间 · 机位齐全 · 主体非空 · speaker 已识别</div>
+        </div>
+        <div class="insp-sec">
+          <h4>迭代版本（2）</h4>
+          <div class="take cur">
+            <div class="th"></div>
+            <span class="meta"><b>当前采用</b><br><span class="tid">take_c82fbba1717e · mock · 3.8s</span></span>
+            <span class="badge ok">采用中</span>
+          </div>
+          <div class="take">
+            <div class="th" style="background:linear-gradient(135deg,#20182a,#12101c)"></div>
+            <span class="meta">未采用<br><span class="tid">take_ce342d01482b · mock · 3.8s</span></span>
+            <span class="badge mute">历史</span>
+            <button class="btn sm">采用</button>
+          </div>
+        </div>
+        <div class="gen-row">
+          <button class="btn primary">重新生成</button>
+          <span class="hint">重生成不抢占当前采用版——新版进历史等你挑选 · 上限 30s</span>
+        </div>
+      </div>
+      <!-- 右：参考素材 -->
+      <div class="refs">
+        <h3>参考素材</h3>
+        <div class="ref-card">
+          <div class="ref-thumb" style="background:linear-gradient(150deg,#1b2534,#0f151d)"></div>
+          <div><div class="rn">林越 · 三视图</div><div class="rt">角色 · onyx · 短寸头/深蓝冲锋衣</div></div>
+        </div>
+        <div class="ref-card">
+          <div class="ref-thumb" style="background:linear-gradient(150deg,#241b30,#130f1a)"></div>
+          <div><div class="rn">苏晚 · 正面</div><div class="rt">角色 · nova · 马尾/店员围裙</div></div>
+        </div>
+        <div class="ref-card">
+          <div class="ref-thumb" style="background:linear-gradient(150deg,#12202a,#0c1016)"></div>
+          <div><div class="rn">便利店夜景</div><div class="rt">场景 · 暖白灯带/雪夜</div></div>
+        </div>
+        <div class="ref-card">
+          <div class="ref-thumb" style="background:linear-gradient(150deg,#1c2030,#101318)"></div>
+          <div><div class="rn">红绳手环</div><div class="rt">道具 · 关键信物</div></div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ═══ 屏 4 · 首帧墙 ═══ -->
+  <section class="screen" id="s4">
+    <div class="wall-head">
+      <h1 style="font-size:var(--fs-22);font-weight:600">首帧墙</h1>
+      <span class="sub" style="color:var(--text-3);font-size:var(--fs-12)">整集静帧质检——批量出片前先过一遍构图</span>
+      <div class="grow" style="flex:1"></div>
+      <button class="btn primary">补齐缺的 8 张</button>
+    </div>
+    <div class="wall">
+      <div class="kf fresh"><div class="ph a"></div><span class="no">01</span><span class="st badge ok">有</span><div class="dlg">无对白 · 环境音</div><span class="vtag">▶</span></div>
+      <div class="kf fresh"><div class="ph b"></div><span class="no">02</span><span class="st badge ok">有</span><div class="dlg">林越：303 的，夜宵到了。</div><span class="vtag">▶</span></div>
+      <div class="kf fresh"><div class="ph c"></div><span class="no">03</span><span class="st badge ok">有</span><div class="dlg">苏晚：放这儿，我核一下。</div><span class="vtag">▶</span></div>
+      <div class="kf fresh"><div class="ph a"></div><span class="no">04</span><span class="st badge ok">有</span><div class="dlg">苏晚：凉的，重新拿一杯。</div><span class="vtag">▶</span></div>
+      <div class="kf fresh"><div class="ph b"></div><span class="no">05</span><span class="st badge ok">有</span><div class="dlg">林越：没事，我赶时间。</div><span class="vtag">▶</span></div>
+      <div class="kf fresh"><div class="ph c"></div><span class="no">06</span><span class="st badge ok">有</span><div class="dlg">苏晚：手伸出来。</div><span class="vtag">▶</span></div>
+      <div class="kf stale"><div class="ph a"></div><span class="no">07</span><span class="st badge warn">过期</span><div class="dlg">分镜已变更 · 需重出</div></div>
+      <div class="kf miss"><span class="no">08</span><span class="st badge mute">缺</span><div class="dlg">手背到身后</div></div>
+      <div class="kf miss"><span class="no">09</span><span class="st badge mute">缺</span><div class="dlg">你这手环哪儿来的</div></div>
+      <div class="kf miss"><span class="no">10</span><span class="st badge mute">缺</span><div class="dlg">捡的</div></div>
+      <div class="kf miss"><span class="no">11</span><span class="st badge mute">缺</span><div class="dlg">摘下来</div></div>
+      <div class="kf miss"><span class="no">12</span><span class="st badge mute">缺</span><div class="dlg">不行</div></div>
+      <div class="kf miss"><span class="no">13</span><span class="st badge mute">缺</span><div class="dlg">手腕缩回袖口</div></div>
+      <div class="kf miss"><span class="no">14</span><span class="st badge mute">缺</span><div class="dlg">隔着收银台对峙</div></div>
+      <div class="kf miss"><span class="no">15</span><span class="st badge mute">缺</span><div class="dlg">冷柜嗡嗡响</div></div>
+    </div>
+    <div style="margin-top:var(--sp-4);display:flex;gap:var(--sp-4);color:var(--text-3);font-size:var(--fs-11)">
+      <span><span class="dot ok" style="display:inline-block"></span> 首帧与分镜一致（7）</span>
+      <span><span class="dot warn" style="display:inline-block"></span> 过期——分镜/形象已变更（1）</span>
+      <span><span class="dot mute" style="display:inline-block"></span> 缺首帧（8）</span>
+    </div>
+  </section>
+
+  <!-- ═══ 屏 5 · 资产 ═══ -->
+  <section class="screen" id="s5">
+    <div class="page-head">
+      <h1>资产</h1><span class="sub">一致性来自这里——资产粒度是「角色 × 形象」</span>
+      <div class="grow"></div>
+      <button class="btn primary">批量生成未出图的</button>
+    </div>
+    <div class="asset-group">
+      <h2>角色（2）</h2>
+      <div class="asset-grid">
+        <div class="card asset-card">
+          <div class="t" style="display:flex;align-items:center;gap:var(--sp-2)">
+            <h3 style="font-size:var(--fs-15);font-weight:600;flex:1">林越</h3>
+            <span class="badge acc">主角</span>
+            <span class="badge ok">2 形象</span>
+          </div>
+          <div class="look-strip">
+            <div class="look cur"><div class="im"></div><div class="nm">三视图 · 主形象</div></div>
+            <div class="look"><div class="im" style="background:linear-gradient(150deg,#2a1b26,#140f18)"></div><div class="nm">日常便装</div></div>
+            <div class="look" style="border-style:dashed;display:grid;place-items:center;color:var(--text-3);font-size:11px;aspect-ratio:3/4">＋新形象</div>
+          </div>
+          <div class="asset-meta">
+            <span class="tag">短寸头</span><span class="tag">窄长脸</span><span class="tag">深蓝外卖冲锋衣</span><span class="tag">右腕红绳手环</span>
+          </div>
+          <div class="voice-row">音色
+            <select><option>onyx（当前）</option><option>alloy</option><option>echo</option><option>nova</option></select>
+            <span style="flex:1"></span>
+            <button class="btn ghost sm">🔒 锁定形象</button>
+          </div>
+        </div>
+        <div class="card asset-card">
+          <div class="t" style="display:flex;align-items:center;gap:var(--sp-2)">
+            <h3 style="font-size:var(--fs-15);font-weight:600;flex:1">苏晚</h3>
+            <span class="badge mute">配角</span>
+            <span class="badge ok">1 形象</span>
+          </div>
+          <div class="look-strip">
+            <div class="look cur"><div class="im" style="background:linear-gradient(150deg,#241b30,#130f1a)"></div><div class="nm">正面 · 店员</div></div>
+            <div class="look" style="border-style:dashed;display:grid;place-items:center;color:var(--text-3);font-size:11px;aspect-ratio:3/4">＋新形象</div>
+          </div>
+          <div class="asset-meta">
+            <span class="tag">低马尾</span><span class="tag">店员围裙</span><span class="tag">左手小疤</span>
+          </div>
+          <div class="voice-row">音色
+            <select><option>nova（当前）</option><option>alloy</option><option>echo</option><option>onyx</option></select>
+            <span style="flex:1"></span>
+            <button class="btn ghost sm">锁定形象</button>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="asset-group">
+      <h2>场景（1） · 道具（2） · 画风（1）</h2>
+      <div class="asset-grid">
+        <div class="card asset-card">
+          <div class="t"><h3 style="font-size:var(--fs-15);font-weight:600;flex:1">便利店夜景</h3><span class="badge mute">场景</span></div>
+          <div class="look-strip"><div class="look cur" style="width:100%"><div class="im" style="aspect-ratio:16/9;background:linear-gradient(150deg,#12202a,#0c1016)"></div><div class="nm">全景 · 暖白灯带/雪夜</div></div></div>
+        </div>
+        <div class="card asset-card">
+          <div class="t"><h3 style="font-size:var(--fs-15);font-weight:600;flex:1">红绳手环</h3><span class="badge mute">道具</span></div>
+          <div class="look-strip"><div class="look cur" style="width:100%"><div class="im" style="aspect-ratio:16/9;background:linear-gradient(150deg,#301b1b,#180f0f)"></div><div class="nm">特写 · 关键信物</div></div></div>
+        </div>
+        <div class="card asset-card">
+          <div class="t"><h3 style="font-size:var(--fs-15);font-weight:600;flex:1">热豆浆杯</h3><span class="badge mute">道具</span></div>
+          <div class="look-strip"><div class="look cur" style="width:100%"><div class="im" style="aspect-ratio:16/9;background:linear-gradient(150deg,#2a2418,#151208)"></div><div class="nm">特写 · 白杯热气</div></div></div>
+        </div>
+        <div class="card asset-card">
+          <div class="t"><h3 style="font-size:var(--fs-15);font-weight:600;flex:1">电影感写实</h3><span class="badge mute">画风</span></div>
+          <div class="look-strip"><div class="look cur" style="width:100%"><div class="im" style="aspect-ratio:16/9;background:linear-gradient(150deg,#1c2230,#0f1218)"></div><div class="nm">浅景深 · 暖白/冷蓝对比</div></div></div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ═══ 屏 6 · 未包含占位 ═══ -->
+  <section class="screen" id="s6">
+    <div class="page-head"><h1>本屏未包含在 Demo 中</h1></div>
+    <div class="card panel" style="max-width:560px">
+      <p style="color:var(--text-2);line-height:1.8">
+        预览与结构视图两屏沿用现有实现（只套新 token），这次 Demo 聚焦在
+        <b>项目列表 / 概览 / 剧本 / 制作 / 首帧墙 / 资产</b> 六个重排页面。
+        完整设计见 <span class="num" style="font-family:var(--font-mono);font-size:12px">specs/2026-10-20-frontend-redesign-design.md</span>。
+      </p>
+    </div>
+  </section>
+
+  </main>
+</div>
+
+<!-- Demo 切换器 -->
+<div class="demo-ctl">
+  <span class="lbl">设计 Demo</span>
+  <button onclick="go(0)" data-n="0">项目列表</button>
+  <button onclick="go(1)" data-n="1">概览</button>
+  <button onclick="go(2)" data-n="2">剧本</button>
+  <button onclick="go(3)" data-n="3">制作</button>
+  <button onclick="go(4)" data-n="4">首帧墙</button>
+  <button onclick="go(5)" data-n="5">资产</button>
+</div>
+<div class="demo-note">静态原型 · 数据为便利店项目快照 · 正式版将接真实 API</div>
+
+<script>
+function go(n) {
+  document.querySelectorAll(".screen").forEach((s, i) => s.classList.toggle("on", i === n));
+  document.querySelectorAll(".demo-ctl button").forEach(b => b.classList.toggle("on", +b.dataset.n === n));
+  document.querySelectorAll(".nav a").forEach(a => a.classList.remove("cur"));
+  const navMap = { 1: 0, 2: 1, 5: 2, 3: 3, 4: 3, 6: 4 };
+  if (navMap[n] !== undefined) document.querySelectorAll(".nav a")[navMap[n]].classList.add("cur");
+  document.querySelector(".main").scrollTop = 0;
+}
+go(0);
+</script>
+</body>
+</html>

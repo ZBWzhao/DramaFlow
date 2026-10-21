@@ -1,0 +1,829 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>DramaFlow · Demo v3</title>
+<style>
+/* ============================================================
+   DramaFlow Demo v3 — 视觉语言重做
+   暖墨底 / 朱砂单强调 / 宋体标题与剧本 / 发丝线 / 无渐变无 emoji
+   ============================================================ */
+:root {
+  /* 暖墨色阶（不带蓝调） */
+  --bg: #0B0A09; --bg-2: #0F0E0C; --panel: #121110;
+  --card: #161513; --card-2: #1B1917; --card-3: #211F1C;
+  /* 发丝线 */
+  --line: rgba(255,251,243,.06); --line-2: rgba(255,251,243,.11); --line-3: rgba(255,251,243,.17);
+  /* 暖象牙文字 */
+  --text: #EDE8DF; --text-2: #A89F91; --text-3: #6F685D;
+  /* 主强调：朱砂（可切换） */
+  --accent: #C9553D; --accent-hi: #DD6A50; --accent-soft: rgba(201,85,61,.13);
+  /* 台词/声音专用金 */
+  --gold: #C2A36B; --gold-soft: rgba(194,163,107,.12);
+  /* 状态 */
+  --ok: #6FA284; --ok-soft: rgba(111,162,132,.12);
+  --warn: #C98A4B; --warn-soft: rgba(201,138,75,.12);
+  --bad: #C25B54;
+  --sp-1: 4px; --sp-2: 8px; --sp-3: 12px; --sp-4: 16px; --sp-5: 24px; --sp-6: 32px;
+  --r-1: 4px; --r-2: 6px; --r-3: 8px;
+  --fs-11: 11px; --fs-12: 12px; --fs-13: 13px; --fs-14: 14px; --fs-16: 16px; --fs-20: 20px;
+  --dur: 160ms; --ease: cubic-bezier(.25,.6,.3,1);
+  --sans: "PingFang SC","MiSans","HarmonyOS Sans SC","Microsoft YaHei",-apple-system,sans-serif;
+  --serif: "Noto Serif SC","Source Han Serif SC","Songti SC",STSong,SimSun,serif;
+  --mono: "SF Mono",ui-monospace,Consolas,monospace;
+}
+* { box-sizing: border-box; margin: 0; padding: 0; }
+html, body { height: 100%; }
+body { background: var(--bg); color: var(--text); font-family: var(--sans); font-size: var(--fs-13); line-height: 1.6; -webkit-font-smoothing: antialiased; }
+button { font: inherit; color: inherit; background: none; border: none; cursor: pointer; }
+.num { font-variant-numeric: tabular-nums; }
+.cap { font-size: var(--fs-11); letter-spacing: .14em; color: var(--text-3); font-weight: 500; }
+svg.ic { width: 14px; height: 14px; stroke: currentColor; stroke-width: 1.5; fill: none; vertical-align: -2px; }
+::-webkit-scrollbar { width: 8px; height: 8px; }
+::-webkit-scrollbar-thumb { background: #26231f; border-radius: 4px; }
+::-webkit-scrollbar-track { background: transparent; }
+
+.app { display: flex; flex-direction: column; height: 100vh; }
+
+/* ---------- 顶栏 ---------- */
+.topbar { display: flex; align-items: stretch; height: 50px; padding: 0 var(--sp-5); background: var(--bg-2); border-bottom: 1px solid var(--line); flex: none; }
+.brand { display: flex; align-items: center; gap: 10px; padding-right: var(--sp-5); border-right: 1px solid var(--line); }
+.brand .wd { font-family: var(--sans); font-weight: 600; font-size: var(--fs-13); letter-spacing: .18em; }
+.brand .wd i { font-style: normal; color: var(--accent); }
+.brand .home-link { color: var(--text-3); font-size: var(--fs-12); display: none; }
+body.inproj .brand .home-link { display: inline; }
+.brand .home-link:hover { color: var(--text); }
+.pname { display: none; align-items: center; padding: 0 var(--sp-4); font-size: var(--fs-13); color: var(--text-2); max-width: 300px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+body.inproj .pname { display: flex; }
+.top-tabs { display: flex; align-items: stretch; margin: 0 auto; }
+.top-tabs button { position: relative; padding: 0 22px; color: var(--text-3); font-size: var(--fs-13); font-family: var(--serif); letter-spacing: .06em; transition: color var(--dur) var(--ease); }
+.top-tabs button:hover { color: var(--text-2); }
+.top-tabs button.cur { color: var(--text); }
+.top-tabs button.cur::after { content: ""; position: absolute; left: 22px; right: 22px; bottom: 0; height: 2px; background: var(--accent); }
+.top-utils { display: none; align-items: center; gap: var(--sp-4); }
+body.inproj .top-utils { display: flex; }
+.top-utils button { color: var(--text-3); font-size: var(--fs-12); padding: 4px 2px; }
+.top-utils button:hover { color: var(--text); }
+.top-utils .sep { width: 1px; height: 16px; background: var(--line-2); }
+.top-utils .spec { font-family: var(--mono); font-size: var(--fs-11); color: var(--text-3); }
+.runstat { display: flex; align-items: center; gap: 7px; font-size: var(--fs-12); color: var(--text-3); }
+.runstat .pulse { width: 6px; height: 6px; border-radius: 50%; background: var(--ok); animation: pulse 1.6s ease-in-out infinite; }
+@keyframes pulse { 50% { opacity: .3; } }
+
+.main { flex: 1; overflow: hidden; position: relative; }
+.screen { display: none; height: 100%; }
+.screen.on { display: flex; flex-direction: column; }
+
+/* ---------- 按钮 ---------- */
+.btn { display: inline-flex; align-items: center; justify-content: center; gap: 7px; padding: 7px 16px; border-radius: var(--r-1); font-size: var(--fs-13); color: var(--text-2); transition: all var(--dur) var(--ease); flex: none; }
+.btn:hover { color: var(--text); background: var(--card-2); }
+.btn.primary { background: var(--accent); color: #FFF7F0; }
+.btn.primary:hover { background: var(--accent-hi); }
+.btn.quiet { color: var(--text-3); }
+.btn.quiet:hover { color: var(--text); }
+.btn.sm { padding: 4px 10px; font-size: var(--fs-12); }
+.txt-link { color: var(--accent-hi); font-size: var(--fs-12); }
+.txt-link:hover { color: var(--accent); }
+
+/* ---------- 状态 ---------- */
+.st { display: inline-flex; align-items: center; gap: 6px; font-size: var(--fs-12); color: var(--text-3); }
+.st i { width: 6px; height: 6px; border-radius: 50%; flex: none; }
+.st.ok i { background: var(--ok); } .st.ok { color: var(--ok); }
+.st.warn i { background: var(--warn); } .st.warn { color: var(--warn); }
+.st.mute i { background: var(--text-3); }
+.st.acc i { background: var(--accent); } .st.acc { color: var(--accent-hi); }
+.hairline { height: 1px; background: var(--line); }
+.bar { height: 2px; background: var(--card-3); }
+.bar i { display: block; height: 100%; background: var(--ok); }
+
+/* ---------- 屏0 · 首页（海报墙） ---------- */
+.home { overflow-y: auto; flex: 1; }
+.home-in { max-width: 1200px; margin: 0 auto; padding: var(--sp-6) var(--sp-6) 96px; }
+.home-head { display: flex; align-items: baseline; gap: var(--sp-4); padding-bottom: var(--sp-4); }
+.home-head h1 { font-family: var(--serif); font-size: var(--fs-20); font-weight: 600; letter-spacing: .04em; }
+.home-head .sub { color: var(--text-3); font-size: var(--fs-12); }
+.home-head .grow { flex: 1; }
+.poster-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: var(--sp-4); }
+.poster { cursor: pointer; }
+.poster .im { aspect-ratio: 9/13; border-radius: var(--r-2); position: relative; overflow: hidden; border: 1px solid var(--line); transition: transform var(--dur) var(--ease), border-color var(--dur) var(--ease); }
+.poster:hover .im { transform: translateY(-2px); border-color: var(--line-2); }
+.poster .im .fx { position: absolute; inset: 0; }
+.poster .im .veil { position: absolute; inset: 0; background: linear-gradient(180deg, transparent 40%, rgba(8,7,6,.88)); }
+.poster .im .ttl { position: absolute; left: 12px; right: 12px; bottom: 26px; font-family: var(--serif); font-size: var(--fs-14); font-weight: 600; line-height: 1.5; }
+.poster .im .meta { position: absolute; left: 12px; right: 12px; bottom: 8px; font-size: var(--fs-11); color: var(--text-2); display: flex; gap: 8px; }
+.poster .bar { margin-top: 8px; }
+.poster .foot { display: flex; justify-content: space-between; margin-top: 6px; font-size: var(--fs-11); color: var(--text-3); }
+.poster.new { aspect-ratio: 9/13; border: 1px dashed var(--line-2); border-radius: var(--r-2); display: grid; place-items: center; color: var(--text-3); font-size: var(--fs-12); }
+.poster.new:hover { color: var(--text-2); border-color: var(--line-3); }
+.fx-a { background: linear-gradient(165deg, #2A2622 0%, #171310 55%, #1F1A14 100%); }
+.fx-b { background: linear-gradient(195deg, #241F2B 0%, #131017 60%, #191420 100%); }
+.fx-c { background: linear-gradient(150deg, #1C2320 0%, #0F1310 65%, #15201A 100%); }
+
+/* ---------- 弹窗 ---------- */
+.dlg-mask { position: fixed; inset: 0; background: rgba(5,4,3,.7); z-index: 50; display: none; align-items: center; justify-content: center; backdrop-filter: blur(2px); }
+.dlg-mask.on { display: flex; }
+.dlg { background: var(--panel); border: 1px solid var(--line-2); border-radius: var(--r-3); width: 820px; max-height: 86vh; overflow-y: auto; padding: var(--sp-5) var(--sp-6); }
+.dlg h2 { font-family: var(--serif); font-size: var(--fs-20); font-weight: 600; margin-bottom: var(--sp-4); display: flex; align-items: center; }
+.dlg h2 .x { margin-left: auto; color: var(--text-3); font-family: var(--sans); font-size: var(--fs-13); }
+.frm { display: grid; grid-template-columns: 1fr 1fr; gap: var(--sp-4) var(--sp-5); }
+.fld label { display: block; font-size: var(--fs-11); letter-spacing: .1em; color: var(--text-3); margin-bottom: 6px; }
+.fld label em { color: var(--accent-hi); font-style: normal; }
+.inp { width: 100%; background: var(--card); border: 1px solid var(--line); border-radius: var(--r-1); padding: 8px 12px; color: var(--text); font: inherit; font-size: var(--fs-13); }
+.inp:focus { outline: none; border-color: rgba(201,85,61,.5); }
+.up-box { grid-column: 1/-1; border: 1px dashed var(--line-2); border-radius: var(--r-2); padding: var(--sp-5); text-align: center; color: var(--text-3); font-size: var(--fs-12); }
+.up-box b { display: block; color: var(--text-2); font-weight: 500; margin-bottom: 4px; }
+.dlg-foot { display: flex; align-items: center; gap: var(--sp-3); margin-top: var(--sp-5); }
+.dlg-foot .note { margin-right: auto; color: var(--text-3); font-size: var(--fs-12); display: flex; align-items: center; gap: 8px; }
+.dlg-foot .note i { width: 13px; height: 13px; border-radius: 3px; background: var(--accent); display: inline-grid; place-items: center; color: #FFF7F0; font-size: 9px; font-style: normal; }
+
+/* ---------- 屏1 · 剧本 ---------- */
+.script-lay { display: grid; grid-template-columns: 232px 1fr 300px; height: 100%; }
+.ep-side { background: var(--bg-2); border-right: 1px solid var(--line); display: flex; flex-direction: column; }
+.side-cap { padding: var(--sp-4) var(--sp-4) var(--sp-2); }
+.ep-scroll { flex: 1; overflow-y: auto; }
+.ep-item { display: flex; align-items: baseline; gap: 10px; padding: 9px var(--sp-4); cursor: pointer; border-left: 1px solid transparent; color: var(--text-3); font-size: var(--fs-13); transition: all var(--dur) var(--ease); }
+.ep-item:hover { color: var(--text-2); background: var(--card); }
+.ep-item.cur { background: var(--card); border-left-color: var(--accent); color: var(--text); }
+.ep-item .no { font-size: var(--fs-11); color: var(--text-3); width: 38px; flex: none; }
+.ep-item .stx { margin-left: auto; font-size: var(--fs-11); color: var(--text-3); }
+.ep-item.cur .stx { color: var(--ok); }
+.flow { border-top: 1px solid var(--line); padding: var(--sp-3) var(--sp-4) var(--sp-4); }
+.flow .it { display: flex; align-items: center; gap: 9px; padding: 6px 0; font-size: var(--fs-12); color: var(--text-3); }
+.flow .it .n { width: 15px; height: 15px; border-radius: 50%; display: grid; place-items: center; font-size: 9px; flex: none; }
+.flow .it.done .n { background: var(--ok-soft); color: var(--ok); }
+.flow .it.todo .n { border: 1px solid var(--line-3); color: var(--text-3); }
+.flow .it.todo { color: var(--text-2); }
+
+.script-main { display: flex; flex-direction: column; overflow: hidden; }
+.script-head { display: flex; align-items: baseline; gap: var(--sp-4); padding: var(--sp-4) var(--sp-6); border-bottom: 1px solid var(--line); flex: none; }
+.script-head h2 { font-family: var(--serif); font-size: var(--fs-16); font-weight: 600; }
+.script-head .vm { font-size: var(--fs-11); color: var(--text-3); }
+.script-head .grow { flex: 1; }
+.script-scroll { flex: 1; overflow-y: auto; }
+.script-doc { max-width: 700px; margin: 0 auto; padding: var(--sp-6) var(--sp-6) 96px; font-family: var(--serif); font-size: 16px; line-height: 2.15; color: var(--text); }
+.script-doc .scene { color: var(--text-3); font-size: var(--fs-13); letter-spacing: .12em; margin: var(--sp-5) 0 var(--sp-3); }
+.script-doc .scene::before { content: "◇ "; color: var(--accent); font-size: 10px; }
+.script-doc p { margin-bottom: var(--sp-3); text-align: justify; }
+.script-doc p b { color: var(--gold); font-weight: 600; }
+.script-doc .meta-line { font-family: var(--sans); color: var(--text-3); font-size: var(--fs-11); letter-spacing: .1em; margin-bottom: var(--sp-5); }
+.script-foot { display: flex; gap: var(--sp-2); padding: var(--sp-3) var(--sp-6); border-top: 1px solid var(--line); flex: none; background: var(--bg-2); align-items: center; }
+.script-foot .cnt { margin-left: auto; font-size: var(--fs-11); color: var(--text-3); }
+
+.ai-side { background: var(--bg-2); border-left: 1px solid var(--line); display: flex; flex-direction: column; }
+.ai-head { display: flex; align-items: baseline; gap: 10px; padding: var(--sp-4); border-bottom: 1px solid var(--line); }
+.ai-head .nm { font-family: var(--serif); font-weight: 600; font-size: var(--fs-14); flex: 1; }
+.ai-body { flex: 1; overflow-y: auto; padding: var(--sp-4); display: flex; flex-direction: column; gap: var(--sp-4); }
+.msg { font-size: var(--fs-12); line-height: 1.8; }
+.msg.user { color: var(--text-2); padding-left: 10px; border-left: 2px solid var(--line-3); }
+.msg.bot { color: var(--text-2); }
+.msg.bot b { color: var(--text); font-weight: 500; }
+.ai-acts { padding: 0 var(--sp-4) var(--sp-2); display: flex; flex-direction: column; }
+.ai-act { text-align: left; padding: 10px 0; border-top: 1px solid var(--line); font-size: var(--fs-12); color: var(--text-2); display: flex; align-items: center; gap: 8px; }
+.ai-act:hover { color: var(--text); }
+.ai-act::before { content: "→"; color: var(--accent-hi); }
+.ai-input { padding: var(--sp-3) var(--sp-4); border-top: 1px solid var(--line); }
+.ai-input .box { background: var(--card); border: 1px solid var(--line); border-radius: var(--r-1); padding: 9px var(--sp-3); color: var(--text-3); font-size: var(--fs-12); }
+
+/* ---------- 屏2 · 制作四栏 ---------- */
+.prod-top { display: flex; align-items: center; gap: var(--sp-4); padding: 0 var(--sp-5); height: 46px; border-bottom: 1px solid var(--line); flex: none; }
+.ep-sel { font-size: var(--fs-12); color: var(--text-2); padding: 5px 10px; border-radius: var(--r-1); }
+.ep-sel:hover { background: var(--card-2); }
+.prod-top .grow { flex: 1; }
+.prod4 { display: grid; grid-template-columns: 190px 236px 1fr 330px; flex: 1; overflow: hidden; }
+.pcol { overflow-y: auto; display: flex; flex-direction: column; }
+.pcol + .pcol { border-left: 1px solid var(--line); }
+.pcol-cap { padding: var(--sp-3) var(--sp-4); position: sticky; top: 0; background: var(--bg); z-index: 2; display: flex; align-items: baseline; gap: 8px; }
+.pcol-cap .grow { flex: 1; }
+
+.seg-item { display: flex; align-items: baseline; gap: 10px; padding: 8px var(--sp-4); cursor: pointer; border-left: 1px solid transparent; color: var(--text-3); font-size: var(--fs-12); }
+.seg-item:hover { background: var(--card); color: var(--text-2); }
+.seg-item.cur { background: var(--card); border-left-color: var(--accent); color: var(--text); }
+.seg-item .no { font-family: var(--mono); font-size: var(--fs-11); width: 32px; flex: none; }
+.seg-item .dur { margin-left: auto; font-family: var(--mono); font-size: var(--fs-11); color: var(--text-3); }
+.side-acts { padding: var(--sp-2) var(--sp-3) var(--sp-3); display: flex; flex-direction: column; gap: var(--sp-1); }
+.side-act { text-align: left; padding: 8px 10px; border-radius: var(--r-1); font-size: var(--fs-12); color: var(--text-2); border: 1px solid var(--line); }
+.side-act:hover { border-color: var(--line-3); color: var(--text); }
+.side-act.primary { background: var(--accent); border-color: var(--accent); color: #FFF7F0; text-align: center; }
+.side-act.primary:hover { background: var(--accent-hi); }
+
+.prompt-pane { padding: var(--sp-4) var(--sp-5) 96px; max-width: 820px; }
+.pm-head { display: flex; align-items: baseline; gap: var(--sp-3); margin-bottom: var(--sp-3); }
+.pm-head h2 { font-family: var(--serif); font-size: var(--fs-16); font-weight: 600; }
+.pm-head .sub { font-size: var(--fs-12); color: var(--text-3); }
+.prompt-doc { font-size: var(--fs-13); line-height: 2.05; color: var(--text-2); }
+.prompt-doc .sec { padding: 7px 0; border-bottom: 1px solid var(--line); display: flex; gap: 12px; }
+.prompt-doc .sec:last-child { border-bottom: none; }
+.prompt-doc .tag-k { color: var(--text-3); flex: none; width: 58px; font-size: var(--fs-12); letter-spacing: .06em; }
+.prompt-doc a { color: var(--gold); text-decoration: none; border-bottom: 1px dashed rgba(194,163,107,.4); }
+.prompt-doc .dlg-t { color: var(--text); }
+.prompt-doc .voice-ref { color: var(--text-3); font-size: var(--fs-12); }
+.gen-bar { display: flex; align-items: center; gap: var(--sp-2); margin-top: var(--sp-4); }
+.gen-bar .sel { padding: 5px 12px; border: 1px solid var(--line); border-radius: var(--r-1); font-size: var(--fs-12); color: var(--text-2); font-family: var(--mono); }
+.gen-bar .sel:hover { border-color: var(--line-3); color: var(--text); }
+.gen-bar .hint { margin-left: auto; color: var(--text-3); font-size: var(--fs-11); }
+.vers { margin-top: var(--sp-5); }
+.ver-row { display: flex; gap: var(--sp-3); margin-top: var(--sp-2); }
+.ver-card { width: 108px; cursor: pointer; }
+.ver-card .im { aspect-ratio: 9/16; border-radius: var(--r-1); border: 1px solid var(--line); background: linear-gradient(165deg, #23201B, #14110E); position: relative; }
+.ver-card.cur .im { border-color: var(--ok); }
+.ver-card .tm { font-size: 10px; color: var(--text-3); font-family: var(--mono); margin-top: 5px; }
+.ver-card .mk { font-size: 10px; color: var(--warn); margin-top: 2px; }
+
+.video-pane { padding: var(--sp-4); display: flex; flex-direction: column; gap: var(--sp-4); }
+.vplayer { aspect-ratio: 9/16; max-height: 400px; margin: 0 auto; border-radius: var(--r-2); background: linear-gradient(165deg, #23201B, #14110E); display: grid; place-items: center; position: relative; border: 1px solid var(--line); }
+.vplayer .play { width: 40px; height: 40px; border-radius: 50%; background: rgba(237,232,223,.08); display: grid; place-items: center; color: var(--text); }
+.vplayer .cc { position: absolute; bottom: 12px; left: 12px; right: 12px; text-align: center; font-family: var(--serif); font-size: var(--fs-13); color: #F2EDE4; text-shadow: 0 1px 6px rgba(0,0,0,.9); }
+.v-acts { display: flex; gap: var(--sp-2); }
+.v-acts .btn { flex: 1; }
+.mk-chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.mk-chip { font-size: var(--fs-11); padding: 3px 12px; border-radius: 999px; border: 1px solid var(--line-2); color: var(--text-3); }
+.mk-chip.on { border-color: var(--warn); color: var(--warn); background: var(--warn-soft); }
+.lint-line { display: flex; align-items: center; gap: 7px; font-size: var(--fs-12); color: var(--ok); }
+.lint-line::before { content: "✓"; font-size: var(--fs-11); }
+
+/* ---------- 屏3 · 首帧墙 ---------- */
+.wall-wrap { overflow-y: auto; flex: 1; padding: var(--sp-5) var(--sp-6) 96px; }
+.wall-head2 { display: flex; align-items: baseline; gap: var(--sp-4); margin-bottom: var(--sp-4); max-width: 1200px; margin-left: auto; margin-right: auto; }
+.wall-head2 h2 { font-family: var(--serif); font-size: var(--fs-16); font-weight: 600; }
+.wall-head2 .sub { font-size: var(--fs-12); color: var(--text-3); }
+.wall-head2 .grow { flex: 1; }
+.wall { display: grid; grid-template-columns: repeat(8, 1fr); gap: 10px; max-width: 1200px; margin: 0 auto; }
+.kf { aspect-ratio: 9/16; border-radius: var(--r-1); border: 1px solid var(--line); position: relative; overflow: hidden; background: var(--card); cursor: pointer; transition: border-color var(--dur) var(--ease); }
+.kf:hover { border-color: var(--line-3); }
+.kf.fresh { border-color: rgba(111,162,132,.4); }
+.kf.stale { border-color: rgba(201,138,75,.55); }
+.kf.miss { background: repeating-linear-gradient(45deg, var(--card) 0 7px, var(--bg-2) 7px 14px); }
+.kf .ph { position: absolute; inset: 0; }
+.kf .ph.a { background: linear-gradient(165deg, #26221C, #14110D); }
+.kf .ph.b { background: linear-gradient(195deg, #221E27, #131016); }
+.kf .ph.c { background: linear-gradient(150deg, #1B2220, #0F1412); }
+.kf .no { position: absolute; top: 6px; left: 6px; font-family: var(--mono); font-size: 9px; color: var(--text-2); }
+.kf .dlg { position: absolute; left: 0; right: 0; bottom: 0; padding: 16px 8px 6px; background: linear-gradient(transparent, rgba(8,7,6,.85)); font-size: 10px; color: var(--text-2); }
+.kf.stale .dlg { color: var(--warn); }
+.kf.miss .dlg { position: static; padding: 24px 8px 6px; background: none; text-align: center; }
+.wall-legend { display: flex; gap: var(--sp-5); font-size: var(--fs-11); color: var(--text-3); max-width: 1200px; margin: var(--sp-4) auto 0; }
+
+/* ---------- 屏4 · 项目资产 ---------- */
+.ast-lay { display: grid; grid-template-columns: 280px 1fr; height: 100%; }
+.ast-list { background: var(--bg-2); border-right: 1px solid var(--line); display: flex; flex-direction: column; }
+.ast-tabs { display: flex; padding: var(--sp-3) var(--sp-3) 0; border-bottom: 1px solid var(--line); }
+.ast-tab { flex: 1; text-align: center; padding: 8px 0 10px; font-size: var(--fs-12); color: var(--text-3); border-bottom: 1px solid transparent; margin-bottom: -1px; }
+.ast-tab.on { color: var(--text); border-bottom-color: var(--accent); }
+.ast-tab b { display: block; font-weight: 500; font-size: var(--fs-13); }
+.ast-search { margin: var(--sp-3); }
+.ast-search input { background: transparent; border: none; border-bottom: 1px solid var(--line-2); border-radius: 0; padding: 6px 2px; }
+.ast-grid-wrap { flex: 1; overflow-y: auto; padding: var(--sp-1) var(--sp-3) var(--sp-3); }
+.ast-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; }
+.ast-cell { cursor: pointer; }
+.ast-cell .im { aspect-ratio: 3/4; border-radius: var(--r-1); border: 1px solid var(--line); background: linear-gradient(150deg, #23201B, #14110E); position: relative; }
+.ast-cell.cur .im { border-color: var(--accent); }
+.ast-cell .cnt { position: absolute; top: 5px; left: 5px; font-size: 9px; color: var(--text-3); font-family: var(--mono); }
+.ast-cell .nm { font-size: var(--fs-11); color: var(--text-2); padding: 5px 1px; }
+.ast-foot { padding: var(--sp-3); border-top: 1px solid var(--line); display: flex; flex-direction: column; gap: var(--sp-1); }
+.ast-detail { overflow-y: auto; padding: var(--sp-5) var(--sp-6) 96px; }
+.astd-head { display: flex; align-items: baseline; gap: var(--sp-3); padding-bottom: var(--sp-3); border-bottom: 1px solid var(--line); max-width: 800px; }
+.astd-head h2 { font-family: var(--serif); font-size: var(--fs-20); font-weight: 600; }
+.astd-head .grow { flex: 1; }
+.look-tabs { display: flex; gap: 10px; padding: var(--sp-4) 0; max-width: 800px; }
+.look-tab { width: 84px; cursor: pointer; }
+.look-tab .im { aspect-ratio: 3/4; border-radius: var(--r-1); border: 1px solid var(--line); background: linear-gradient(150deg, #23201B, #14110E); }
+.look-tab.cur .im { border-color: var(--accent); }
+.look-tab .nm { font-size: 10px; color: var(--text-3); padding-top: 5px; }
+.look-tab.add .im { border-style: dashed; display: grid; place-items: center; color: var(--text-3); font-size: var(--fs-11); }
+.astd-sec { padding: var(--sp-3) 0; border-top: 1px solid var(--line); max-width: 800px; }
+.astd-sec > h4 { font-size: var(--fs-11); letter-spacing: .14em; color: var(--text-3); font-weight: 500; margin-bottom: 10px; display: flex; align-items: center; }
+.astd-sec > h4 .grow { flex: 1; }
+.astd-row { display: flex; gap: var(--sp-3); align-items: center; font-size: var(--fs-13); color: var(--text-2); }
+.astd-row select { background: var(--card); border: 1px solid var(--line); border-radius: var(--r-1); padding: 6px 10px; color: var(--text); font: inherit; font-size: var(--fs-12); }
+.desc { font-size: var(--fs-13); color: var(--text-2); line-height: 1.9; }
+.gallery { display: flex; gap: 10px; }
+.gal-item { width: 84px; aspect-ratio: 3/4; border-radius: var(--r-1); border: 1px solid var(--line); background: linear-gradient(150deg, #23201B, #14110E); position: relative; }
+.gal-item .when { position: absolute; bottom: 4px; left: 5px; font-size: 9px; color: var(--text-3); font-family: var(--mono); }
+.gen-bar.full { max-width: 800px; justify-content: flex-start; }
+
+/* ---------- 屏5 · 数据看板 ---------- */
+.dash { overflow-y: auto; flex: 1; }
+.dash-in { max-width: 1080px; margin: 0 auto; padding: var(--sp-6) var(--sp-6) 96px; }
+.dash-head { font-family: var(--serif); font-size: var(--fs-20); font-weight: 600; padding-bottom: var(--sp-4); }
+.stats { display: grid; grid-template-columns: repeat(4, 1fr); border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); margin-bottom: var(--sp-5); }
+.stat { padding: var(--sp-5) var(--sp-5) var(--sp-4); }
+.stat + .stat { border-left: 1px solid var(--line); }
+.stat .k { font-size: var(--fs-11); letter-spacing: .14em; color: var(--text-3); margin-bottom: 10px; }
+.stat .v { font-family: var(--serif); font-size: var(--fs-20); font-weight: 600; }
+.stat .v small { font-size: var(--fs-12); color: var(--text-3); font-weight: 400; font-family: var(--sans); }
+.stat .d { margin-top: 8px; color: var(--text-3); font-size: var(--fs-11); }
+.stat.alert .v { color: var(--warn); }
+.bp { display: flex; align-items: center; gap: var(--sp-3); padding: var(--sp-3) 0 var(--sp-5); font-size: var(--fs-13); }
+.bp .msg { color: var(--warn); flex: 1; }
+.two-col { display: grid; grid-template-columns: 1fr 1fr; gap: var(--sp-6); }
+.panel h2 { font-family: var(--serif); font-size: var(--fs-14); font-weight: 600; padding-bottom: var(--sp-2); border-bottom: 1px solid var(--line); margin-bottom: var(--sp-2); }
+.act { display: flex; align-items: baseline; gap: var(--sp-3); padding: 10px 0; border-bottom: 1px solid var(--line); font-size: var(--fs-12); }
+.act .time { color: var(--text-3); font-family: var(--mono); font-size: var(--fs-11); width: 40px; flex: none; }
+.act .what { flex: 1; color: var(--text-2); }
+.act .what b { color: var(--text); font-weight: 500; }
+.render-row { display: flex; align-items: center; gap: var(--sp-3); padding: 10px 0; border-bottom: 1px solid var(--line); }
+.render-row .th { width: 46px; aspect-ratio: 9/16; border-radius: var(--r-1); background: linear-gradient(165deg, #23201B, #14110E); flex: none; }
+.render-row .what { flex: 1; font-size: var(--fs-12); color: var(--text-2); }
+
+/* ---------- 屏6 · 预览 ---------- */
+.pv-hero { display: flex; gap: var(--sp-6); max-width: 760px; }
+.pv-poster { width: 220px; aspect-ratio: 9/16; border-radius: var(--r-2); background: linear-gradient(165deg, #26221C, #14110D); display: grid; place-items: center; position: relative; flex: none; border: 1px solid var(--line-2); }
+.pv-poster .cc { position: absolute; bottom: 14px; left: 14px; right: 14px; text-align: center; font-family: var(--serif); color: #F2EDE4; font-size: var(--fs-13); text-shadow: 0 1px 6px rgba(0,0,0,.9); }
+.pv-meta h2 { font-family: var(--serif); font-size: var(--fs-20); font-weight: 600; margin-bottom: 6px; }
+.pv-meta .spec { font-family: var(--mono); font-size: var(--fs-12); color: var(--text-3); margin-bottom: var(--sp-4); }
+.pv-meta .row { display: flex; align-items: center; gap: var(--sp-3); padding: 10px 0; border-top: 1px solid var(--line); font-size: var(--fs-12); color: var(--text-2); }
+.pv-meta .row .n { width: 52px; flex: none; color: var(--text-3); font-size: var(--fs-11); letter-spacing: .1em; }
+
+/* ---------- Demo 切换器 ---------- */
+.demo-ctl { position: fixed; right: 16px; bottom: 16px; z-index: 99; display: flex; align-items: center; gap: 2px; background: rgba(18,17,16,.92); border: 1px solid var(--line-2); border-radius: 999px; padding: 5px 6px 5px 14px; backdrop-filter: blur(8px); }
+.demo-ctl .lbl { font-size: var(--fs-11); color: var(--text-3); margin-right: 6px; }
+.demo-ctl button { padding: 3px 11px; border-radius: 999px; font-size: var(--fs-12); color: var(--text-3); }
+.demo-ctl button:hover { color: var(--text); }
+.demo-ctl button.on { color: var(--text); background: var(--card-3); }
+.demo-ctl .acc-sw { display: flex; align-items: center; gap: 4px; margin-left: 8px; padding-left: 10px; border-left: 1px solid var(--line-2); }
+.demo-ctl .acc-sw i { width: 12px; height: 12px; border-radius: 50%; cursor: pointer; display: block; }
+.demo-note { position: fixed; left: 16px; bottom: 16px; z-index: 99; font-size: var(--fs-11); color: var(--text-3); background: rgba(18,17,16,.92); border: 1px solid var(--line); border-radius: 999px; padding: 6px 14px; }
+</style>
+</head>
+<body>
+<div class="app">
+
+  <header class="topbar">
+    <div class="brand">
+      <span class="wd">DRAMA<i>FLOW</i></span>
+      <button class="home-link" onclick="go(0)">‹ 项目</button>
+    </div>
+    <span class="pname">便利店夜班·林越与苏晚的303夜宵</span>
+    <nav class="top-tabs" id="projTabs" style="display:none">
+      <button onclick="go(1)" data-m="1">剧本</button>
+      <button onclick="go(2)" data-m="2">制作</button>
+      <button onclick="go(6)" data-m="6">预览</button>
+    </nav>
+    <div class="top-utils">
+      <button onclick="go(4)">项目资产</button>
+      <button onclick="go(5)">数据看板</button>
+      <button onclick="dlgOn()">项目信息</button>
+      <span class="sep"></span>
+      <span class="spec num">9:16 · 480P</span>
+      <span class="runstat"><span class="pulse"></span><span class="num">2 任务</span></span>
+    </div>
+    <div style="margin-left:auto;display:flex;align-items:center" id="homeCreate">
+      <button class="btn primary" onclick="dlgOn()">新建项目</button>
+    </div>
+  </header>
+
+  <main class="main">
+
+  <!-- ═══ 屏0 · 首页 ═══ -->
+  <section class="screen on" id="s0">
+    <div class="home">
+      <div class="home-in">
+        <div class="home-head">
+          <h1>项 目</h1>
+          <span class="sub num">4 部短剧 · 2 部制作中</span>
+          <div class="grow"></div>
+        </div>
+        <div class="poster-grid">
+          <div class="poster" onclick="go(1)">
+            <div class="im"><div class="fx fx-a"></div><div class="veil"></div>
+              <div class="ttl">便利店夜班<br>林越与苏晚的303夜宵</div>
+              <div class="meta num"><span>7/15 段</span><span>6/6 资产</span><span>68s 成片</span></div>
+            </div>
+            <div class="bar"><i style="width:47%"></i></div>
+            <div class="foot"><span>9:16 · 480P</span><span class="st ok"><i></i>制作中</span></div>
+          </div>
+          <div class="poster" onclick="go(1)">
+            <div class="im"><div class="fx fx-b"></div><div class="veil"></div>
+              <div class="ttl">外卖员深夜送单<br>认出失散多年的姐姐</div>
+              <div class="meta num"><span>3 集</span><span>4/4 段</span><span>5/5 资产</span></div>
+            </div>
+            <div class="bar"><i style="width:33%"></i></div>
+            <div class="foot"><span>9:16 · 480P</span><span class="st acc"><i></i>可预览</span></div>
+          </div>
+          <div class="poster">
+            <div class="im"><div class="fx fx-c"></div><div class="veil"></div>
+              <div class="ttl">钟声 · 工艺版</div>
+              <div class="meta num"><span>1 集</span><span>0/3 段</span><span>1/3 资产</span></div>
+            </div>
+            <div class="bar"><i style="width:2%"></i></div>
+            <div class="foot"><span>16:9 · 720P</span><span class="st mute"><i></i>草稿</span></div>
+          </div>
+          <div class="poster new" onclick="dlgOn()">＋ 新建短剧</div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ═══ 屏1 · 剧本 ═══ -->
+  <section class="screen" id="s1">
+    <div class="script-lay">
+      <aside class="ep-side">
+        <div class="side-cap cap">剧本列表</div>
+        <div class="ep-scroll">
+          <div class="ep-item cur"><span class="no num">第一集</span>303 夜宵<span class="stx num">7/15</span></div>
+          <div class="ep-item"><span class="no num">第二集</span>门缝里的灯<span class="stx">待制作</span></div>
+          <div class="ep-item"><span class="no num">第三集</span>红绳<span class="stx">待制作</span></div>
+        </div>
+        <div class="flow">
+          <div class="cap" style="padding-bottom:8px">制作准备</div>
+          <div class="it done"><span class="n">✓</span>导入剧本 · 自动分集</div>
+          <div class="it done"><span class="n">✓</span>Agent 制作 · 分镜与提示词</div>
+          <div class="it done"><span class="n">✓</span>资产就绪 6/6</div>
+          <div class="it todo"><span class="n num">8</span>补齐首帧 → 批量出片</div>
+        </div>
+      </aside>
+      <div class="script-main">
+        <div class="script-head">
+          <h2>第一集 · 303 夜宵</h2>
+          <span class="vm">版本 v1</span>
+          <div class="grow"></div>
+          <span class="vm num">1216 字 · 15 段 · 9 句对白</span>
+        </div>
+        <div class="script-scroll">
+          <article class="script-doc">
+            <div class="meta-line">9:16 竖屏 · 480P · 深夜便利店 · 双人物</div>
+            <div class="scene">场一 · 深夜便利店 · 林越 苏晚</div>
+            <p>深夜的便利店像一座亮着的孤岛。自动门开合的一瞬，冷气裹着雪粒涌进来。林越推门进来，肩头落着雪，手里拎着外卖袋，手腕上一圈红绳手环在灯下格外扎眼。</p>
+            <p><b>林越</b>：303 的，夜宵到了。</p>
+            <p>苏晚坐在收银台后核单，头也没抬，指尖在屏幕上敲着。</p>
+            <p><b>苏晚</b>：放这儿，我核一下。</p>
+            <p>林越等在收银台前，呵出的白气很快散掉。苏晚找零的时候，目光扫过他手腕——动作停了半秒。那圈红绳手环，她见过。在很多年前的一个冬天。</p>
+            <p><b>苏晚</b>：凉的，重新拿一杯。</p>
+            <p>她转身去了冷柜。其实那杯豆浆还冒着热气。她只是需要几秒钟，把心跳压回去。</p>
+            <p><b>林越</b>：没事，我赶时间。</p>
+            <p>苏晚把热豆浆换成一杯凉的放到台面上，杯壁的水珠顺着她的指尖滑下来。她的声音很轻，轻得像是怕碰碎什么。</p>
+            <p><b>苏晚</b>：手伸出来。</p>
+            <p>林越愣了一下，还是伸出了手腕。红绳手环在灯下晃了晃。苏晚的指尖悬在半空，最终没有碰上去。冷柜的嗡嗡声忽然变得很大。</p>
+            <p><b>苏晚</b>：你这手环……哪儿来的。</p>
+            <p><b>林越</b>：捡的。</p>
+            <p>他说完自己都笑了。可苏晚没有笑。她盯着那圈红绳，像是在看一件从旧时间里漂来的东西。收银台的灯管闪了一下。</p>
+            <p><b>苏晚</b>：摘下来。</p>
+            <p><b>林越</b>：不行。</p>
+            <p>两个人隔着收银台对峙。谁都没有再说话。窗外雪落无声。</p>
+          </article>
+        </div>
+        <div class="script-foot">
+          <button class="btn sm">编辑剧本</button>
+          <button class="btn sm">重新分集</button>
+          <span class="cnt">导出 txt</span>
+          <span style="flex:1"></span>
+          <button class="btn primary sm" onclick="go(2)">进入制作</button>
+        </div>
+      </div>
+      <aside class="ai-side">
+        <div class="ai-head"><span class="nm">AI 助手</span><span class="st ok"><i></i>在线</span></div>
+        <div class="ai-body">
+          <div class="msg user">帮我看看第1集的对白节奏有没有问题</div>
+          <div class="msg bot">检查了第 1 集全部 <b>9 句对白</b>：最短的「捡的。」3 字 ≈ 0.7s，镜头 3.2s 足够；最长的「凉的，重新拿一杯。」7 字 ≈ 1.6s，镜头留了 4.1s，<b>表演余量充足</b>，没有需要拆分的超长台词。</div>
+          <div class="msg user">苏晚的音色换一个更冷的</div>
+          <div class="msg bot">已把苏晚的音色改为 <b>nova</b>（偏低沉冷静），后续合成自动生效。</div>
+        </div>
+        <div class="ai-acts">
+          <button class="ai-act">根据剧本重新生成资产表</button>
+          <button class="ai-act">生成本集分镜提示词</button>
+        </div>
+        <div class="ai-input"><div class="box">告诉 AI 你想改什么……</div></div>
+      </aside>
+    </div>
+  </section>
+
+  <!-- ═══ 屏2 · 制作 ═══ -->
+  <section class="screen" id="s2">
+    <div class="prod-top">
+      <button class="ep-sel">第一集 ▾</button>
+      <span class="st ok"><i></i>进行中</span>
+      <span class="st" style="color:var(--text-2)"><span class="num">完成 7/15 · 47%</span></span>
+      <div class="bar" style="width:110px"><i style="width:47%"></i></div>
+      <div class="grow"></div>
+      <button class="btn sm" onclick="go(3)">首帧墙</button>
+    </div>
+    <div class="prod4">
+      <div class="pcol">
+        <div class="pcol-cap cap">第 1 集 · 概要</div>
+        <div style="padding:0 var(--sp-4);font-size:var(--fs-12);color:var(--text-3);line-height:1.9">深夜便利店，外卖员林越与店员苏晚因一只红绳手环相认。15 段 · 9 句对白。</div>
+      </div>
+      <div class="pcol">
+        <div class="pcol-cap cap">片段队列 <span class="grow"></span><span class="num" style="letter-spacing:0">7/15</span></div>
+        <div class="seg-item"><span class="no">1-1</span><span class="st ok"><i></i>完成</span><span class="dur num">4.2s</span></div>
+        <div class="seg-item cur"><span class="no">1-2</span><span class="st ok"><i></i>完成</span><span class="dur num">3.8s</span></div>
+        <div class="seg-item"><span class="no">1-3</span><span class="st ok"><i></i>完成</span><span class="dur num">4.1s</span></div>
+        <div class="seg-item"><span class="no">1-4</span><span class="st ok"><i></i>完成</span><span class="dur num">3.6s</span></div>
+        <div class="seg-item"><span class="no">1-5</span><span class="st ok"><i></i>完成</span><span class="dur num">3.4s</span></div>
+        <div class="seg-item"><span class="no">1-6</span><span class="st ok"><i></i>完成</span><span class="dur num">2.9s</span></div>
+        <div class="seg-item"><span class="no">1-7</span><span class="st warn"><i></i>过期</span><span class="dur num">4.0s</span></div>
+        <div class="seg-item"><span class="no">1-8</span><span class="st mute"><i></i>未完成</span><span class="dur num">3.2s</span></div>
+        <div class="seg-item"><span class="no">1-9</span><span class="st mute"><i></i>未完成</span><span class="dur num">3.5s</span></div>
+        <div class="seg-item"><span class="no">1-10</span><span class="st mute"><i></i>未完成</span><span class="dur num">2.6s</span></div>
+        <div class="seg-item" style="opacity:.35"><span class="no">1-11</span><span>已下线</span></div>
+        <div class="side-acts">
+          <button class="side-act" onclick="go(3)">首帧墙 · 整集质检</button>
+          <button class="side-act primary">批量生成未出片 (8)</button>
+        </div>
+      </div>
+      <div class="pcol">
+        <div class="pcol-cap" style="letter-spacing:0"><span style="font-family:var(--serif);font-size:var(--fs-14);font-weight:600">提示词</span><span class="cap" style="letter-spacing:.06em">1-2 · 报单·核一下</span><span class="grow"></span><button class="txt-link">在结构视图中查看</button></div>
+        <div class="prompt-pane">
+          <div class="prompt-doc">
+            <div class="sec"><span class="tag-k">禁止</span>禁止出现任何颜色的字幕、任何颜色的文字和背景音乐。</div>
+            <div class="sec"><span class="tag-k">人物</span><a href="#">林越 · 三视图</a><span class="voice-ref">　声音参考 [onyx]</span></div>
+            <div class="sec"><span class="tag-k">场景</span><a href="#">便利店 · 日景 / 室内暖白灯带</a>，日内</div>
+            <div class="sec"><span class="tag-k">道具</span><a href="#">外卖袋</a>、<a href="#">热豆浆杯</a></div>
+            <div class="sec"><span class="tag-k">画风</span>电影感写实，浅景深，暖白灯带与冷蓝雪夜对比，自然光。风格指令应用于全片。</div>
+            <div class="sec"><span class="tag-k">站位</span>林越立在台前递外卖袋，苏晚低头核单。</div>
+            <div class="sec"><span class="tag-k">画面</span>① 林越把外卖袋放上台面　② 苏晚指尖敲核单　③ 抬眼半秒</div>
+            <div class="sec"><span class="tag-k">台词</span><span class="dlg-t">（林越，同期声，原文一字不改）：303 的，夜宵到了。</span></div>
+          </div>
+          <div class="gen-bar">
+            <button class="sel">mock</button>
+            <button class="sel num">480p</button>
+            <button class="sel num">3.8s</button>
+            <span class="hint">重生成不抢占当前采用版 · 单次上限 30s</span>
+            <button class="btn primary sm">生成</button>
+          </div>
+          <div class="lint-line" style="margin-top:var(--sp-3)">硬校验通过——时长 3-8s · 机位齐全 · 主体非空 · 说话人已识别</div>
+          <div class="vers">
+            <div class="cap" style="padding:var(--sp-4) 0 var(--sp-1)">迭代版本</div>
+            <div class="ver-row">
+              <div class="ver-card cur">
+                <div class="im"><span class="badge ok" style="position:absolute;top:5px;left:5px;font-size:9px;padding:0 6px">采用中</span></div>
+                <div class="tm num">14:32:11</div>
+                <div class="mk">标记：可用</div>
+              </div>
+              <div class="ver-card">
+                <div class="im" style="background:linear-gradient(165deg,#28202A,#161016)"></div>
+                <div class="tm num">14:28:47</div>
+                <div class="mk" style="color:var(--warn)">人脸漂移 · 站位有误</div>
+              </div>
+              <div class="ver-card" style="display:grid;place-items:center;border:1px dashed var(--line-2);border-radius:var(--r-1);color:var(--text-3);font-size:var(--fs-11);min-height:80px">重新生成</div>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="pcol">
+        <div class="pcol-cap cap">视频预览 <span class="grow"></span><span style="letter-spacing:0">原始版</span></div>
+        <div class="video-pane">
+          <div class="vplayer"><span class="play"><svg class="ic" viewBox="0 0 16 16" style="width:15px;height:15px"><path d="M5 3.5v9l7-4.5z" fill="currentColor" stroke="none"/></svg></span><span class="cc">303 的，夜宵到了。</span></div>
+          <div class="v-acts">
+            <button class="btn sm">下载</button>
+            <button class="btn sm">再次生成</button>
+          </div>
+          <div>
+            <div class="cap" style="padding-bottom:8px">标记本版问题 · 下版本规避</div>
+            <div class="mk-chips">
+              <span class="mk-chip">人脸漂移</span><span class="mk-chip on">站位有误</span><span class="mk-chip">台词问题</span><span class="mk-chip">可用</span>
+            </div>
+          </div>
+          <div>
+            <div class="cap" style="padding-bottom:8px">首帧 · 与分镜一致</div>
+            <div style="width:100%;aspect-ratio:9/16;max-height:170px;border-radius:var(--r-1);border:1px solid rgba(111,162,132,.4);background:linear-gradient(165deg,#1B2220,#0F1412)"></div>
+          </div>
+          <div style="font-size:var(--fs-11);color:var(--text-3);font-family:var(--mono)">1-2 / v2 · mock · 3.8s · 480×854</div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ═══ 屏3 · 首帧墙 ═══ -->
+  <section class="screen" id="s3">
+    <div class="wall-wrap">
+      <div class="wall-head2">
+        <h2>首帧墙</h2>
+        <span class="sub">整集静帧质检——批量出片前先过一遍构图</span>
+        <div class="grow"></div>
+        <button class="btn primary sm">补齐缺的 8 张</button>
+      </div>
+      <div class="wall">
+        <div class="kf fresh"><div class="ph a"></div><span class="no">01</span><div class="dlg">无对白 · 环境音</div></div>
+        <div class="kf fresh"><div class="ph b"></div><span class="no">02</span><div class="dlg">林越：303 的，夜宵到了。</div></div>
+        <div class="kf fresh"><div class="ph c"></div><span class="no">03</span><div class="dlg">苏晚：放这儿，我核一下。</div></div>
+        <div class="kf fresh"><div class="ph a"></div><span class="no">04</span><div class="dlg">苏晚：凉的，重新拿一杯。</div></div>
+        <div class="kf fresh"><div class="ph b"></div><span class="no">05</span><div class="dlg">林越：没事，我赶时间。</div></div>
+        <div class="kf fresh"><div class="ph c"></div><span class="no">06</span><div class="dlg">苏晚：手伸出来。</div></div>
+        <div class="kf stale"><div class="ph a"></div><span class="no">07</span><div class="dlg">过期 · 分镜已变更</div></div>
+        <div class="kf miss"><div class="dlg">08 · 手背到身后</div></div>
+        <div class="kf miss"><div class="dlg">09 · 你这手环哪儿来的</div></div>
+        <div class="kf miss"><div class="dlg">10 · 捡的</div></div>
+        <div class="kf miss"><div class="dlg">11 · 摘下来</div></div>
+        <div class="kf miss"><div class="dlg">12 · 不行</div></div>
+        <div class="kf miss"><div class="dlg">13 · 手腕缩回袖口</div></div>
+        <div class="kf miss"><div class="dlg">14 · 隔着收银台对峙</div></div>
+        <div class="kf miss"><div class="dlg">15 · 冷柜嗡嗡响</div></div>
+      </div>
+      <div class="wall-legend">
+        <span class="st ok"><i></i>首帧与分镜一致（7）</span>
+        <span class="st warn"><i></i>过期——分镜/形象已变更（1）</span>
+        <span class="st mute"><i></i>缺首帧（8）</span>
+      </div>
+    </div>
+  </section>
+
+  <!-- ═══ 屏4 · 项目资产 ═══ -->
+  <section class="screen" id="s4">
+    <div class="ast-lay">
+      <aside class="ast-list">
+        <div class="side-cap cap" style="padding-top:var(--sp-3)">项目资产 · 《303 夜宵》</div>
+        <div class="ast-tabs">
+          <button class="ast-tab on">角色<b class="num">2/2</b></button>
+          <button class="ast-tab">场景<b class="num">1/1</b></button>
+          <button class="ast-tab">道具<b class="num">2/2</b></button>
+          <button class="ast-tab">音色<b class="num">2</b></button>
+        </div>
+        <div class="ast-search"><input class="inp" placeholder="搜索资产…"></div>
+        <div class="ast-grid-wrap">
+          <div class="ast-grid">
+            <div class="ast-cell cur"><div class="im"><span class="cnt num">2 形象</span></div><div class="nm">林越</div></div>
+            <div class="ast-cell"><div class="im" style="background:linear-gradient(150deg,#28202A,#161016)"><span class="cnt num">1 形象</span></div><div class="nm">苏晚</div></div>
+            <div class="ast-cell"><div class="im" style="background:linear-gradient(150deg,#1B2220,#0F1412)"><span class="cnt num">1 图</span></div><div class="nm">便利店夜景</div></div>
+          </div>
+        </div>
+        <div class="ast-foot"><button class="btn sm">＋ 新增角色</button></div>
+      </aside>
+      <div class="ast-detail">
+        <div class="astd-head">
+          <h2>林越</h2>
+          <span class="st acc"><i></i>主角</span>
+          <span class="st" style="color:var(--gold)"><i style="background:var(--gold)"></i><span class="num">音色 onyx</span></span>
+          <div class="grow"></div>
+          <button class="btn quiet sm">编辑</button>
+        </div>
+        <div class="look-tabs">
+          <div class="look-tab cur"><div class="im"></div><div class="nm">三视图 · 主形象</div></div>
+          <div class="look-tab"><div class="im" style="background:linear-gradient(150deg,#28202A,#161016)"></div><div class="nm">日常便装</div></div>
+          <div class="look-tab add"><div class="im">＋ 新形象</div></div>
+        </div>
+        <div class="astd-sec">
+          <h4>人物描述 <span class="grow"></span><button class="txt-link">编辑</button></h4>
+          <div class="desc">外卖员，二十六七岁，短寸头，窄长脸，深蓝色外卖冲锋衣，灰色连帽卫衣。右腕系一圈红绳手环——全片关键信物。跑单多年，性子急但心软，肩头总有没拍干净的雪。</div>
+        </div>
+        <div class="astd-sec">
+          <h4>音色</h4>
+          <div class="astd-row">
+            <select><option>onyx · 当前</option><option>alloy</option><option>echo</option><option>fable</option><option>nova</option><option>shimmer</option></select>
+            <button class="btn sm">试听</button>
+            <span style="color:var(--text-3);font-size:var(--fs-11)">TTS 现场合成 · 每角色固定音色，即声音的参考图</span>
+          </div>
+        </div>
+        <div class="astd-sec">
+          <h4>出场章节</h4>
+          <div class="astd-row"><span style="color:var(--text)">第一集 · 全 15 段</span></div>
+        </div>
+        <div class="astd-sec">
+          <h4>一致性标签</h4>
+          <div class="desc">短寸头 · 窄长脸 · 深蓝外卖冲锋衣 · 灰色连帽卫衣 · 右腕细红绳手环 · 肩头落雪</div>
+        </div>
+        <div class="astd-sec">
+          <h4>生成提示词 <span class="grow"></span><button class="txt-link">复制</button></h4>
+          <div class="desc" style="font-family:var(--mono);font-size:var(--fs-12)">【人物形象描述】真人写实男性角色，二十六七岁，短寸头，窄长脸，眉眼利落，肤色偏冷。深蓝色外卖冲锋衣＋灰色连帽卫衣，右腕红绳手环。【表情/姿态】站姿端正，双手插兜，神情平静带着倦意。</div>
+        </div>
+        <div class="astd-sec">
+          <h4>形象图库</h4>
+          <div class="gallery">
+            <div class="gal-item"><span class="when num">10-18</span></div>
+            <div class="gal-item" style="background:linear-gradient(150deg,#28202A,#161016)"><span class="when num">10-19</span></div>
+            <div class="gal-item" style="border-style:dashed;display:grid;place-items:center;color:var(--text-3);font-size:var(--fs-11)">上传</div>
+          </div>
+        </div>
+        <div class="gen-bar full" style="padding-top:var(--sp-3)">
+          <button class="sel">mock</button>
+          <button class="sel num">9:16</button>
+          <button class="sel num">480P</button>
+          <span class="hint">批量只画没有图的 · 已出图的形象绝不重画</span>
+          <button class="btn primary sm">生成当前形象</button>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ═══ 屏5 · 数据看板 ═══ -->
+  <section class="screen" id="s5">
+    <div class="dash">
+      <div class="dash-in">
+        <div class="dash-head">数据看板 <span style="font-family:var(--sans);font-size:var(--fs-12);color:var(--text-3);font-weight:400;margin-left:12px">便利店夜班 · 第一集</span></div>
+        <div class="stats">
+          <div class="stat"><div class="k">集进度</div><div class="v num">7 <small>/ 15 段出片</small></div><div class="bar" style="margin-top:10px"><i style="width:47%"></i></div><div class="d">一镜一段 3-8s</div></div>
+          <div class="stat"><div class="k">资产就绪</div><div class="v num">6 <small>/ 6 有图</small></div><div class="d" style="margin-top:12px">角色 2 · 场景 1 · 道具 2 · 画风 1</div></div>
+          <div class="stat alert"><div class="k">制作断点</div><div class="v num">8</div><div class="d">段未建生成槽 · 分镜已就绪</div></div>
+          <div class="stat"><div class="k">成片</div><div class="v num">1</div><div class="d">68s · 含对白音轨与字幕</div></div>
+        </div>
+        <div class="bp">
+          <span class="st warn"><i></i></span>
+          <span class="msg">8 段未建生成槽——先批量出首帧做质检，再批量出片</span>
+          <button class="btn sm" onclick="go(3)">去补首帧</button>
+          <button class="btn primary sm" onclick="go(2)">去制作</button>
+        </div>
+        <div class="two-col">
+          <div class="panel">
+            <h2>最近动态</h2>
+            <div class="act"><span class="time num">14:32</span><span class="what"><b>produce 完成</b>——第 1 集重拆 15 个一镜一段，旧 7 段原位保留</span></div>
+            <div class="act"><span class="time num">14:40</span><span class="what"><b>片段 1-2 重出片</b>——新版本已采用，过期标记清除</span></div>
+            <div class="act"><span class="time num">14:51</span><span class="what"><b>音色绑定</b>——林越 → onyx，苏晚 → nova</span></div>
+            <div class="act"><span class="time num">14:58</span><span class="what"><b>成片合成</b>——68s，5 句对白全部对齐，无告警</span></div>
+          </div>
+          <div class="panel">
+            <h2>成片</h2>
+            <div class="render-row" style="cursor:pointer" onclick="go(6)">
+              <div class="th"></div>
+              <span class="what"><b>第一集 · 整集</b><br><span class="num" style="color:var(--text-3)">480×854 · 68s · h264+aac · 2 分钟前</span></span>
+              <button class="btn sm">下载</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ═══ 屏6 · 预览 ═══ -->
+  <section class="screen" id="s6">
+    <div class="dash">
+      <div class="dash-in">
+        <div class="dash-head">预览 <span style="font-family:var(--sans);font-size:var(--fs-12);color:var(--text-3);font-weight:400;margin-left:12px">交付的最后一公里</span></div>
+        <div class="pv-hero">
+          <div class="pv-poster"><svg class="ic" viewBox="0 0 16 16" style="width:20px;height:20px;opacity:.85"><path d="M5 3.5v9l7-4.5z" fill="currentColor" stroke="none"/></svg><span class="cc">303 的，夜宵到了。</span></div>
+          <div class="pv-meta">
+            <h2>第一集 · 整集</h2>
+            <div class="spec num">480×854 · 68s · h264 + aac · 24fps</div>
+            <div class="row"><span class="n">对白</span>5 句全部对齐 · 字幕已烧录 · 无告警</div>
+            <div class="row"><span class="n">审批</span>片段顺序与输出规格已人工确认</div>
+            <div class="row"><span class="n">合成</span>2 分钟前 · sha256 6cba2327…</div>
+            <div style="display:flex;gap:var(--sp-2);padding-top:var(--sp-4)">
+              <button class="btn primary">下载成片</button>
+              <button class="btn">重新合成</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  </main>
+</div>
+
+<!-- ═══ 新建项目弹窗 ═══ -->
+<div class="dlg-mask" id="newDlg">
+  <div class="dlg">
+    <h2>新建项目 <button class="x" onclick="dlgOff()">关闭 ✕</button></h2>
+    <div class="frm">
+      <div class="fld"><label>项目名称 <em>*</em></label><input class="inp" value="便利店夜班·林越与苏晚的303夜宵"></div>
+      <div class="fld"><label>画面比例 <em>*</em></label><select class="inp"><option>9:16 竖屏 · 短剧</option><option>16:9 横屏</option></select></div>
+      <div class="fld"><label>画质 <em>*</em></label><select class="inp"><option>480P</option><option>720P</option></select></div>
+      <div class="fld"><label>画风</label><select class="inp"><option>电影感写实</option><option>动漫 2D</option><option>3D</option></select></div>
+      <div class="fld"><label>图片模型</label><select class="inp"><option>mock</option><option>Seedream</option></select></div>
+      <div class="fld"><label>视频模型</label><select class="inp"><option>mock</option><option>Seedance</option><option>Wan</option></select></div>
+      <div class="fld" style="grid-column:1/-1"><label>剧本内容 <em>*</em> · docx / txt / md，粘贴或上传后自动分集</label>
+        <div class="up-box"><b>拖入文件，或点击选择</b>按「第N集 / Episode N」自动分集，单集异常会告警</div>
+      </div>
+      <div class="fld"><label>分集标志符号</label><input class="inp" placeholder="留空按「第X集」"></div>
+      <div class="fld"><label>制作 Skill</label><select class="inp"><option>短剧制作 · drama_craft（默认）</option></select></div>
+    </div>
+    <div class="dlg-foot">
+      <span class="note"><i>✓</i>创建后自动生成资产表</span>
+      <button class="btn" onclick="dlgOff()">取消</button>
+      <button class="btn primary" onclick="dlgOff()">确认创建</button>
+    </div>
+  </div>
+</div>
+
+<!-- Demo 切换器 -->
+<div class="demo-ctl">
+  <span class="lbl">Demo v3</span>
+  <button onclick="go(0)" data-n="0">首页</button>
+  <button onclick="go(1)" data-n="1">剧本</button>
+  <button onclick="go(2)" data-n="2">制作</button>
+  <button onclick="go(3)" data-n="3">首帧墙</button>
+  <button onclick="go(4)" data-n="4">资产</button>
+  <button onclick="go(5)" data-n="5">看板</button>
+  <button onclick="go(6)" data-n="6">预览</button>
+  <span class="acc-sw">
+    <i style="background:#C9553D" title="朱砂" onclick="setAccent('#C9553D','#DD6A50')"></i>
+    <i style="background:#C2A36B" title="鎏金" onclick="setAccent('#B08D4F','#C9A76B')"></i>
+    <i style="background:#8A9B6E" title="苔青" onclick="setAccent('#7E9161','#93A675')"></i>
+  </span>
+</div>
+<div class="demo-note">v3 · 视觉语言重做：暖墨底 · 朱砂单强调 · 宋体标题与剧本 · 发丝线 · 无渐变无 emoji · 右下角圆点可切主色</div>
+
+<script>
+function go(n) {
+  document.querySelectorAll(".screen").forEach((s, i) => s.classList.toggle("on", i === n));
+  document.querySelectorAll(".demo-ctl button").forEach(b => b.classList.toggle("on", +b.dataset.n === n));
+  const inproj = n > 0;
+  document.body.classList.toggle("inproj", inproj);
+  document.getElementById("projTabs").style.display = inproj ? "flex" : "none";
+  document.getElementById("homeCreate").style.display = inproj ? "none" : "flex";
+  document.querySelectorAll(".top-tabs button").forEach(b => {
+    const m = +b.dataset.m;
+    const cur = (n === 1 && m === 1) || ((n === 2 || n === 3) && m === 2) || (n === 6 && m === 6);
+    b.classList.toggle("cur", cur);
+  });
+}
+function dlgOn() { document.getElementById("newDlg").classList.add("on"); }
+function dlgOff() { document.getElementById("newDlg").classList.remove("on"); }
+function setAccent(a, hi) {
+  document.documentElement.style.setProperty("--accent", a);
+  document.documentElement.style.setProperty("--accent-hi", hi);
+  document.documentElement.style.setProperty("--accent-soft", a + "22");
+}
+go(0);
+</script>
+</body>
+</html>
