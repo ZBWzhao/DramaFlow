@@ -50,6 +50,9 @@ class SkillEntry(BaseModel):
     location: str  # 相对路径，给模型去读
     body_chars: int = 0
     disable_model_invocation: bool = False
+    version: str = "0.1.0"
+    role: str = ""  # script-analysis | director | asset；空 = 未分类
+    allowed_tools: list[str] = Field(default_factory=list)
 
 
 # ---------------------------------------------------------------------------
@@ -85,9 +88,38 @@ def discover_skills(root: Path = SKILLS_ROOT) -> tuple[list[SkillEntry], list[st
                 location=f"skills/{path.parent.name}/SKILL.md",
                 body_chars=len(body),
                 disable_model_invocation=frontmatter.get("disable-model-invocation", "").lower() == "true",
+                version=frontmatter.get("version", "0.1.0"),
+                role=frontmatter.get("role", ""),
+                allowed_tools=_parse_tool_list(frontmatter.get("allowed_tools", "")),
             )
         )
     return entries, errors
+
+
+def _parse_tool_list(raw: str) -> list[str]:
+    """allowed_tools 只写 `[a, b]` 形式——YAML 列表语法不值得为它加依赖。"""
+    if not raw.strip():
+        return []
+    return [t.strip() for t in raw.strip().strip("[]").split(",") if t.strip()]
+
+
+def validate_skill_tools(entries: list[SkillEntry], tool_names: set[str]) -> list[str]:
+    """白名单引用的工具必须存在——装载期拦截，不给运行期留幽灵引用。"""
+    errors = []
+    for entry in entries:
+        for tool in entry.allowed_tools:
+            if tool not in tool_names:
+                errors.append(f"{entry.name}: allowed_tools 引用了不存在的工具「{tool}」")
+    return errors
+
+
+def skills_by_role(entries: list[SkillEntry]) -> dict[str, SkillEntry]:
+    """role → SkillEntry（同 role 多个时取排序靠后的；skill 目录名排序保证确定性）。"""
+    by_role: dict[str, SkillEntry] = {}
+    for entry in entries:
+        if entry.role:
+            by_role[entry.role] = entry
+    return by_role
 
 
 def skills_prompt_section(entries: list[SkillEntry]) -> str:
