@@ -202,7 +202,7 @@ onMounted(refresh);
       class="dock"
       mode="dock"
       :canvas="String(route.params.name)"
-      :chips="['分析本集对白节奏', '检查穿帮风险', '下一集拆分镜']"
+      :chips="['解析出资产表', '细化林小满的人物小传', '把世界观改得更黑暗', '分析本集对白节奏']"
       @canvas-changed="refresh"
     />
 
