@@ -1,0 +1,48 @@
+/* ============================================================
+ * 共享 UI 原语 —— 给"真实状态"用的最小件（demo 只画了理想态，
+ * 真实页面大部分时间处于空态/加载/运行中，这些必须也是设计过的）。
+ * 命名空间 ui-*，不绑定具体视图。
+ * ============================================================ */
+
+/* ---------- 空态：图标 + 标题 + 说明 + 行动按钮，禁止裸句子占位 ---------- */
+.ui-empty {
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  gap: 6px; text-align: center; padding: 40px 20px; color: var(--text-3);
+}
+.ui-empty .ico {
+  width: 44px; height: 44px; border-radius: 14px; display: grid; place-items: center;
+  background: var(--card); border: 1px solid var(--line); color: var(--text-3);
+  font-size: 18px; margin-bottom: 4px;
+}
+.ui-empty .tt { font-family: var(--serif); font-size: var(--fs-14); color: var(--text-2); }
+.ui-empty .ds { font-size: var(--fs-12); line-height: 1.8; max-width: 240px; }
+.ui-empty .act { margin-top: 10px; }
+
+/* ---------- 按钮：统一三态 ---------- */
+.ui-btn {
+  display: inline-flex; align-items: center; justify-content: center; gap: 7px;
+  padding: 9px 18px; border-radius: var(--r-2); font-size: var(--fs-13);
+  color: var(--text-2); background: var(--card); border: 1px solid var(--line-2);
+  cursor: pointer; transition: all var(--dur) var(--ease); text-decoration: none;
+}
+.ui-btn:hover { color: var(--text); border-color: var(--line-3); background: var(--card-2); }
+.ui-btn.primary { background: var(--accent); border-color: var(--accent); color: var(--text-on-accent); }
+.ui-btn.primary:hover { background: var(--accent-hi); border-color: var(--accent-hi); }
+.ui-btn.ghost { background: none; border-color: transparent; }
+.ui-btn.ghost:hover { background: var(--card); border-color: var(--line-2); }
+.ui-btn.sm { padding: 6px 14px; font-size: var(--fs-12); border-radius: 10px; }
+.ui-btn:disabled { opacity: .45; pointer-events: none; }
+
+/* ---------- 信息行（标签: 值） ---------- */
+.ui-meta { display: flex; flex-direction: column; gap: 8px; }
+.ui-meta .row { display: flex; gap: 12px; font-size: var(--fs-12); line-height: 1.7; }
+.ui-meta .row .k { color: var(--text-3); flex: none; width: 56px; }
+.ui-meta .row .v { color: var(--text-2); word-break: break-all; }
+
+/* ---------- 徽标 / 状态点 ---------- */
+.ui-badge {
+  display: inline-flex; align-items: center; gap: 6px;
+  font-size: var(--fs-11); padding: 3px 10px; border-radius: 999px;
+  background: var(--card); border: 1px solid var(--line-2); color: var(--text-3);
+}
+.ui-badge.gold { color: var(--gold); background: var(--gold-soft); border-color: transparent; }

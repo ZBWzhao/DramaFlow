@@ -11,6 +11,7 @@ import "@vue-flow/minimap/dist/style.css";
 
 // 设计 token：颜色/间距/圆角/字体/层级的唯一真源（暖墨重设计 · 2026-10-21 spec）
 import "./styles/tokens.css";
+import "./styles/ui.css";
 // 画布视图专用暗色主题（作用域 .canvas-app，不影响首页/制片台）
 import "./styles/canvas.css";
 import "./styles/canvas2.css";

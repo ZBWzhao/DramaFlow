@@ -960,6 +960,19 @@ async def mutate_message(session_id: str, entry_id: str, req: MessageActionReque
         raise HTTPException(status_code=409, detail=str(exc))
 
 
+@app.get("/api/sessions/{session_id}/questions")
+async def list_pending_questions(session_id: str) -> dict[str, Any]:
+    """刷新后恢复待答问题：活会话从 QuestionBroker 快照取，非活会话没有等待中的问题。"""
+    try:
+        registry.session_path(session_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    live = registry.sessions.get(session_id)
+    if live is None:
+        return {"questions": []}
+    return {"questions": live.questions.snapshot()}
+
+
 @app.post("/api/sessions/{session_id}/questions/{question_id}/answer")
 async def answer_question(session_id: str, question_id: str, req: QuestionAnswerRequest) -> dict[str, Any]:
     try:

@@ -227,9 +227,14 @@ onMounted(async () => {
       <!-- ── 概要 ── -->
       <div class="col col-overview">
         <div class="col-cap cap">第 {{ currentEp }} 集 · 概要</div>
-        <div class="summary">
-          <b>{{ studio.project?.title }}</b>
-          <p>{{ studio.project?.style_preset || "画风未设" }} · {{ studio.project?.aspect_ratio }} · {{ studio.project?.quality }}</p>
+        <div class="summary ui-card">
+          <span class="ui-badge gold">第 {{ currentEp }} 集 · {{ episodes.length }} 集</span>
+          <b class="s-title">{{ studio.project?.title || "未命名项目" }}</b>
+          <div class="ui-meta">
+            <div class="row"><span class="k">画风</span><span class="v">{{ studio.project?.style_preset || "未设" }}</span></div>
+            <div class="row"><span class="k">画幅画质</span><span class="v num">{{ studio.project?.aspect_ratio || "—" }} · {{ studio.project?.quality || "—" }}</span></div>
+            <div class="row"><span class="k">出片</span><span class="v num">{{ segDone }}/{{ segments.length }} 段完成</span></div>
+          </div>
           <p class="dim">一镜一段 3-8s · 时长与台词由系统校验</p>
         </div>
       </div>
@@ -249,7 +254,14 @@ onMounted(async () => {
             <span class="st" :class="segStatus(s).cls"><i></i>{{ segStatus(s).text }}</span>
             <span v-if="s.duration_s" class="dur num">{{ s.duration_s }}s</span>
           </div>
-          <div v-if="!segments.length" class="empty">这一集还没有片段——回剧本页「开始制作」</div>
+          <div v-if="!segments.length" class="ui-empty seg-empty">
+            <span class="ico">🎬</span>
+            <span class="tt">这一集还没有片段</span>
+            <span class="ds">回剧本页点「开始制作」，Agent 会拆分镜、写提示词，片段会出现在这里</span>
+            <span class="act">
+              <button class="ui-btn primary sm" type="button" @click="router.push(`/project/${route.params.name}/script`)">去剧本页开始制作</button>
+            </span>
+          </div>
         </div>
         <div class="side-acts">
           <button class="side-act" type="button" @click="router.push(`/project/${route.params.name}/wall`)">首帧墙 · 整集质检</button>
@@ -273,7 +285,6 @@ onMounted(async () => {
 
         <div v-if="detail" class="prompt-pane">
           <div class="edit-hint">悬停任意字段可直接改——改过的内容标记为<b>人改</b>，服务端不再覆盖；或点「让 AI 改」看建议再应用</div>
-
           <template v-if="mode === 'structured'">
             <div v-if="promptHead" class="prompt-head num">{{ promptHead }}</div>
             <div v-for="f in promptFields" :key="f.k" class="sec" :class="{ editing: editingKey === f.k }">
@@ -318,7 +329,7 @@ onMounted(async () => {
             <button class="fix" type="button" :disabled="busy" @click="generate(true)">改好后强制生成</button>
           </div>
 
-          <!-- 生成参数条 -->
+          <!-- 生成参数条（吸底：长提示词滚动时操作始终可达） -->
           <div class="gen-bar">
             <span class="sel num">{{ genParams }}</span>
             <span class="sel num">{{ detail.duration_s ? `${detail.duration_s}s` : "时长自适应" }}</span>
@@ -351,7 +362,13 @@ onMounted(async () => {
             </div>
           </div>
         </div>
-        <div v-else class="prompt-pane"><div class="empty">选择左侧片段查看提示词</div></div>
+        <div v-else class="prompt-pane">
+          <div class="ui-empty">
+            <span class="ico">✍️</span>
+            <span class="tt">选择左侧片段查看提示词</span>
+            <span class="ds">每个片段一条结构化提示词——人物、场景、镜头、台词分字段可改，AI 修改需你确认</span>
+          </div>
+        </div>
       </div>
 
       <!-- ── 视频预览 ── -->
@@ -426,9 +443,12 @@ onMounted(async () => {
 .col + .col { border-left: 1px solid var(--line); }
 .col-cap { padding: var(--sp-3) var(--sp-4); position: sticky; top: 0; background: var(--bg); z-index: 2; display: flex; align-items: baseline; gap: 8px; }
 .col-cap .t { font-family: var(--serif); font-size: var(--fs-14); font-weight: 600; }
-.summary { padding: 0 var(--sp-4); font-size: var(--fs-12); color: var(--text-3); line-height: 1.9; }
-.summary b { color: var(--text-2); font-weight: 500; font-family: var(--serif); font-size: var(--fs-13); }
-.summary .dim { color: var(--text-3); opacity: .8; }
+.summary { margin: 0 var(--sp-3) var(--sp-3); padding: var(--sp-4); border: 1px solid var(--line); border-radius: var(--r-2); background: var(--card); display: flex; flex-direction: column; gap: 10px; font-size: var(--fs-12); color: var(--text-3); line-height: 1.8; }
+.summary .s-title { color: var(--text); font-weight: 600; font-family: var(--serif); font-size: var(--fs-16); line-height: 1.4; }
+.summary .dim { color: var(--text-3); opacity: .75; font-size: var(--fs-11); }
+.seg-empty { padding: 48px 16px; }
+.seg-empty .act { width: 100%; }
+.seg-empty .act .ui-btn { width: 100%; }
 
 .st { display: inline-flex; align-items: center; gap: 6px; font-size: var(--fs-11); }
 .st i { width: 6px; height: 6px; border-radius: 50%; flex: none; }
@@ -492,7 +512,11 @@ onMounted(async () => {
 .lint-line .fix { margin-left: auto; color: var(--warn); background: none; border: 1px solid var(--line-2); border-radius: var(--r-1); padding: 4px 12px; font-size: var(--fs-11); cursor: pointer; }
 .lint-line .fix:hover { border-color: var(--warn); }
 
-.gen-bar { display: flex; align-items: center; gap: var(--sp-2); margin-top: var(--sp-4); }
+.gen-bar {
+  display: flex; align-items: center; gap: var(--sp-2); margin-top: var(--sp-4);
+  position: sticky; bottom: 0; padding: var(--sp-3) 0;
+  background: linear-gradient(to top, var(--bg) 75%, transparent);
+}
 .gen-bar .sel { padding: 7px 14px; border: 1px solid var(--line); border-radius: var(--r-1); font-size: var(--fs-13); color: var(--text-2); font-family: var(--mono); }
 .gen-bar .hint { margin-left: auto; color: var(--text-3); font-size: var(--fs-11); }
 
@@ -507,8 +531,9 @@ onMounted(async () => {
 .adopt { display: block; margin-top: 4px; width: 100%; padding: 5px 0; border: 1px solid var(--line-2); border-radius: var(--r-1); font-size: 11px; color: var(--text-2); background: none; cursor: pointer; }
 .adopt:hover { border-color: var(--ok); color: var(--ok); }
 
-/* 右栏预览 */
-.video-pane { padding: var(--sp-4); display: flex; flex-direction: column; gap: var(--sp-4); }
+/* 右栏预览（底部留出 AI 浮球空间） */
+.video-pane { padding: var(--sp-4) var(--sp-4) 96px; display: flex; flex-direction: column; gap: var(--sp-5); }
+.video-pane .cap { padding-bottom: 8px; }
 .vplayer { aspect-ratio: 9/16; max-height: 380px; margin: 0 auto; border-radius: var(--r-2); background: linear-gradient(165deg, #23201B, #14110E); position: relative; border: 1px solid var(--line); overflow: hidden; display: grid; place-items: center; }
 .vplayer video { width: 100%; height: 100%; object-fit: contain; }
 .vplayer.empty-v { color: var(--text-3); font-size: var(--fs-12); }
