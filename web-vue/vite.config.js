@@ -20,11 +20,10 @@ export default defineConfig({
     // 那样前端 JS 会 404。改成 static，两条路径各归各的。
     assetsDir: "static",
     chunkSizeWarningLimit: 2000,
-    // 双入口：主力应用 index.html + IA 骨架 Demo skeleton.html（同一 dist，互不影响入口）
+    // 单入口：index.html（IA 骨架 Demo 已随 src/skeleton 一并移除）
     rollupOptions: {
       input: {
         main: fileURLToPath(new URL("./index.html", import.meta.url)),
-        skeleton: fileURLToPath(new URL("./skeleton.html", import.meta.url)),
       },
     },
   },
