@@ -1,0 +1,114 @@
+<script setup>
+/* 任务中心：顶栏「N 任务 ▾」+ 下拉面板。
+ *
+ * 数据只读 studioStore：studio.jobs（生成/合成等 media/studio job，轮询时写入）
+ * 与 studio.produceJob（Agent 制作）。本组件不发起新轮询——job 状态由触发它的
+ * 动作负责更新，这里只做聚合展示：运行中在上，已结束置灰在下。
+ */
+import { computed, onBeforeUnmount, onMounted, ref } from "vue";
+import { studio } from "../studio/studioStore.js";
+
+const open = ref(false);
+const rootEl = ref(null);
+
+const KIND_LABEL = { video: "视频生成", image: "图片生成", keyframe: "首帧生成", audio: "音频生成" };
+const ACTIVE = new Set(["queued", "running"]);
+
+const jobs = computed(() =>
+  Object.entries(studio.jobs)
+    .map(([id, job]) => ({
+      id,
+      label: KIND_LABEL[job?.kind] || job?.kind || "任务",
+      status: job?.status || "unknown",
+      active: ACTIVE.has(job?.status),
+      progress: typeof job?.progress === "number" ? Math.round(job.progress <= 1 ? job.progress * 100 : job.progress) : null,
+      detail: job?.error || (job?.result?.warnings?.length ? `${job.result.warnings.length} 条告警` : ""),
+    }))
+    .sort((a, b) => Number(b.active) - Number(a.active)),
+);
+
+/* Agent 制作是一等任务：单独成行，带耗时 */
+const produce = computed(() => {
+  const p = studio.produceJob;
+  if (!p) return null;
+  return {
+    label: `Agent 制作 · 第 ${p.episode ?? "?"} 集`,
+    status: p.status,
+    active: ACTIVE.has(p.status),
+    elapsed: p.elapsed ? `${p.elapsed}s` : "",
+    detail: p.error || "",
+  };
+});
+
+const activeCount = computed(
+  () => jobs.value.filter((j) => j.active).length + (produce.value?.active ? 1 : 0),
+);
+
+function onDocClick(e) {
+  if (open.value && rootEl.value && !rootEl.value.contains(e.target)) open.value = false;
+}
+onMounted(() => document.addEventListener("click", onDocClick));
+onBeforeUnmount(() => document.removeEventListener("click", onDocClick));
+</script>
+
+<template>
+  <div ref="rootEl" class="task-center">
+    <button class="runstat" type="button" @click="open = !open">
+      <span v-if="activeCount" class="pulse"></span>
+      <span class="num">{{ activeCount }} 任务</span>
+      <span class="caret">▾</span>
+    </button>
+
+    <div v-if="open" class="task-pop">
+      <h3>任务中心</h3>
+
+      <div v-if="produce" class="tj" :class="{ done: !produce.active }">
+        <div class="r1">
+          <span class="nm">{{ produce.label }}</span>
+          <span v-if="produce.active" class="pc num">{{ produce.elapsed }}</span>
+          <span v-else class="pc">{{ produce.status === "succeeded" ? "✓" : produce.status }}</span>
+        </div>
+        <div v-if="produce.detail" class="d">{{ produce.detail }}</div>
+      </div>
+
+      <div v-for="j in jobs" :key="j.id" class="tj" :class="{ done: !j.active }">
+        <div class="r1">
+          <span class="nm">{{ j.label }} <span class="sub num">{{ j.id.slice(0, 8) }}</span></span>
+          <span v-if="j.active" class="pc num">{{ j.progress != null ? `${j.progress}%` : j.status }}</span>
+          <span v-else class="pc">{{ j.status === "succeeded" ? "✓" : j.status }}</span>
+        </div>
+        <div v-if="j.progress != null && j.active" class="bar"><i :style="{ width: `${j.progress}%` }"></i></div>
+        <div v-if="j.detail" class="d">{{ j.detail }}</div>
+      </div>
+
+      <div v-if="!jobs.length && !produce" class="empty">本会话还没有触发过任务</div>
+    </div>
+  </div>
+</template>
+
+<style scoped>
+.task-center { position: relative; display: flex; align-items: center; }
+.runstat { display: flex; align-items: center; gap: 7px; font-size: var(--fs-13); color: var(--text-3); padding: 5px 3px; }
+.runstat:hover { color: var(--text-2); }
+.pulse { width: 6px; height: 6px; border-radius: 50%; background: var(--ok); animation: tc-pulse 1.6s ease-in-out infinite; }
+@keyframes tc-pulse { 50% { opacity: .3; } }
+.caret { font-size: 10px; }
+
+.task-pop {
+  position: absolute; top: 34px; right: 0; width: 320px;
+  background: var(--panel); border: 1px solid var(--line-2); border-radius: var(--r-2);
+  padding: var(--sp-4); z-index: 60; box-shadow: 0 12px 40px rgba(0, 0, 0, .5);
+}
+.task-pop h3 { font-family: var(--serif); font-size: var(--fs-14); font-weight: 600; padding-bottom: 10px; border-bottom: 1px solid var(--line); }
+.tj { padding: 10px 0; border-bottom: 1px solid var(--line); font-size: var(--fs-12); }
+.tj:last-of-type { border-bottom: none; }
+.tj .r1 { display: flex; align-items: center; gap: 8px; }
+.tj .nm { color: var(--text); flex: 1; }
+.tj .nm .sub { color: var(--text-3); font-size: var(--fs-11); }
+.tj .pc { color: var(--text-3); font-family: var(--mono); font-size: var(--fs-11); }
+.tj .d { margin-top: 4px; color: var(--bad); font-size: var(--fs-11); }
+.tj .bar { margin-top: 7px; height: 2px; background: var(--card-3); }
+.tj .bar i { display: block; height: 100%; background: var(--ok); }
+.tj.done .nm { color: var(--text-3); }
+.empty { padding: 14px 0 4px; color: var(--text-3); font-size: var(--fs-12); }
+</style>

@@ -8,6 +8,7 @@
  */
 import { computed } from "vue";
 import { useRoute } from "vue-router";
+import TaskCenter from "./TaskCenter.vue";
 
 const route = useRoute();
 
@@ -43,7 +44,7 @@ const tabs = [
         <span class="sep"></span>
         <!-- 规格：Task 8 从 studio.project 读真实值 -->
         <span class="spec num">9:16 · 480P</span>
-        <!-- TASKCENTER：Task 4 挂任务中心（.runstat + 下拉） -->
+        <TaskCenter />
       </div>
       <!-- NEW-PROJECT：Task 6 挂 NewProjectDialog（首页态右上的「新建项目」按钮） -->
       <div v-else class="home-right"></div>
