@@ -15,7 +15,7 @@ toonflow-app-source/
 _install_staging/
 
 # 前端（Vue + Vite）：依赖与构建产物都不入库
-web-vue/node_modules/
+node_modules/
 web-vue/dist/
 web-vue/*.log
 web-vue/**/*.log

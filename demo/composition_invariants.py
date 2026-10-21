@@ -61,6 +61,38 @@ def main() -> None:
         assert rendered.width == 640 and rendered.height == 360 and rendered.fps == 24
         print("PASS mock MP4 -> ordered timeline -> TTS/subtitle -> validated final MP4")
 
+        # --- 对白轨：逐句 TTS → 按镜头边界对齐 → 与旁白混音 → 真实时间轴字幕 ---
+        tts = TTSRegistry(root)
+        line_a = tts.synthesize({"provider": "mock", "text": "你到底是谁。"}, "dlg-a")
+        line_b = tts.synthesize({"provider": "mock", "text": "我等了你十年。"}, "dlg-b")
+        rendered2 = CompositionService(root).render(
+            {
+                "clips": [{"path": clip["path"]} for clip in plan["clips"]],
+                "audio": {"path": narration.path},
+                "dialogue": {
+                    "lines": [
+                        {"clip_index": 0, "path": line_a.path, "text": "你到底是谁。", "voice": "nv_warm"},
+                        {"clip_index": 1, "path": line_b.path, "text": "我等了你十年。", "voice": "nv_warm"},
+                    ]
+                },
+                "output": plan["output"],
+            },
+            "test-job-dialogue",
+        )
+        inspected2 = probe_media(root / rendered2.path)
+        assert inspected2["video"] and inspected2["audio"], "成片必须带音轨"
+        assert not rendered2.warnings, rendered2.warnings
+        # srt 落在渲染目录：时间轴必须单调递增且含两句文本
+        srt_files = list((root / "assets" / "rendered" / "test-job-dialogue").glob("*.srt"))
+        assert srt_files, "对白字幕必须落盘"
+        rows = srt_files[0].read_text(encoding="utf-8")
+        assert "你到底是谁。" in rows and "我等了你十年。" in rows
+        stamps = [ln for ln in rows.splitlines() if " --> " in ln]
+        assert len(stamps) == 2
+        times = [ln.split(" --> ")[0] for ln in stamps]
+        assert times == sorted(times), "字幕时间轴必须单调递增"
+        print("PASS dialogue track: aligned lines + mixed audio + real-timing srt")
+
 
 if __name__ == "__main__":
     main()

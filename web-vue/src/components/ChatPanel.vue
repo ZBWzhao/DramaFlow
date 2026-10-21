@@ -1,4 +1,4 @@
-﻿<script setup>
+<script setup>
 /* 对话页：按事件流的**发生顺序**渲染一条 feed。
  *
  * 运行期间的三处"活着"信号（这轮补的，之前只靠一个静止的"正在生成…"）：
@@ -22,6 +22,9 @@ const modeOptions = computed(() => [
   ...state.teams.map((t) => ({ value: `team:${t.name}`, label: `团队 · ${t.display_name || t.name}` })),
 ]);
 
+/* 浮层的配色由宿主决定：新画布传深色 popper 类，旧画布保持默认浅色。 */
+const props = defineProps({ popperClass: { type: String, default: "" } });
+
 const policyOptions = [
   { value: "ask", label: "逐步询问后审批" },
   { value: "auto_review", label: "自动准备后审批" },
@@ -30,7 +33,13 @@ const policyOptions = [
 const currentProvider = computed(() => state.mediaProviders.find((item) => item.id === state.mediaProvider));
 const modelOptions = computed(() => currentProvider.value?.models || []);
 const providerLabel = computed(() => currentProvider.value?.label || state.mediaProvider);
-const sessionLabel = (item) => `${item.title}${item.messages ? ` · ${item.messages} 条` : ""}`;
+
+/* 当前会话只读展示；切换统一在浮层头部的「会话记录」里做。 */
+const currentSessionLabel = computed(() => {
+  if (!state.sessionId) return "新会话（发送后自动保存）";
+  const item = state.sessions.find((session) => session.id === state.sessionId);
+  return item?.title || state.sessionId;
+});
 
 async function onSessionChange(sessionId) {
   try {
@@ -111,15 +120,6 @@ async function switchBranch(item, offset) {
     await actions.mutateMessage(target, "branch");
   } catch (err) {
     ElMessage.error(`切换分支失败：${err.message || err}`);
-  }
-}
-
-async function approveGeneration() {
-  try {
-    const res = await actions.approveGeneration();
-    ElMessage.success(`已批准并完成 ${res.done}/${res.total} 个生成任务`);
-  } catch (err) {
-    ElMessage.error(`生成失败：${err.message}`);
   }
 }
 
@@ -243,37 +243,17 @@ function onKeydown(event) {
 
 watch(() => state.feed.length, () => scrollToBottom(true));
 watch(lastActivity, () => scrollToBottom());
+
+/* 会话浮层的头部动作直接复用这里的实现，避免同一套逻辑写两份。 */
+defineExpose({ newSession: onNewSession, chooseSession: onSessionChange });
 </script>
 
 <template>
   <div class="chat-view">
     <div class="session-strip">
-      <el-select
-        :model-value="state.sessionId"
-        :loading="state.sessionLoading"
-        :disabled="state.running"
-        placeholder="新会话（发送后自动保存）"
-        size="small"
-        aria-label="当前 Agent 会话"
-        @update:model-value="onSessionChange"
-      >
-        <el-option
-          v-for="session in state.sessions"
-          :key="session.id"
-          :label="sessionLabel(session)"
-          :value="session.id"
-        />
-      </el-select>
-      <el-button
-        circle
-        size="small"
-        :disabled="state.running"
-        title="新建会话"
-        aria-label="新建会话"
-        @click="onNewSession"
-      >
-        <el-icon><Plus /></el-icon>
-      </el-button>
+      <span class="session-caption">对话记录</span>
+      <!-- 切换会话统一走浮层头部的「会话记录」，这里只显示当前会话，避免两套入口 -->
+      <span class="session-current" :title="currentSessionLabel">{{ currentSessionLabel }}</span>
       <el-button
         circle
         size="small"
@@ -333,26 +313,6 @@ watch(lastActivity, () => scrollToBottom());
         </div>
       </template>
 
-      <div v-if="state.generationReview" class="generation-review">
-        <div class="review-head">
-          <b>生成前需要你拍板</b>
-          <span :class="currentProvider?.mock ? 'mock-pill' : 'cost-pill'">
-            {{ currentProvider?.mock ? "Mock · 不扣费" : "真实 Provider · 可能产生费用" }}
-          </span>
-        </div>
-        <p>
-          画布 {{ state.generationReview.canvas }} 有
-          <b>{{ state.generationReview.ready }}/{{ state.generationReview.total }}</b>
-          个节点可生成，将使用 {{ providerLabel }} / {{ state.mediaModel }}。
-        </p>
-        <div class="review-actions">
-          <el-button size="small" @click="actions.dismissGenerationReview()">暂不生成</el-button>
-          <el-button size="small" type="primary" :loading="state.canvasBusy" @click="approveGeneration">
-            批准并开始生成
-          </el-button>
-        </div>
-      </div>
-
       <!-- 还没收到任何事件时的占位：发完消息不该只有一句提问留在屏幕上 -->
       <div v-if="showLiveRow" class="msg assistant">
         <div class="msg-head">
@@ -381,7 +341,7 @@ watch(lastActivity, () => scrollToBottom());
           @keydown="onKeydown"
         />
         <div class="composer-bar">
-          <el-popover placement="top-start" :width="300" trigger="click">
+          <el-popover placement="top-start" :width="300" :popper-class="popperClass" trigger="click">
             <template #reference>
               <el-button circle size="small" title="Agent 与媒体生成设置">
                 <el-icon><Setting /></el-icon>
@@ -392,6 +352,7 @@ watch(lastActivity, () => scrollToBottom());
               <label>协作方式</label>
               <el-select
                 :model-value="state.mediaPolicy"
+                :popper-class="popperClass"
                 size="small"
                 @update:model-value="actions.setMediaPolicy"
               >
@@ -400,6 +361,7 @@ watch(lastActivity, () => scrollToBottom());
               <label>媒体 Provider</label>
               <el-select
                 :model-value="state.mediaProvider"
+                :popper-class="popperClass"
                 size="small"
                 @update:model-value="actions.setMediaProvider"
               >
@@ -414,6 +376,7 @@ watch(lastActivity, () => scrollToBottom());
               <label>生成模型</label>
               <el-select
                 :model-value="state.mediaModel"
+                :popper-class="popperClass"
                 size="small"
                 @update:model-value="actions.setMediaModel"
               >
@@ -427,7 +390,7 @@ watch(lastActivity, () => scrollToBottom());
               <p>真实媒体生成仍会在执行前请求你的确认。</p>
             </div>
           </el-popover>
-          <el-select v-model="state.mode" size="small" class="agent-mode-select">
+          <el-select v-model="state.mode" :popper-class="popperClass" size="small" class="agent-mode-select">
             <el-option v-for="opt in modeOptions" :key="opt.value" :label="opt.label" :value="opt.value" />
           </el-select>
           <span class="composer-status" :class="{ running: state.running, warn: silent > 0 || state.endReason === 'limited' }">

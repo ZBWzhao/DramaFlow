@@ -1,0 +1,63 @@
+# DramaFlow 反向代理 —— Caddy 2.8+
+#
+# 用法：
+#   sudo cp deploy/Caddyfile /etc/caddy/Caddyfile
+#   sudo sed -i 's/dramaflow.example.com/你的域名/g' /etc/caddy/Caddyfile
+#   sudo caddy validate --config /etc/caddy/Caddyfile
+#   sudo systemctl reload caddy
+#
+# 前提：域名 A/AAAA 记录已指向本机，云防火墙放行 80/443（Caddy 用 HTTP-01 自动签证书）。
+# 应用只监听 127.0.0.1:8000，公网不直接暴露 8000。
+{
+	# ACME 账号邮箱，证书到期/异常时会收到通知
+	email admin@example.com
+}
+
+dramaflow.example.com {
+	# 安全响应头（与 nginx.conf 保持一致）
+	header {
+		X-Content-Type-Options nosniff
+		X-Frame-Options SAMEORIGIN
+		Referrer-Policy strict-origin-when-cross-origin
+	}
+
+	# 只压缩普通资源；NDJSON 流（/api/agent、/api/team、/api/events/stream）不压缩，
+	# 压缩会把小事件攒成大块，破坏逐行下发。
+	@not_streaming not path /api/agent* /api/team* /api/events/stream
+	encode @not_streaming zstd gzip
+
+	# 素材上传上限。Caddy 默认不限，显式写死避免超大请求占满内存/带宽。
+	request_body {
+		max_size 512MB
+	}
+
+	# /api/agent、/api/team 返回 application/x-ndjson（一行一个事件）。
+	# Caddy 的 reverse_proxy 默认不缓冲响应，这里仍显式 flush_interval -1，
+	# 保证每个事件立即下发，避免前端"憋一坨"才渲染。
+	reverse_proxy 127.0.0.1:8000 {
+		flush_interval -1
+
+		# 上游是明文 HTTP。Agent 一次运行可能几十秒到几分钟：
+		# Caddy 的 transport 默认不设响应读取超时，长任务不会被切断。
+		# 如果前面还有云负载均衡，把它的 idle timeout 调到 ≥ 900s。
+		transport http {
+			dial_timeout 10s
+			keepalive 30s
+		}
+
+		# 保留真实客户端 IP；X-Forwarded-For / -Proto 由 Caddy 自动补齐。
+		header_up X-Real-IP {remote_host}
+	}
+
+	# 健康检查会暴露仓储实现类名。不想公开给全网时取消下面两行注释：
+	# @health path /api/health
+	# respond @health 404
+
+	log {
+		output file /var/log/caddy/dramaflow-access.log {
+			roll_size 50MiB
+			roll_keep 5
+		}
+		format console
+	}
+}

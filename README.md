@@ -295,7 +295,7 @@ core/     config 配置 · events 事件 · llm 请求 · session 会话与用�
 mcp_server/ 对外 MCP Server（工具、资源、Prompt；stdio / Streamable HTTP）
 tools/    word_count（自研） · workspace（读写范例）
 teams/    storyboardTeam：team.json + members/*.md（声明式多 Agent）
-skills/   storyboard（含 references/）· code_review —— 清单常驻，正文按需读
+skills/   workflow（路由表 + references/ 分册）· drama_craft · code_review —— 清单常驻，正文按需读
 .agent/   sessions/*.jsonl（会话落盘，含分支与压缩记录）
 server/   FastAPI：/api/agent（NDJSON 流）、取消、工具清单、热装载、MCP 状态
 web/      index.html + app.js + style.css

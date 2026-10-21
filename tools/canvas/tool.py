@@ -13,13 +13,12 @@
 
 from __future__ import annotations
 
-import hashlib
 import re
 from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
-from core.canvas import NODE_SPEC, Canvas, CanvasError, canvas_path, story_similarity
+from core.canvas import NODE_SPEC, Canvas, CanvasError, canvas_path
 from core.context import ToolContext
 from core.plugin import ToolResult, define_tool, tool_result
 
@@ -30,7 +29,9 @@ TOOL_META = {
     "version": "0.1.0",
     "author": "toonflow-py-lab",
     "prompt": (
-        "做短剧时先用 identify_story 识别并切换到独立剧本画布，再用 add_node 建节点、connect_nodes 连线，"
+        "你只能操作**用户当前打开的那一张画布**：不要试图读写别的项目，也不要按标题相似度"
+        "判断两个项目是不是同一个故事——这类判断一律由用户在界面上做。"
+        "开始产内容前先 identify_story 确认当前画布，再用 add_node 建节点、connect_nodes 连线，"
         "再按 get_canvas 返回的拓扑顺序逐个产出内容。不要一次性把正文塞进节点，正文用 set_text 落盘。"
     ),
 }
@@ -52,8 +53,8 @@ class GetCanvasArgs(BaseModel):
 class IdentifyStoryArgs(BaseModel):
     title: str = Field(min_length=2, max_length=100, description="本次故事的短标题，必须包含核心人物/事件")
     summary: str = Field(min_length=2, max_length=500, description="本次故事的一句话事件摘要")
-    force_new: bool = Field(False, description="用户明确说新故事/另一段/无关项目时设为 true")
-    continuation_canvas: str = Field("", description="用户明确要续写某画布时填写画布名")
+    force_new: bool = Field(False, description="已废弃：新建项目由用户在首页完成，这里不再建画布")
+    continuation_canvas: str = Field("", description="留空即可；只能填当前画布，填别的会被拒绝")
 
 
 class AddNodeArgs(BaseModel):
@@ -112,20 +113,66 @@ class ExportPromptArgs(BaseModel):
     path: str = Field("", description="导出路径，默认 assets/export/<画布名>-prompts.md")
 
 
-class Shot(BaseModel):
-    """一个镜头的 6 个必填字段（缺了 Pydantic 直接挡回，不用等到导出才发现）。
+class Camera(BaseModel):
+    """机位三字段。不要只写一句「镜头推近」——高度/角度/运镜是三个独立量。"""
 
-    字段描述刻意写短：工具 schema 每一轮都要进上下文，描述越长越贵。
+    height: str = Field("", description="机位高度：平视/与胸口齐平/俯拍/仰拍")
+    angle: str = Field("", description="机位角度：正面/左前侧 30°/过肩")
+    movement: str = Field("固定", description="运镜：固定/推/拉/摇/移/跟/升降")
+
+
+class Subject(BaseModel):
+    """本镜出镜主体。id 填资产 node id；同框 ≥2 人时 screen_pos 与 gaze 必填。"""
+
+    id: str = Field("", description="资产 node id")
+    name: str = Field("", description="资产名（没有 id 时用；正文里写 @名字）")
+    screen_pos: str = Field("", description="画面位置：画面左三分之一/前景偏右")
+    gaze: str = Field("", description="视线落点：看向对方喉咙/看向画外左侧")
+    start_state: str = Field("", description="本镜起始状态")
+    end_state: str = Field("", description="本镜末态（必须是看得见的）")
+
+
+class ShotProp(BaseModel):
+    id: str = Field("", description="资产 node id")
+    name: str = Field("", description="资产名（没有 id 时用）")
+    state: str = Field("", description="本镜道具状态：螺纹段贴住皮肤")
+
+
+class Light(BaseModel):
+    direction: str = Field("", description="光源方向：右后方")
+    color: str = Field("", description="色温/颜色：暖橙 2700K")
+    contrast: str = Field("", description="对比：高/中/低")
+
+
+class Dialogue(BaseModel):
+    text: str = Field("", description="同期台词原文，一字不改；没有就留空")
+    speaker: str = Field("", description="说话角色：资产 node id 或资产名；旁白/画外音留空")
+    duration_s: float = Field(0, ge=0, description="台词时长秒")
+
+
+class Shot(BaseModel):
+    """一个镜头的结构化字段（一镜一段，单镜 3-8 秒）。
+
+    正文由服务端渲染（`data.rendered_by="server"`），这里**不要写长提示词**。
+    老画布的 subject/camera_move/duration 仍兼容，新内容一律用新字段。
     """
 
     no: int | None = None  # 镜号，留空自动编号
     segment_no: int = Field(1, ge=1, description="片段号")
-    subject: str = Field(min_length=1, description="主体")
-    action: str = Field(min_length=1, description="可见动作")
-    shot_size: str = Field(min_length=1, description="景别：远/全/中/近/特写")
-    camera_move: str = Field("固定", description="运镜：固定/推/拉/摇/移/跟")
-    sound: str = Field(min_length=1, description="声音/台词")
-    duration: float = Field(gt=0, le=180, description="时长秒")
+    duration_s: float = Field(4, ge=1, le=60, description="本镜时长秒（规范 3-8）")
+    shot_size: str = Field("中景", description="景别：极特写/特写/近景/中景/全景/远景/空镜")
+    camera: Camera = Field(default_factory=Camera)
+    subjects: list[Subject] = Field(default_factory=list)
+    props: list[ShotProp] = Field(default_factory=list)
+    action: str = Field("", description="可见动作：起点→可见末态；资产用 @名字 引用")
+    focus: str = Field("", description="焦点：手与喉咙的接触点")
+    light: Light = Field(default_factory=Light)
+    sound: str = Field("", description="环境音/拟音；台词写进 dialogue")
+    dialogue: Dialogue = Field(default_factory=Dialogue)
+    forbidden: list[str] = Field(default_factory=list, description="本镜禁止出现的具体东西")
+    subject: str = Field("", description="（兼容老画布）一段文字主体")
+    camera_move: str = Field("", description="（兼容老画布）运镜文字")
+    duration: float = Field(0, ge=0, le=180, description="（兼容老画布）时长秒")
 
 
 class SetStoryboardArgs(BaseModel):
@@ -171,55 +218,49 @@ def build_tools(ctx: ToolContext) -> list[Any]:
         return str(context.config.get("default_canvas") or DEFAULT_CANVAS)
 
     async def _identify_story(args: IdentifyStoryArgs, context: ToolContext) -> ToolResult:
-        """把自然语言创意确定性地路由到一张单故事画布。"""
-        repository = context.require_canvas_repository()
-        candidates: list[tuple[float, Canvas]] = []
-        for name in await repository.list():
-            canvas = await repository.load(name)
-            if args.continuation_canvas and canvas.name == args.continuation_canvas:
-                candidates = [(1.0, canvas)]
-                break
-            score = story_similarity(f"{args.title}\n{args.summary}", canvas.story_text())
-            candidates.append((score, canvas))
+        """把这次工作固定到会话绑定的那张画布上，不去别的项目里找。
 
-        selected: Canvas | None = None
-        score = 0.0
-        if args.continuation_canvas:
-            match = next((item for item in candidates if item[1].name == args.continuation_canvas), None)
-            if match is None:
-                return tool_result(f"找不到要续写的画布：{args.continuation_canvas}", is_error=True)
-            score, selected = match
-        elif candidates and not args.force_new:
-            score, selected = max(candidates, key=lambda item: item[0])
-            if score < 0.34:
-                selected = None
+        以前这里会按标题相似度在所有画布之间路由（阈值 0.34）。结果是：
+        「便利店夜班」以 40% 的相似度被"识别"成「外卖员」那张画布，标题被覆盖、
+        布局被重排，而且不回滚也不报错。**模型没有能力判断两个项目是不是同一个故事，
+        用户也没法预期它什么时候会认错**——所以这类"智能"必须去掉：
+        画布由用户在界面上选，工具只认当前这一张。
+        """
+        bound = current_canvas(context)
+        if args.continuation_canvas and args.continuation_canvas.strip() != bound:
+            return tool_result(
+                f"只能续写当前画布「{bound}」，不能切到「{args.continuation_canvas}」。"
+                "要换项目请在界面上打开对应项目。",
+                is_error=True,
+            )
 
-        created = selected is None
+        canvas = await context.require_canvas_repository().load(bound)
+        existing = str(canvas.meta.get("story_title") or "").strip()
+        if existing and existing != args.title.strip():
+            return tool_result(
+                f"当前画布已经是《{existing}》，不会把它改名成《{args.title}》。"
+                "如果这是一个新故事，请让用户在首页「新建项目」。",
+                is_error=True,
+                canvases=[bound],
+            )
+
+        created = not canvas.nodes and not existing
+        canvas.ensure_story(args.title, args.summary)
         if created:
-            digest = hashlib.sha1(f"{args.title}\n{args.summary}".encode("utf-8")).hexdigest()[:8]
-            safe = re.sub(r"[^0-9a-zA-Z\u4e00-\u9fff-]+", "-", args.title).strip("-")[:24]
-            name = f"story-{safe or digest}-{digest}"
-            selected = Canvas(name, context.resolve_path(f"{name}.canvas.json"))
-        selected.ensure_story(args.title, args.summary)
-        selected.arrange()
-        await _save(context, selected)
-        action = "新建独立剧本画布" if created else "识别为已有剧本"
+            canvas.arrange()
+        await _save(context, canvas)
         return tool_result(
-            f"{action}「{args.title}」→ {selected.name}（匹配度 {score:.0%}）。"
+            f"当前画布《{args.title}》已就绪（{canvas.name}）。"
             "后续所有节点和连线只写入这张画布。",
-            story_id=selected.meta.get("story_id"),
-            story_title=args.title,
-            match_score=score,
+            story_id=canvas.meta.get("story_id"),
+            story_title=canvas.meta.get("story_title"),
             created=created,
-            **_changed(selected),
+            **_changed(canvas),
         )
 
     async def _get_canvas(args: GetCanvasArgs, context: ToolContext) -> ToolResult:
         canvas = await _load(context, args.canvas or current_canvas(context))
-        known = await context.require_canvas_repository().list()
         body = canvas.summary()
-        if len(known) > 1:
-            body += f"\n\n工作区里的其他画布：{', '.join(n for n in known if n != canvas.name)}"
         if not canvas.nodes:
             specs = "；".join(f"{k}={v['label']}" for k, v in NODE_SPEC.items())
             body += f"\n\n（画布还是空的）节点类型：{specs}"
@@ -477,15 +518,18 @@ def build_tools(ctx: ToolContext) -> list[Any]:
         define_tool(
             name="set_storyboard",
             description=(
-                "把分镜以**结构化**方式写入（每个镜头 6 字段：主体/动作/景别/运动/声音/时长）；"
-                "时间范围与总时长由系统算出，填了 target_duration 就会校验时长预算"
+                "把分镜以**结构化字段**写入（一镜一段：duration_s 3-8s、shot_size、camera{height,angle,movement}、"
+                "subjects[{id,name,screen_pos,gaze,start_state,end_state}]、props、action、focus、light、sound、"
+                "dialogue、forbidden）；正文与时间范围由服务端按字段渲染，不要手写长提示词；"
+                "填了 target_duration 就会校验时长预算"
             ),
             args_model=SetStoryboardArgs,
             execute=_set_storyboard,
             side_effect=True,
             prompt_guidelines=[
-                "分镜一律用 set_storyboard 写（不要用 set_text 手写分镜表，那样时长无法校验）",
-                "每镜必须能拍到：主体、动作、景别、运动、声音、时长缺一不可",
+                "分镜一律用 set_storyboard 写结构化字段（不要用 set_text 手写分镜表，那样时长与字段都无法校验）",
+                "一镜一段：每段只写一个镜头、单镜 3-8 秒，不要在一段里写「0-3 秒…3-7 秒…」这种时间轴",
+                "同框 ≥2 个主体时必须写 screen_pos 与 gaze；action 里的 @名字 必须在 subjects/props 里声明",
             ],
         ),
         define_tool(

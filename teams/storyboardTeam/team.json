@@ -1,26 +1,29 @@
 {
   "name": "storyboardTeam",
   "displayName": "分镜创作团队",
-  "description": "导演定约束，分镜编剧把方案结构化写入当前画布，审校按画布数据验收。",
-  "version": "2.0.0",
+  "description": "导演定约束，编剧按一镜一段把剧本与结构化分镜写入当前画布，审校按画布字段验收。",
+  "version": "2.1.0",
   "author": "toonflow-py-lab",
   "entry": "director",
   "members": {
     "director": {
-      "description": "明确创作边界与验收标准，拆分任务，最后汇总成统一方案。",
+      "description": "明确创作边界与验收标准（含一镜一段 3-8 秒），拆分任务，最后按画布字段汇总验收。",
       "instructions": "members/director.md",
       "delegates": ["writer", "reviewer"],
-      "tools": ["get_canvas", "read_file", "list_dir"]
+      "tools": ["get_canvas", "read_file", "list_dir"],
+      "skills": ["workflow"]
     },
     "writer": {
-      "description": "根据导演约束建立剧本与分镜节点，并用结构化镜头数据写入当前画布。",
+      "description": "建立剧本与分镜节点，用 set_storyboard 写入一镜一段的结构化镜头数据。",
       "instructions": "members/writer.md",
-      "tools": ["get_canvas", "add_nodes", "update_node", "connect_nodes", "set_text", "set_storyboard", "read_file", "word_count"]
+      "tools": ["get_canvas", "add_nodes", "update_node", "connect_nodes", "set_text", "set_storyboard", "read_file", "word_count"],
+      "skills": ["workflow", "drama_craft"]
     },
     "reviewer": {
-      "description": "核查剧情覆盖、镜头可执行性与前后连续性，提出可操作的修改项。",
+      "description": "核查镜头字段完整性、引用闭包、可执行性与连续性，提出可操作的修改项。",
       "instructions": "members/reviewer.md",
-      "tools": ["get_canvas", "read_file"]
+      "tools": ["get_canvas", "read_file"],
+      "skills": ["workflow"]
     }
   }
 }

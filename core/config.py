@@ -13,7 +13,12 @@ from pathlib import Path
 
 DEFAULT_BASE_URL = "https://api.deepseek.com"
 DEFAULT_MODEL = "deepseek-chat"
-DEFAULT_MAX_OUTPUT_TOKENS = 8192
+# 单次输出上限（tokens）。以前写死 8192，正好是「一口气写 59 个分镜」被截断的那条线：
+# 截断会留下半截工具调用，续跑直接空回复。现在放宽到 32K（实测服务端接受 1–384K）。
+#   · 想更宽：环境变量 LLM_MAX_OUTPUT_TOKENS=65536
+#   · 想交还服务端默认（非思考模式 8K，反而更小）：设为 0 → 请求里不再带 max_tokens
+# 注意总预算是「输入 + 输出 ≤ 上下文窗口」，输出开太大时压缩会更早触发。
+DEFAULT_MAX_OUTPUT_TOKENS = 32768
 DEFAULT_CONTEXT_WINDOW = 128000
 
 

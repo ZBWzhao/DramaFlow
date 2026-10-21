@@ -1,4 +1,4 @@
-﻿/* 全局状态与动作（一个模块级 reactive，等价于轻量版 Pinia，省一个依赖）。
+/* 全局状态与动作（一个模块级 reactive，等价于轻量版 Pinia，省一个依赖）。
  *
  * 三条设计要点：
  *   1. 画布数据保持"服务端原样"，Vue Flow 需要的 nodes/edges 由 computed 派生 ——
@@ -10,7 +10,8 @@
  */
 
 import { computed, reactive } from "vue";
-import { getJSON, postFile, postJSON, streamNDJSON } from "./api.js";
+import { deleteJSON, getJSON, postFile, postJSON, streamNDJSON } from "./api.js";
+import { normalizePosition } from "./canvas2/positions.js";
 
 let activeRunController = null;
 const settingsStorage = typeof localStorage === "undefined" ? null : localStorage;
@@ -18,14 +19,25 @@ const savedSetting = (key, fallback) => settingsStorage?.getItem(key) || fallbac
 const persistSetting = (key, value) => settingsStorage?.setItem(key, value);
 const sessionBindingsKey = "toonflow-session-by-canvas";
 const mediaJobBindingsKey = "toonflow-media-job-by-canvas";
+// 单卡工作台给每个节点单独一条会话：既不污染画布会话的历史，也不受它上下文压缩影响
+const nodeSessionKey = "toonflow-node-session";
 let sessionBindings = {};
 let mediaJobBindings = {};
+let nodeBindings = {};
 try {
   sessionBindings = JSON.parse(settingsStorage?.getItem(sessionBindingsKey) || "{}");
   mediaJobBindings = JSON.parse(settingsStorage?.getItem(mediaJobBindingsKey) || "{}");
+  nodeBindings = JSON.parse(settingsStorage?.getItem(nodeSessionKey) || "{}");
 } catch {
   sessionBindings = {};
   mediaJobBindings = {};
+  nodeBindings = {};
+}
+
+function rememberNodeSession(key, sessionId) {
+  if (!key || !sessionId) return;
+  nodeBindings[key] = sessionId;
+  settingsStorage?.setItem(nodeSessionKey, JSON.stringify(nodeBindings));
 }
 
 function rememberMediaJob(canvas, jobId) {
@@ -101,6 +113,9 @@ export const state = reactive({
   pendingQuestions: [],
   productionRun: null, // 短剧生产状态机：阶段、验收问题、重试次数
   compacting: false, // 正在压缩上下文（这个阶段也要在界面上可见）
+  // ---------------- 单卡工作台的对话 ----------------
+  // key = `${canvas}:${nodeId}`，值 = { messages:[{role,text}], running, sessionId, error }
+  nodeChats: {},
   nowTick: Date.now(), // 由组件定时刷新，驱动所有"计时器"重绘
 
   // ---------------- 信息 ----------------
@@ -137,8 +152,9 @@ export const flowEdges = computed(() =>
     sourceHandle: edge.source_handle,
     targetHandle: edge.target_handle,
     selected: edge.id === state.selectedEdgeId,
-    // 正交圆角路径比自由贝塞尔曲线更容易追踪，也能显著减少“像跨剧本串线”的错觉。
-    type: "smoothstep",
+    // 收束式贝塞尔：多条上游汇入同一节点时会先并成一股再进卡，视觉上像括号，
+    // 比正交折线更直观地把「这一组资产共同决定这一个镜头」表达出来。
+    type: "default",
   }))
 );
 
@@ -163,11 +179,29 @@ async function loadCanvases() {
   return state.canvases;
 }
 
-async function loadCanvas(name) {
-  if (name) state.canvasName = name;
-  const target = state.canvasName;
-  const data = await getJSON(`/api/canvas?name=${encodeURIComponent(target)}`);
-  state.canvas = {
+/* 轮询是 800ms 一次的全量 GET；如果每次都替换 state.canvas，
+ * 所有卡片都会因为"新对象"而重渲染（视频闪一下、输入框丢焦点）。
+ * 这里做一次浅层结构化 diff：内容没变的节点/边继续复用旧对象，
+ * 只有真正变化的项才换新引用——渲染层因此能跳过没变的卡。 */
+function mergeFlat(prev, next) {
+  if (prev === undefined) return next;
+  return JSON.stringify(prev) === JSON.stringify(next) ? prev : next;
+}
+
+function mergeById(prevList, nextList, key = "id") {
+  const list = Array.isArray(nextList) ? nextList : [];
+  if (!Array.isArray(prevList) || prevList.length !== list.length) return list;
+  const prev = new Map(prevList.map((item) => [item?.[key], item]));
+  const merged = list.map((item) => {
+    const old = prev.get(item?.[key]);
+    if (old && JSON.stringify(old) === JSON.stringify(item)) return old;
+    return item;
+  });
+  return merged.every((item, index) => item === prevList[index]) ? prevList : merged;
+}
+
+function patchCanvas(prev, data) {
+  const next = {
     meta: data.meta || {},
     nodes: data.nodes || [],
     edges: data.edges || [],
@@ -175,6 +209,22 @@ async function loadCanvas(name) {
     topo: data.topo_order || [],
     problems: data.problems || [],
   };
+  if (!prev) return next;
+  return {
+    meta: mergeFlat(prev.meta, next.meta),
+    nodes: mergeById(prev.nodes, next.nodes, "id"),
+    edges: mergeById(prev.edges, next.edges, "id"),
+    spec: mergeFlat(prev.spec, next.spec),
+    topo: mergeFlat(prev.topo, next.topo),
+    problems: mergeFlat(prev.problems, next.problems),
+  };
+}
+
+async function loadCanvas(name) {
+  if (name) state.canvasName = name;
+  const target = state.canvasName;
+  const data = await getJSON(`/api/canvas?name=${encodeURIComponent(target)}`);
+  state.canvas = patchCanvas(state.canvas, data);
   state.canvasName = data.name;
   state.canvasServerRevision = Number(data.revision || 0);
   if (!state.canvases.includes(data.name)) await loadCanvases();
@@ -218,18 +268,71 @@ async function refreshCanvasFromAgent(ev) {
   }, 5200);
 }
 
-async function moveNode({ id, position }) {
+/* 把坐标写回本地权威数据（`state.canvas.nodes`）——这是 P0-3 的关键一步：
+ * 卡片渲染读的是这里的 position，只写服务端 revision 不写坐标，松手就会弹回原位。 */
+function applyNodePosition(id, position) {
+  const target = normalizePosition(position);
+  if (!target) return false;
+  const node = (state.canvas?.nodes || []).find((item) => item.id === id);
+  if (!node) return false;
+  node.position = target;
+  return true;
+}
+
+/** 快照节点当前位置，用于失败回滚。 */
+function snapshotNodePosition(id) {
+  const node = (state.canvas?.nodes || []).find((item) => item.id === id);
+  if (!node) return null;
+  return normalizePosition({ x: node.position?.x ?? 0, y: node.position?.y ?? 0 });
+}
+
+/* 提交单张卡的坐标。乐观更新已由调用方先写进本地，这里只负责"发出去 + 失败处理"：
+ * 409 → 重拉（服务端为准）；其它失败 → 用 before 回滚，避免"看起来存上了其实没存"。 */
+async function commitNodePosition(id, target, before) {
   try {
     const result = await postJSON(`/api/canvas/nodes/${id}/position`, {
       canvas: state.canvasName,
-      x: Math.round(position.x),
-      y: Math.round(position.y),
+      x: target.x,
+      y: target.y,
       revision: state.canvasServerRevision,
     });
     state.canvasServerRevision = Number(result.revision ?? state.canvasServerRevision);
+    return result;
   } catch (error) {
-    throw await refreshAfterCanvasConflict(error);
+    if (error?.code === "canvas_revision_conflict") {
+      // 别人先改了画布：以服务端为准重新拉一次（调用方会提示"位置已刷新"）
+      throw await refreshAfterCanvasConflict(error);
+    }
+    if (before) applyNodePosition(id, before);
+    throw error;
   }
+}
+
+async function moveNode({ id, position }) {
+  const target = normalizePosition(position);
+  if (!target) throw new Error("节点坐标无效");
+  const before = snapshotNodePosition(id);   // 必须在乐观更新之前取，否则回滚成"回滚到落点"
+  applyNodePosition(id, target);             // 乐观更新：松手立刻停在落点，不等服务端往返
+  return commitNodePosition(id, target, before);
+}
+
+/* 多选拖动：先把整组坐标落到本地（避免逐张跳），再逐张提交。
+ * 必须串行：每次提交都会把服务端 revision +1，并发提交必然互相 409。 */
+async function moveNodes({ moves }) {
+  const list = Array.isArray(moves) ? moves.filter((move) => move?.id) : [];
+  if (!list.length) return [];
+  const plan = [];
+  for (const move of list) {
+    const target = normalizePosition(move.position);
+    if (!target) continue;
+    plan.push({ id: move.id, target, before: snapshotNodePosition(move.id) });
+  }
+  for (const item of plan) applyNodePosition(item.id, item.target);   // 整组先落位
+  const results = [];
+  for (const item of plan) {
+    results.push(await commitNodePosition(item.id, item.target, item.before));
+  }
+  return results;
 }
 
 async function updateNode(id, fields) {
@@ -242,6 +345,49 @@ async function updateNode(id, fields) {
     await loadCanvas();
     state.selectedId = id;
     state.changedNodeIds = [id];
+    state.canvasRevision += 1;
+    return result;
+  } catch (error) {
+    throw await refreshAfterCanvasConflict(error);
+  }
+}
+
+/* 人自己写/改提示词正文。走 studio 的路由而不是画布的 update 接口，
+ * 因为它会把正文写进 `assets/<node_id>/content.md` 并打上 `rendered_by="human"`，
+ * 服务端之后就不再覆盖这段文字 —— 这就是"人改过的东西 Agent 不许动"的最小实现。 */
+async function savePrompt(nodeId, prompt) {
+  try {
+    const result = await postJSON(
+      `/api/canvas/nodes/${encodeURIComponent(nodeId)}/text`,
+      { canvas: state.canvasName, text: prompt, revision: state.canvasServerRevision },
+    );
+    await loadCanvas();
+    state.selectedId = nodeId;
+    state.changedNodeIds = [nodeId];
+    state.canvasRevision += 1;
+    return result;
+  } catch (error) {
+    throw await refreshAfterCanvasConflict(error);
+  }
+}
+
+/* 把某一版历史设为当前版（takes 存历史，outputs 存当前指针）。
+ *
+ * 画布里的生成节点（image_gen / video_gen）用 /api/canvas/nodes/{id}/take；
+ * 制片台那边仍然用 /api/studio/segments/{id}/take。两边改的是同一份 node.data.takes，
+ * 所以画布上切完版，制片台的版本条也跟着变。
+ */
+async function selectTake(nodeId, takeId) {
+  try {
+    const result = await postJSON(`/api/canvas/nodes/${encodeURIComponent(nodeId)}/take`, {
+      canvas: state.canvasName,
+      take_id: takeId,
+      revision: state.canvasServerRevision,
+    });
+    await loadCanvas();
+    // 不动 state.selectedId：切版本时抽屉要保持打开，让人能接着对比下一版；
+    // 关掉 selectedId 的 watch 会把历史抽屉自己收起来。
+    state.changedNodeIds = [nodeId];
     state.canvasRevision += 1;
     return result;
   } catch (error) {
@@ -281,6 +427,26 @@ async function deleteEdge(edgeId) {
   }
 }
 
+/* 删除节点：服务端级联删除它的入边/出边，并校验 revision。
+ * 删完必须重新 loadCanvas：边和上游的"就绪状态"都会变，不能只删本地节点。 */
+async function deleteNode(nodeId) {
+  try {
+    const result = await deleteJSON(
+      `/api/canvas/nodes/${encodeURIComponent(nodeId)}` +
+        `?canvas=${encodeURIComponent(state.canvasName)}` +
+        `&revision=${encodeURIComponent(state.canvasServerRevision)}`,
+    );
+    state.canvasServerRevision = Number(result.revision ?? state.canvasServerRevision);
+    if (state.selectedId === nodeId) state.selectedId = null;
+    state.changedNodeIds = [nodeId];
+    await loadCanvas();
+    state.changedNodeIds = [nodeId];
+    return result;
+  } catch (error) {
+    throw await refreshAfterCanvasConflict(error);
+  }
+}
+
 async function arrangeCanvas() {
   try {
     const res = await postJSON("/api/canvas/arrange", {
@@ -294,20 +460,27 @@ async function arrangeCanvas() {
   }
 }
 
-async function runCanvas({ approved = false } = {}) {
+/* `only` = 只跑这几张生成卡（单卡重跑 / 选区执行）。
+ * 服务端 `RunCanvasRequest.only` 早就支持，并且审批哈希会把 only 一起算进去，
+ * 所以这里必须**同一份 payload** 先申请审批再执行，否则哈希失配会被拒。 */
+async function runCanvas({ approved = false, only = [] } = {}) {
   state.canvasBusy = true;
   try {
+    // 画幅/画质以项目设置为准（后端还会叠加「节点设置 > 分镜镜头时长」），
+    // 前端不再写死 16:9 —— 竖屏短剧必须能直接出 9:16。
+    const project = state.canvas?.meta?.project || {};
     const payload = {
       canvas: state.canvasName,
       approved,
       provider: state.mediaProvider,
       model: state.mediaModel,
       duration: 5,
-      resolution: "720p",
-      ratio: "16:9",
+      resolution: String(project.quality || "720p").toLowerCase(),
+      ratio: project.aspect_ratio || "16:9",
       generate_audio: false,
       revision: state.canvasServerRevision,
       production_run_id: state.productionRun?.id || null,
+      ...(only.length ? { only } : {}),
     };
     if (approved) {
       const approval = await postJSON("/api/canvas/approvals", payload);
@@ -352,6 +525,20 @@ async function waitForMediaJob(jobId, total = 0) {
     rememberMediaJob(state.canvasName, null);
     if (job.status === "succeeded" && job.result) {
       state.runResult = { ...job.result, job_id: jobId, status: job.status };
+      await refreshProductionRun();
+      return state.runResult;
+    }
+    if (job.status === "discarded") {
+      // 产物被新一代任务取代、没有写回画布：不是失败，别提示用户"重试"。
+      state.runResult = {
+        ...job.result,
+        job_id: jobId,
+        status: job.status,
+        discarded: true,
+        error:
+          job.result?.error ||
+          "本次结果已过期，未写入画布（节点已有更新一代任务）",
+      };
       await refreshProductionRun();
       return state.runResult;
     }
@@ -914,6 +1101,86 @@ function settleFeed() {
   }
 }
 
+/* ---------------- 单卡工作台：只服务一张卡的对话 ----------------
+ *
+ * 和整图画布 Agent 共用 /api/agent，但有两处刻意的不同：
+ *   1. 请求带 focus_node —— 服务端只给「读画布 / 改节点 / 写文字 / 导出」这几个工具，
+ *      新建、删除、连线、改故事板一律不给，所以它想改别处也没有工具可用。
+ *   2. 每个节点一条独立会话 —— 不去掺在画布会话的长历史里（那边动不动就几万 token，
+ *      还会触发上下文压缩），单个镜头的来回对话应该自己是一段干净的上下文。
+ */
+function nodeChat(key) {
+  if (!state.nodeChats[key]) {
+    state.nodeChats[key] = { messages: [], running: false, sessionId: nodeBindings[key] || "", error: "" };
+  }
+  return state.nodeChats[key];
+}
+
+async function askNode(node, prompt) {
+  const text = String(prompt || "").trim();
+  if (!text || !node?.id) return;
+  const key = `${state.canvasName}:${node.id}`;
+  const chat = nodeChat(key);
+  if (chat.running) return;
+
+  chat.error = "";
+  chat.messages.push({ role: "user", text });
+  const reply = reactive({ role: "assistant", text: "", streaming: true });
+  chat.messages.push(reply);
+  chat.running = true;
+
+  const controller = new AbortController();
+  try {
+    if (!chat.sessionId) {
+      // 第一次问这张卡：给它开一条独立会话（标题带节点名，侧边栏里认得出来）
+      try {
+        const detail = await postJSON("/api/sessions", {
+          canvas: state.canvasName,
+          title: `节点工作台：${node.label || node.id}`,
+        });
+        chat.sessionId = detail.id;
+        rememberNodeSession(key, detail.id);
+      } catch {
+        chat.sessionId = state.sessionId || ""; // 开不出来就退回画布会话
+      }
+    }
+    await streamNDJSON(
+      "/api/agent",
+      {
+        prompt: text,
+        session_id: chat.sessionId || null,
+        canvas: state.canvasName,
+        media_policy: "plan_only",
+        focus_node: node.id,
+      },
+      (ev) => {
+        if (ev.type === "message_update") reply.text += ev.delta || "";
+        else if (ev.type === "tool_execution_end" && ev.canvas) loadCanvas().catch(() => {});
+      },
+      (err) => {
+        chat.error = err.message || String(err);
+        if (!reply.text) reply.text = `出错：${chat.error}`;
+      },
+      controller.signal,
+      {
+        onConnection: ({ sessionId }) => {
+          if (sessionId && sessionId !== chat.sessionId) {
+            chat.sessionId = sessionId;
+            rememberNodeSession(key, sessionId);
+          }
+        },
+      },
+    );
+  } catch (err) {
+    chat.error = err.message || String(err);
+    if (!reply.text) reply.text = `出错：${chat.error}`;
+  } finally {
+    reply.streaming = false;
+    chat.running = false;
+    await loadCanvas().catch(() => {});
+  }
+}
+
 async function send(prompt, options = {}) {
   const text = String(prompt || "").trim();
   if (!text) return;
@@ -1101,19 +1368,27 @@ async function stop() {
   }
 }
 
-async function prepareGenerationReview() {
+/* `only` = 这一次要跑的生成卡。审批面板按它过滤 jobs；确认后必须用同一批 id 走
+ * approvals → run（服务端审批哈希会算 only，换一批就会被拒）。 */
+async function prepareGenerationReview({ only = [] } = {}) {
   const plan = await getJSON(`/api/canvas/generation-plan?name=${encodeURIComponent(state.canvasName)}`);
-  state.generationReview = plan.total ? {
+  const target = Array.isArray(only) ? only.filter(Boolean) : [];
+  const provider = state.mediaProviders.find((item) => item.id === state.mediaProvider);
+  // 单卡/选区即使不在批量计划里（如 tts_gen）也要弹审批：花钱的事必须过一次确认。
+  state.generationReview = plan.total || target.length ? {
     ...plan,
+    only: target,
     provider: state.mediaProvider,
     model: state.mediaModel,
+    mock: Boolean(provider?.mock),
     requestedAt: Date.now(),
   } : null;
   return plan;
 }
 
 async function approveGeneration() {
-  return runCanvas({ approved: true });
+  const only = Array.isArray(state.generationReview?.only) ? state.generationReview.only : [];
+  return runCanvas({ approved: true, only });
 }
 
 async function prepareCompositionReview() {
@@ -1268,6 +1543,41 @@ async function switchCanvas(name) {
   restoreMediaJobForCanvas();
 }
 
+async function renameCanvas(name, title) {
+  if (state.running || state.canvasBusy) throw new Error("运行期间不能重命名项目");
+  const target = String(name || state.canvasName);
+  const isCurrent = target === state.canvasName;
+  const revision = isCurrent
+    ? state.canvasServerRevision
+    : Number((await getJSON(`/api/canvas?name=${encodeURIComponent(target)}`)).revision || 0);
+  const res = await postJSON(`/api/canvases/${encodeURIComponent(target)}/rename`, {
+    title: String(title || "").trim(),
+    revision,
+  });
+  await loadCanvases();
+  if (target === state.canvasName) await loadCanvas(target);
+  return res;
+}
+
+async function deleteCanvas(name) {
+  if (state.running || state.canvasBusy) throw new Error("运行期间不能删除项目");
+  const target = String(name || "");
+  if (!target) return null;
+  const wasCurrent = target === state.canvasName;
+  const revision = wasCurrent
+    ? state.canvasServerRevision
+    : Number((await getJSON(`/api/canvas?name=${encodeURIComponent(target)}`)).revision || 0);
+  const res = await deleteJSON(
+    `/api/canvases/${encodeURIComponent(target)}?revision=${encodeURIComponent(revision)}`,
+  );
+  await loadCanvases();
+  if (wasCurrent) {
+    const next = state.canvases.find((item) => item !== target) || "main";
+    await switchCanvas(next);
+  }
+  return res;
+}
+
 /* ==================== 信息 ==================== */
 
 async function refreshStats() {
@@ -1360,8 +1670,9 @@ async function loadTeams() {
 export async function bootstrap() {
   await Promise.all([loadTools(), loadSkills(), loadTeams(), loadMediaProviders()]);
   await loadCanvases();
-  // 默认视图就是画布，所以必须主动拉一次数据（不是等切换才加载）
-  await loadCanvas(state.canvases[0] || "main");
+  // 画布已降级为结构视图：只有从制片台「结构视图」进来时才有指定画布，
+  // 否则退回第一个画布（保留旧行为，方便直接打开 /?demo=1 调试）。
+  await loadCanvas(state.canvasName || state.canvases[0] || "main");
   await restoreSessionForCanvas();
   restoreMediaJobForCanvas();
 }
@@ -1370,9 +1681,16 @@ export const actions = {
   loadCanvases,
   loadCanvas,
   moveNode,
+  moveNodes,
+  applyNodePosition,
   updateNode,
+  savePrompt,
+  selectTake,
+  askNode,
+  nodeChat,
   connectNodes,
   deleteEdge,
+  deleteNode,
   createNode,
   uploadMedia,
   arrangeCanvas,
@@ -1398,6 +1716,8 @@ export const actions = {
   mutateMessage,
   restoreSessionForCanvas,
   switchCanvas,
+  renameCanvas,
+  deleteCanvas,
   refreshStats,
   refreshProductionRun,
   refreshSubagents,

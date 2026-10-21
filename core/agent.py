@@ -163,6 +163,18 @@ class Agent:
 
             message = await self._request_model(turn)
             self.last_finish_reason = message.finish_reason
+            if message.finish_reason == "length" and message.tool_calls:
+                # 输出被 max_tokens 截断时，模型往往正停在半个 tool_call 上。这些调用不会执行，
+                # 若照原样写进历史，下一轮请求就带着悬空的 tool_calls —— provider 可能直接 400，
+                # 也可能只回一条空消息（线上症状：点「继续」0.5s 空回复再报错）。
+                dropped = len(message.tool_calls)
+                message.tool_calls = []
+                limit = getattr(getattr(self.llm, "settings", None), "max_output_tokens", 8192)
+                note = (
+                    f"（上一轮输出达到 {limit} token 上限被截断，"
+                    f"{dropped} 个未执行的工具调用已丢弃。请把这一步拆成更小的批次再试。）"
+                )
+                message.content = f"{message.content}\n\n{note}".strip() if message.content else note
             if message.content:
                 final = message.content
             assistant_parent_id = self.session.current_id
@@ -171,10 +183,14 @@ class Agent:
 
             if message.finish_reason == "length":
                 self.last_status = "limited"
+                limit = getattr(getattr(self.llm, "settings", None), "max_output_tokens", 8192)
                 self._emit(
                     "limited",
                     reason="length",
-                    message="模型输出达到长度限制，当前结果可能不完整，请继续生成或缩小任务范围。",
+                    message=(
+                        f"模型这一轮写到了 {limit} token 的输出上限被截断，当前结果不完整。"
+                        "把这一步拆成更小的批次（例如一次只写几个分镜）再继续，比直接续跑更稳。"
+                    ),
                 )
                 self._emit("turn_end", turn=turn)
                 await asyncio.sleep(0)
@@ -197,7 +213,15 @@ class Agent:
                 else:
                     self.last_status = "error"
                     self.last_finish_reason = "empty_response"
-                    self._emit("error", message="模型未返回可交付正文，任务没有完成。")
+                    reason = message.finish_reason or "unknown"
+                    self._emit(
+                        "error",
+                        message=(
+                            f"模型这次返回了空内容（finish_reason={reason}），任务没有完成。"
+                            "常见原因：上一条输出被截断后留下的半截工具调用、或单轮请求过大；"
+                            "直接再发一次「继续」即可，若仍是空回复就新建会话。"
+                        ),
+                    )
                 break
 
             calls, errors = await self._run_tools(message, turn)
@@ -460,8 +484,8 @@ def build_system_prompt(
         "- 工具报错时先看错误信息，再决定是否换参数重试",
         "- 所有路径都是工作区内的相对路径",
         "- 对话说明保持简洁；剧本、对白、分镜、正式生成提示词和技能要求的作品成果必须完整，不得为了简洁压成梗概",
-        "- 判断某个技能与任务相关后，先用 read_skill 读正文再动手；references 仅按正文路由和当前需要读取",
-        "- 用户要求制作、生成、继续或修改视频作品时，优先读取 workflow，并以它作为唯一制作主流程；不要再叠加 legacy 的 drama_script/storyboard/asset_design/shot_prompt 形成冲突模板",
+        "- 技能是分层的：`workflow` 管**流程**（从哪开始、顺序、门禁、确认与恢复，正文是一张路由表，按阶段指到 references 分册）；`drama_craft` 管**工艺**（首帧八段式、引用与文字锁、分镜信息块、表演与抛光细节）。两者配合使用，不是二选一；判断相关后先用 read_skill 读正文再动手，references 只读当前阶段需要的那一册",
+        "- 用户要求制作、生成、继续或修改视频作品时，先读 workflow 判定处在哪个阶段，再按它指的路由读对应分册；写提示词、首帧、引用、文字锁、表演、抛光时读 drama_craft。禁止引用或叠加已删除的 legacy 技能 asset_design/drama_script/storyboard/shot_prompt",
         "- 每次收到新的故事/短剧创意，必须先调用 identify_story 做剧本识别，再对它返回的画布调用 get_canvas；不得默认把新创意追加到当前画布",
         "- 只有用户明确表示续写、修改或继续某个已有故事时才复用旧画布；用户说另一段、新故事或内容核心人物/事件不同，就建立独立剧本画布",
         "- 用户只有一句创意时，先补成可审阅的完整剧本；已有定稿剧情且目标是视频制作时，按 workflow 锁存 Seedance 路由和后续阶段",

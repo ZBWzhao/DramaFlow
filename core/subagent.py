@@ -29,6 +29,7 @@ from .events import EventBus
 from .llm import LLM, Usage
 from .plugin import ToolDefinition, define_tool, tool_result
 from .session import Session
+from .skills import SkillEntry, discover_skills
 
 # 对应 Toonflow subAgent.ts 的 16000：子 Agent 的结论超过这个长度就截断，
 # 并提示父 Agent 改去读工作区产物（而不是把超长文本灌进父的上下文）。
@@ -114,11 +115,34 @@ class DelegationRecord:
 class DelegationManager:
     """委派管理器：持有父 Agent 的引用，管理子会话与两条通道。"""
 
-    def __init__(self, parent: Agent, llm: LLM, cwd: str) -> None:
+    def __init__(
+        self,
+        parent: Agent,
+        llm: LLM,
+        cwd: str,
+        skills: list[SkillEntry] | None = None,
+    ) -> None:
         self.parent = parent
         self.llm = llm
         self.cwd = cwd
         self.registry: dict[str, DelegationRecord] = {}
+        # 技能清单（只有名 + 描述 + 路径，正文仍要 read_skill 按需读）。
+        # 子 Agent 以前拿不到它：于是"子 Agent 的专业性"只剩角色 md，
+        # 角色 md 一过期（例如仍写旧 6 字段）就与 skills / 校验器三头打架。
+        if skills is None:
+            discovered, errors = discover_skills()
+            self.skills: list[SkillEntry] = discovered
+            self.skill_errors: list[str] = errors
+        else:
+            self.skills = list(skills)
+            self.skill_errors = []
+
+    def _skills_for(self, names: list[str] | None) -> list[SkillEntry]:
+        """按角色白名单取技能子集；不给名字 = 全部（向后兼容）。"""
+        wanted = {str(name).strip() for name in (names or []) if str(name).strip()}
+        if not wanted:
+            return list(self.skills)
+        return [entry for entry in self.skills if entry.name in wanted]
 
     def mark_question_status(self, name: str, waiting: bool, question: dict[str, Any]) -> None:
         """结构化提问期间把子 Agent 暴露为 inputRequired，回答后恢复 running。"""
@@ -131,6 +155,42 @@ class DelegationManager:
     # ------------------------------------------------------------------
     # 父 → 子：subagent 工具
     # ------------------------------------------------------------------
+    def _ensure_skill_reader(
+        self, tools: list[ToolDefinition], skills: list[SkillEntry]
+    ) -> list[ToolDefinition]:
+        """带技能的子 Agent 必须能读正文：工具表里没有 read_skill 就补一个。
+
+        团队成员的 tools 白名单是手写的，很容易漏；漏了就会出现
+        「角色 md 让它 read_skill，它却没有这个工具」的哑火。
+        """
+        if not skills or any(tool.name == "read_skill" for tool in tools):
+            return tools
+        reader = getattr(self, "_available", {}).get("read_skill")
+        if reader is None:  # 父工具还没注册（demo / 手动工具表）时自建一个
+            from .skills import build_skill_tools
+
+            reader = build_skill_tools()[0]
+        return [*tools, reader]
+
+    def _child_system_prompt(
+        self,
+        current: str,
+        child_tools: list[ToolDefinition],
+        skills: list[SkillEntry],
+        role_prompt: str | None,
+    ) -> str:
+        """子会话的 system prompt：清单 + 角色段。已存在且不陈旧就原样复用。
+
+        旧会话落盘时没有 `<available_skills>` 段 —— 光靠 `if not current`
+        会让升级后的团队继续用旧提示词跑，所以带技能时再做一次陈旧判定。
+        """
+        stale = bool(skills) and "<available_skills>" not in (current or "")
+        if current and not stale:
+            return current
+        base = build_system_prompt(self.cwd, child_tools, skills)
+        # 团队里的成员会额外拿到一段角色提示词（写在 md 里，改提示词不用改代码）
+        return f"{base}\n\n<role>\n{role_prompt}\n</role>" if role_prompt else base
+
     def parent_tool(self, available_tools: list[ToolDefinition]) -> ToolDefinition:
         self._available = {t.name: t for t in available_tools}
 
@@ -153,7 +213,11 @@ class DelegationManager:
                          "适合调研、统计、审阅这类能独立收尾的子任务；完成后你会拿到它的结论与本次用量。"),
             args_model=SubAgentArgs,
             execute=_execute,
-            prompt_guidelines=["子任务要用 subagent 委派，不要自己硬做", "同名子 Agent 会复用会话，适合多轮追问"],
+            prompt_guidelines=[
+                "子任务要用 subagent 委派，不要自己硬做",
+                "同名子 Agent 会复用会话，适合多轮追问",
+                "子 Agent 也能读技能（read_skill）：把「按哪个技能做」写进 task，不要把整段工艺细节抄进 task",
+            ],
         )
 
     # ------------------------------------------------------------------
@@ -241,6 +305,7 @@ class DelegationManager:
         task: str,
         tool_names: list[str] | None = None,
         role_prompt: str | None = None,
+        skill_names: list[str] | None = None,
     ) -> DelegationResult:
         tool_names = tool_names or list(DEFAULT_SUB_TOOLS)
         allowed = [self._available[n] for n in tool_names if n in getattr(self, "_available", {})]
@@ -263,14 +328,16 @@ class DelegationManager:
             return self._report_tool(rec, child_bus)
 
         child_tools = allowed + [reporter_factory(record)]
+        # 子 Agent 也要能读技能正文：清单进 system prompt，正文靠 read_skill。
+        skills = self._skills_for(skill_names)
+        child_tools = self._ensure_skill_reader(child_tools, skills)
         child_ctx = self.parent.context.derive(
             config={**getattr(self.parent.context, "config", {}), "agent_name": name},
             tool_names={tool.name for tool in child_tools},
         )
-        if not record.session.system_prompt:
-            base = build_system_prompt(self.cwd, child_tools)
-            # 团队里的成员会额外拿到一段角色提示词（写在 md 里，改提示词不用改代码）
-            record.session.system_prompt = f"{base}\n\n<role>\n{role_prompt}\n</role>" if role_prompt else base
+        record.session.system_prompt = self._child_system_prompt(
+            record.session.system_prompt, child_tools, skills, role_prompt
+        )
 
         child = Agent(
             llm=self.llm,

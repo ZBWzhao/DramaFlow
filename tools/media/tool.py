@@ -12,11 +12,13 @@
 from __future__ import annotations
 
 import asyncio
+import uuid
 from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
-from core.canvas import Canvas, CanvasError
+from core.canvas import Canvas, CanvasError, build_media_request
+from core.canvas_repository import CanvasConflictError, mutate_canvas_with_retry
 from core.context import CapabilityUnavailable, ToolContext
 from core.plugin import ToolResult, define_tool, tool_result
 
@@ -68,6 +70,43 @@ def _changed(canvas: Canvas) -> dict[str, Any]:
     }
 
 
+def _pick_model(media: Any, kind: str, requested: str = "") -> tuple[str, str]:
+    """返回 ``(model, provider)``：调用方指定优先，否则取模型表里同类第一个。
+
+    Agent 侧没有审批载荷，也就没有"用户选的 provider/model"；这里退回
+    「当前 Provider 的第一个同类模型」，而不是硬编码 ``mock-video-v1``。
+    """
+    if requested:
+        return requested, ""
+    try:
+        models = media.list_models()
+    except Exception:  # noqa: BLE001
+        return "", ""
+    kind_models = [item for item in models if item.get("kind") == kind and item.get("id")]
+    # 优先当前激活的 Provider：能力适配器持有 registry（或替身 provider）时能看到 active。
+    active = str(getattr(getattr(media, "registry", None), "active", "") or "")
+    if active:
+        for item in kind_models:
+            if str(item.get("provider") or "") == active:
+                return str(item["id"]), active
+    if kind_models:
+        item = kind_models[0]
+        return str(item["id"]), str(item.get("provider") or "")
+    return "", ""
+
+
+async def _mark_node(repository: Any, canvas_name: str, node_id: str, status: str) -> None:
+    """把节点状态写成 generating/error：标记是尽力而为，不能盖掉主流程的结论。"""
+    def mutate(board: Canvas) -> bool:
+        board.update_node(node_id, status=status)
+        return True
+
+    try:
+        await mutate_canvas_with_retry(repository, canvas_name, mutate)
+    except (CanvasError, CanvasConflictError):
+        pass
+
+
 def build_tools(ctx: ToolContext) -> list[Any]:
     default_canvas = str(ctx.config.get("default_canvas") or DEFAULT_CANVAS)
 
@@ -99,44 +138,64 @@ def build_tools(ctx: ToolContext) -> list[Any]:
         except CapabilityUnavailable as exc:
             return tool_result(f"媒体能力不可用：{exc}", is_error=True)
 
-        request: dict[str, Any] = {"prompt": args.prompt}
-        if args.model:
-            request["model"] = args.model
-        if args.size:
-            request["size"] = args.size
-        if args.kind == "video":
-            request["duration"] = args.duration
+        repository = context.require_canvas_repository()
+        canvas_name = args.canvas or default_canvas
+        model, provider = _pick_model(media, args.kind, args.model)
 
-        # 若指定了画布节点，先把状态标成 generating（前端会显示"生成中"）
-        canvas = None
-        node = None
+        # 若指定了画布节点：参数优先取节点自己的口径（与 Worker 同一套
+        # generation_params），否则节点设置会被 Agent 的默认值悄悄覆盖。
+        params: dict[str, Any] = {}
         if args.node_id:
-            repository = context.require_canvas_repository()
-            canvas = await repository.load(args.canvas or default_canvas)
+            canvas = await repository.load(canvas_name)
             try:
-                node = canvas.update_node(args.node_id, status="generating")
+                canvas.require(args.node_id)
             except CanvasError as exc:
                 return tool_result(f"生成失败：{exc}", is_error=True)
-            await repository.save(canvas)
+            params = canvas.generation_params(canvas.require(args.node_id))
+            await _mark_node(repository, canvas_name, args.node_id, "generating")
+
+        request: dict[str, Any] = {
+            "prompt": args.prompt,
+            "model": model,
+            "size": args.size or params.get("size") or ("1024x576" if args.kind == "image" else "1280x720"),
+            "generate_audio": False,
+            "references": [],
+        }
+        if provider:
+            request["provider"] = provider
+        for key in ("ratio", "resolution"):
+            if params.get(key):
+                request[key] = params[key]
+        if args.kind == "video":
+            request["duration"] = params.get("duration") or args.duration
 
         try:
             result = await asyncio.to_thread(media.generate, args.kind, request)
         except Exception as exc:  # noqa: BLE001
-            if canvas is not None and node is not None:
-                canvas.update_node(node.id, status="error")
-                await repository.save(canvas)
+            if args.node_id:
+                await _mark_node(repository, canvas_name, args.node_id, "error")
             return tool_result(f"生成失败：{type(exc).__name__}: {exc}", is_error=True)
 
-        # 结果写进节点 outputs：前端据此显示缩略图，下游节点也能继续引用
-        if canvas is not None and node is not None:
-            port = "image" if args.kind == "image" else "video"
-            node.outputs[port] = {
-                "data_type": port.upper(),
-                "value": {"path": result.path, "mime": result.mime, "mock": result.mock},
-            }
-            node.status = "done"
-            await repository.save(canvas)
-            context.log(f"{node.label} 生成完成 → {result.path}")
+        if args.node_id:
+            take_id = f"take_{uuid.uuid4().hex[:12]}"
+
+            def apply_result(board: Canvas) -> bool:
+                board.record_generated_media(
+                    args.node_id,
+                    kind=args.kind,
+                    path=result.path,
+                    mime=result.mime,
+                    provider=result.provider or provider,
+                    mock=result.mock,
+                    model=request["model"],
+                    duration_s=float(request.get("duration") or 0) or None,
+                    take_id=take_id,
+                    mode="canvas",
+                )
+                return True
+
+            await mutate_canvas_with_retry(repository, canvas_name, apply_result)
+            context.log(f"{args.node_id} 生成完成 → {result.path}")
 
         head = "占位图" if result.mock else "成图"
         return tool_result(
@@ -146,7 +205,7 @@ def build_tools(ctx: ToolContext) -> list[Any]:
             media_path=result.path,
             mock=result.mock,
             node_id=args.node_id or None,
-            canvas_changed=(args.canvas or default_canvas) if args.node_id else None,
+            canvas_changed=canvas_name if args.node_id else None,
         )
 
     async def _run_canvas(args: RunCanvasArgs, context: ToolContext) -> ToolResult:
@@ -163,14 +222,16 @@ def build_tools(ctx: ToolContext) -> list[Any]:
             return tool_result(f"媒体能力不可用：{exc}", is_error=True)
 
         repository = context.require_canvas_repository()
-        canvas = await repository.load(args.canvas or default_canvas)
+        canvas_name = args.canvas or default_canvas
+        canvas = await repository.load(canvas_name)
         jobs = canvas.generation_jobs()
         if args.only:
-            jobs = [job for job in jobs if job["node_id"] in set(args.only)]
+            only = set(args.only)
+            jobs = [job for job in jobs if job["node_id"] in only]
         if not jobs:
             return tool_result(
                 "没有可执行的生成节点。先建 image_gen / video_gen 节点，"
-                "并把 prompt 节点的 prompt 端口连到它的 prompt 端口。",
+                "再在卡片里填提示词，或把提示词节点的 prompt 端口连到它的 prompt 端口。",
                 is_error=True,
             )
 
@@ -178,39 +239,47 @@ def build_tools(ctx: ToolContext) -> list[Any]:
         done = 0
         for job in jobs:
             if not job["ready"]:
-                lines.append(f"⊘ {job['label']}：没有输入提示词，跳过（检查 prompt 端口连线）")
+                reason = job.get("ready_reason") or "没有可用提示词"
+                lines.append(f"⊘ {job['label']}：{reason}，跳过")
                 continue
-            canvas.update_node(job["node_id"], status="generating")
-            await repository.save(canvas)
+            # 参数与请求形状都走共享构造器：节点设置（画幅/时长/画质）与 Worker 完全同源。
+            model, provider = _pick_model(media, job["kind"], args.model)
+            request = build_media_request(job, provider=provider, model=model)
+            if args.size:
+                request["size"] = args.size  # 显式参数优先，兼容老调用方
+            await _mark_node(repository, canvas_name, job["node_id"], "generating")
             try:
-                result = await asyncio.to_thread(
-                    media.generate,
-                    job["kind"], {
-                        "prompt": job["prompt"],
-                        "model": args.model or f"mock-{job['kind']}-v1",
-                        "size": args.size or ("1024x576" if job["kind"] == "image" else "1280x720"),
-                        "references": [
-                            {"path": ref["path"], "type": ref["type"], "mime_type": ref.get("mime_type", "")}
-                            for ref in job.get("refs", []) if ref.get("path")
-                        ],
-                    }
-                )
+                result = await asyncio.to_thread(media.generate, job["kind"], request)
             except Exception as exc:  # noqa: BLE001
-                canvas.update_node(job["node_id"], status="error")
-                await repository.save(canvas)
+                await _mark_node(repository, canvas_name, job["node_id"], "error")
                 lines.append(f"✗ {job['label']}：{type(exc).__name__}: {exc}")
                 continue
-            port = "image" if job["kind"] == "image" else "video"
-            node = canvas.require(job["node_id"])
-            node.outputs[port] = {
-                "data_type": port.upper(),
-                "value": {"path": result.path, "mime": result.mime, "mock": result.mock},
-            }
-            canvas.update_node(job["node_id"], status="done")
-            await repository.save(canvas)
+            take_id = f"take_{uuid.uuid4().hex[:12]}"
+
+            def apply_result(board: Canvas) -> bool:
+                board.record_generated_media(
+                    job["node_id"],
+                    kind=job["kind"],
+                    path=result.path,
+                    mime=result.mime,
+                    provider=result.provider or provider,
+                    mock=result.mock,
+                    model=request["model"],
+                    duration_s=float(request.get("duration") or 0) or None,
+                    take_id=take_id,
+                    mode="canvas",
+                )
+                return True
+
+            try:
+                await mutate_canvas_with_retry(repository, canvas_name, apply_result)
+            except CanvasError as exc:
+                lines.append(f"✗ {job['label']}：写回画布失败（{exc}）")
+                continue
             done += 1
             lines.append(f"✓ {job['label']}（{job['kind']}，提示词 {job['prompt_chars']} 字）→ {result.path}")
 
+        canvas = await repository.load(canvas_name)  # 重读最新版：并发写者可能改过节点
         context.log(f"画布生成：{done}/{len(jobs)} 个节点完成")
         return tool_result(
             f"按拓扑序执行 {len(jobs)} 个生成节点，成功 {done} 个：\n" + "\n".join(lines),

@@ -128,6 +128,7 @@ class ApprovalStore(Protocol):
     async def start(self) -> None: ...
     async def create(self, state: ApprovalState) -> None: ...
     async def consume(self, approval_id: str, scope: str, args_hash: str) -> ApprovalState: ...
+    async def release(self, approval_id: str) -> bool: ...
     async def close(self) -> None: ...
 
 
@@ -162,6 +163,21 @@ class InMemoryApprovalStore:
             state.status = "consumed"
             state.used_at = time.time()
             return ApprovalState(**asdict(state))
+
+    async def release(self, approval_id: str) -> bool:
+        """把"已消费、但下游提交失败"的审批退回 pending，允许同一份审批重试。
+
+        只回退 consumed；pending / expired / 不存在都是幂等空操作（返回 False）。
+        这是 P0-8 的补偿点：审批作废与任务入队不在同一事务里，入队失败后必须
+        把审批还回去，否则用户既没生成、也无法用同一份审批重试。
+        """
+        async with self._lock:
+            state = self._items.get(approval_id)
+            if state is None or state.status != "consumed":
+                return False
+            state.status = "pending"
+            state.used_at = None
+            return True
 
     async def close(self) -> None:
         return None
@@ -280,6 +296,12 @@ class RedisApprovalStore:
     redis.call('HSET', KEYS[1], 'status', 'consumed', 'used_at', ARGV[1])
     return 1
     """
+    _RELEASE = """
+    if redis.call('EXISTS', KEYS[1]) == 0 then return -1 end
+    if redis.call('HGET', KEYS[1], 'status') ~= 'consumed' then return 0 end
+    redis.call('HSET', KEYS[1], 'status', 'pending', 'used_at', '')
+    return 1
+    """
 
     def __init__(self, url: str, prefix: str = "dramaflow") -> None:
         self.url, self.prefix, self._redis = url, prefix.rstrip(":"), None
@@ -321,6 +343,12 @@ class RedisApprovalStore:
             raise ValueError("执行参数与用户审批的参数不一致")
         values = await self._client().hgetall(self._key(approval_id))
         return _approval_from_mapping(values)
+
+    async def release(self, approval_id: str) -> bool:
+        code = int(await self._client().eval(self._RELEASE, 1, self._key(approval_id)))
+        if code == -1:
+            return False
+        return code > 0
 
     async def close(self) -> None:
         if self._redis is not None:
@@ -478,6 +506,16 @@ class PostgresApprovalStore:
         if state is None:
             raise KeyError("审批不存在")
         return state
+
+    async def release(self, approval_id: str) -> bool:
+        """补偿点：仅回退 consumed → pending，其余状态幂等不动。"""
+        row = await self.database.client().fetchrow(
+            """UPDATE approval_requests SET status='pending', used_at=NULL
+               WHERE approval_id=$1 AND status='consumed'
+               RETURNING approval_id""",
+            approval_id,
+        )
+        return row is not None
 
     async def close(self) -> None:
         await self.database.close()

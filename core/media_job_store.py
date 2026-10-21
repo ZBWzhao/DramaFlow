@@ -1,4 +1,13 @@
-"""长耗时媒体任务的队列、租约与 Worker。"""
+"""长耗时媒体任务的队列、租约与 Worker。
+
+任务终态语义（前端与运维都依赖这四个状态，改动前先看这里）：
+
+- ``succeeded``：执行完成，且结果**全部**写回了画布；
+- ``failed``：执行完成，但有节点的生成/写回真的失败（可重试、可换 provider）；
+- ``discarded``：执行完成，但产物被新一代任务取代而整份丢弃（Provider 已扣费，
+  不能算成功，也不该让用户重试同一计划）；
+- ``unknown``：Worker 失联/超时，远端是否执行不确定，禁止自动重试。
+"""
 
 from __future__ import annotations
 
@@ -63,7 +72,10 @@ class MediaJobStore(Protocol):
     async def enqueue(self, job: MediaJob) -> tuple[MediaJob, bool]: ...
     async def claim(self, worker_id: str, lease_seconds: int) -> MediaJob | None: ...
     async def heartbeat(self, job_id: str, worker_id: str, lease_seconds: int) -> bool: ...
-    async def complete(self, job_id: str, worker_id: str, result: dict[str, Any], *, failed: bool = False) -> None: ...
+    async def complete(
+        self, job_id: str, worker_id: str, result: dict[str, Any], *,
+        failed: bool = False, discarded: bool = False,
+    ) -> None: ...
     async def mark_unknown(self, job_id: str, worker_id: str, error: str) -> None: ...
     async def requeue_unknown(self, job_id: str) -> MediaJob: ...
     async def get(self, job_id: str) -> MediaJob | None: ...
@@ -121,12 +133,20 @@ class InMemoryMediaJobStore:
             state.updated_at = time.time()
             return True
 
-    async def complete(self, job_id: str, worker_id: str, result: dict[str, Any], *, failed: bool = False) -> None:
+    async def complete(
+        self, job_id: str, worker_id: str, result: dict[str, Any], *,
+        failed: bool = False, discarded: bool = False,
+    ) -> None:
         async with self._lock:
             state = self._items[job_id]
             if state.status != "running" or state.worker_id != worker_id:
                 raise RuntimeError("媒体任务租约已失效，拒绝覆盖结果")
-            state.status = "failed" if failed else "succeeded"
+            if discarded:
+                state.status = "discarded"
+            elif failed:
+                state.status = "failed"
+            else:
+                state.status = "succeeded"
             state.result_json = json.dumps(result, ensure_ascii=False, sort_keys=True, default=str)
             state.error = str(result.get("error") or "")[:2000] if failed else None
             state.finished_at = state.updated_at = time.time()
@@ -271,12 +291,16 @@ class RedisMediaJobStore:
         )
         return bool(int(code))
 
-    async def complete(self, job_id: str, worker_id: str, result: dict[str, Any], *, failed: bool = False) -> None:
+    async def complete(
+        self, job_id: str, worker_id: str, result: dict[str, Any], *,
+        failed: bool = False, discarded: bool = False,
+    ) -> None:
         now = time.time()
+        status = "discarded" if discarded else ("failed" if failed else "succeeded")
         error = str(result.get("error") or "")[:2000] if failed else ""
         code = await self._client().eval(
             self._FINISH, 2, self._key(job_id), self._leases,
-            worker_id, "failed" if failed else "succeeded",
+            worker_id, status,
             json.dumps(result, ensure_ascii=False, sort_keys=True, default=str), error, str(now), job_id,
         )
         if not int(code):
@@ -371,17 +395,21 @@ class PostgresMediaJobStore:
         )
         return status != "UPDATE 0"
 
-    async def complete(self, job_id: str, worker_id: str, result: dict[str, Any], *, failed: bool = False) -> None:
+    async def complete(
+        self, job_id: str, worker_id: str, result: dict[str, Any], *,
+        failed: bool = False, discarded: bool = False,
+    ) -> None:
         now = time.time()
-        status = await self.database.client().execute(
+        status = "discarded" if discarded else ("failed" if failed else "succeeded")
+        updated = await self.database.client().execute(
             """UPDATE media_jobs SET status=$3,result_json=$4::jsonb,error=$5,
                       finished_at=$6,updated_at=$6,lease_until=0
                WHERE job_id=$1 AND worker_id=$2 AND status='running'""",
-            job_id, worker_id, "failed" if failed else "succeeded",
+            job_id, worker_id, status,
             json.dumps(result, ensure_ascii=False, sort_keys=True, default=str),
             str(result.get("error") or "")[:2000] if failed else None, now,
         )
-        if status == "UPDATE 0":
+        if updated == "UPDATE 0":
             raise RuntimeError("媒体任务租约已失效，拒绝覆盖结果")
 
     async def mark_unknown(self, job_id: str, worker_id: str, error: str) -> None:
@@ -473,7 +501,19 @@ class MediaJobWorker:
             heartbeat = asyncio.create_task(self._heartbeat(current.job_id))
             try:
                 result = await self.execute(current)
-                await self.store.complete(current.job_id, self.worker_id, result, failed=False)
+                failed, discarded = _classify_result(result)
+                if failed and isinstance(result, dict) and not result.get("error"):
+                    # 批次里各节点的真实失败原因要能被 /api/media/jobs 读到，否则前端只能显示"未完成"。
+                    reasons = "；".join(
+                        str(item.get("error"))
+                        for item in result.get("results") or []
+                        if isinstance(item, dict) and not item.get("ok")
+                    )
+                    result["error"] = f"有节点未完成：{reasons}" if reasons else "媒体任务未全部完成"
+                await self.store.complete(
+                    current.job_id, self.worker_id, result,
+                    failed=failed, discarded=discarded,
+                )
             except asyncio.CancelledError:
                 await self.store.mark_unknown(current.job_id, self.worker_id, "Worker 关闭时任务仍在执行，结果不确定")
                 raise
@@ -491,6 +531,25 @@ class MediaJobWorker:
                 except asyncio.CancelledError:
                     pass
                 current = None
+
+
+def _classify_result(result: dict[str, Any]) -> tuple[bool, bool]:
+    """把执行结果翻译成 ``(failed, discarded)`` 两个终态位。
+
+    规则（宁可少报成功，也不要把"没写回"记成成功）：
+
+    - ``ok=True`` → 成功；
+    - 所有非成功条目都带 ``stale_discarded`` → ``discarded``（产物被新一代取代，钱已花）；
+    - 其余（真的有节点失败）→ ``failed``。
+    """
+    if not isinstance(result, dict):
+        return False, False
+    if result.get("ok"):
+        return False, False
+    entries = [item for item in result.get("results") or [] if isinstance(item, dict)]
+    if entries and all(item.get("ok") or item.get("stale_discarded") for item in entries):
+        return False, True
+    return True, False
 
 
 def _mapping(job: MediaJob) -> dict[str, str]:

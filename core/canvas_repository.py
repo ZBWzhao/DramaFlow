@@ -6,11 +6,12 @@ import asyncio
 import hashlib
 import json
 import os
+import random
 import re
 import time
 from contextlib import asynccontextmanager
 from pathlib import Path
-from typing import Any, AsyncIterator, Protocol, runtime_checkable
+from typing import Any, AsyncIterator, Callable, Protocol, runtime_checkable
 
 from .canvas import Canvas
 from .postgres import PostgresDatabase
@@ -35,12 +36,61 @@ def validate_canvas_name(name: str) -> str:
     return value
 
 
+async def mutate_canvas_with_retry(
+    repository: Any,
+    canvas_name: str,
+    mutate: "Callable[[Canvas], bool]",
+    *,
+    attempts: int = 5,
+) -> bool:
+    """对画布做一次"读 → 改 → 写"，冲突时重读重放增量。
+
+    ``mutate`` 必须只依赖它在最新画布上看到的内容（返回 False 表示前提已失效，
+    例如"节点已经属于更新一代任务"），这样重试才是安全的。所有写回路径——
+    Worker 的状态回写、Agent 工具、合成——都走这一份逻辑，避免"一部分代码
+    会重试、另一部分冲突即失败"。``attempts`` 用尽时抛出最后一个冲突。
+    """
+    attempt = 0
+    while True:
+        canvas = await repository.load(canvas_name)
+        if not mutate(canvas):
+            return False
+        try:
+            await repository.save(canvas)
+            return True
+        except CanvasConflictError:
+            attempt += 1
+            if attempt >= attempts:
+                raise
+            # 退避而不是死循环抢锁：多个写者（Worker、用户拖拽、Agent）同时冲突时，
+            # 立刻重试只会再次撞车，还可能把画布文件锁抢成"活锁"。
+            await asyncio.sleep(min(0.3, 0.02 * attempt) * (0.5 + random.random()))
+
+
+async def _replace_atomic(tmp: Path, path: Path, *, attempts: int = 12) -> None:
+    """把临时文件换成正式文件。
+
+    Windows 上 `os.replace` 在目标文件正被另一个句柄打开时会抛 WinError 5（拒绝访问）。
+    读侧（load）故意不加写锁——读盘不该被写操作阻塞——所以写侧必须容忍这种瞬时占用：
+    退避重试几次通常就过去了，比让一次已经付过费的生成整个失败划算得多。
+    """
+    for attempt in range(attempts):
+        try:
+            await asyncio.to_thread(os.replace, tmp, path)
+            return
+        except PermissionError:
+            if attempt == attempts - 1:
+                raise
+            await asyncio.sleep(0.05 * (attempt + 1))
+
+
 @runtime_checkable
 class CanvasRepository(Protocol):
     async def start(self) -> None: ...
     async def load(self, name: str) -> Canvas: ...
     async def save(self, canvas: Canvas) -> int: ...
     async def list(self) -> list[str]: ...
+    async def delete(self, name: str) -> None: ...
     async def close(self) -> None: ...
 
 
@@ -108,12 +158,21 @@ class FileCanvasRepository:
             await asyncio.to_thread(
                 tmp.write_text, json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8"
             )
-            await asyncio.to_thread(os.replace, tmp, path)
+            await _replace_atomic(tmp, path)
             canvas.path, canvas.revision, canvas.persisted = path, next_revision, True
             return next_revision
 
     async def list(self) -> list[str]:
         return sorted(path.name[: -len(".canvas.json")] for path in self.root.glob("*.canvas.json"))
+
+    async def delete(self, name: str) -> None:
+        path = self._path(name)
+        # 锁文件由 _guard 的 finally 释放后再删：Windows 下删除仍被自己持有的
+        # 文件句柄会抛 WinError 32，所以这里绝对不能自己去 unlink 锁文件。
+        async with self._guard(path):
+            if not path.exists():
+                raise FileNotFoundError(name)
+            await asyncio.to_thread(path.unlink)
 
     async def close(self) -> None:
         return None
@@ -207,6 +266,14 @@ class PostgresCanvasRepository:
             "SELECT name FROM canvases WHERE project_id=$1 ORDER BY name", self.project_id
         )
         return [str(row["name"]) for row in rows]
+
+    async def delete(self, name: str) -> None:
+        name = validate_canvas_name(name)
+        deleted = await self.database.client().execute(
+            "DELETE FROM canvases WHERE project_id=$1 AND name=$2", self.project_id, name
+        )
+        if deleted == "DELETE 0":
+            raise FileNotFoundError(name)
 
     async def close(self) -> None:
         await self.database.close()

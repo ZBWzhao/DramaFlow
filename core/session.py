@@ -26,6 +26,53 @@ from .llm import Usage
 
 SESSIONS_DIR = Path(__file__).resolve().parent.parent / ".agent" / "sessions"
 
+TRUNCATED_TOOL_NOTE = "（这一轮的工具调用结果没有落盘：输出被长度限制截断，调用未执行，已跳过。）"
+
+
+def sanitize_tool_pairs(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """发请求前修掉「assistant 带 tool_calls 却没有对应 tool 结果」的历史。
+
+    OpenAI 兼容接口要求 tool_calls 与紧随其后的 tool 消息一一对应。会话一旦停在
+    输出被截断的位置（finish_reason=length，模型写到一半的 tool_call 没执行），
+    历史里就会留下悬空的 tool_calls —— 这类请求有的 provider 直接 400，有的
+    只回一条空消息（线上症状：点「继续」后 0.5s 空回复、再报错）。
+
+    这里只在**请求时**做清洗，JSONL 文件保持原样（可回放、可审计）：
+      · 丢掉没有对应 tool 结果的 tool_call；
+      · 丢掉没有对应 tool_call 的 tool 消息；
+      · 清空后正文为空的 assistant 消息补一句说明，避免整条空消息进上下文。
+    """
+    call_ids: set[str] = set()
+    result_ids: set[str] = set()
+    for item in messages:
+        if item.get("role") == "assistant":
+            for call in item.get("tool_calls") or []:
+                if call.get("id"):
+                    call_ids.add(str(call["id"]))
+        elif item.get("role") == "tool" and item.get("tool_call_id"):
+            result_ids.add(str(item["tool_call_id"]))
+    paired = call_ids & result_ids
+
+    cleaned: list[dict[str, Any]] = []
+    for item in messages:
+        role = item.get("role")
+        if role == "tool":
+            if str(item.get("tool_call_id") or "") in paired:
+                cleaned.append(item)
+            continue
+        if role == "assistant":
+            calls = item.get("tool_calls") or []
+            if calls:
+                kept_calls = [call for call in calls if str(call.get("id") or "") in paired]
+                if not kept_calls:
+                    item = {key: value for key, value in item.items() if key != "tool_calls"}
+                    if not str(item.get("content") or "").strip():
+                        item["content"] = TRUNCATED_TOOL_NOTE
+                elif len(kept_calls) != len(calls):
+                    item = {**item, "tool_calls": kept_calls}
+        cleaned.append(item)
+    return cleaned
+
 
 @dataclass
 class UsageEntry:
@@ -309,7 +356,9 @@ class Session:
         return self.message_ids[index] if 0 <= index < len(self.message_ids) else None
 
     def request_messages(self) -> list[dict]:
-        return ([{"role": "system", "content": self.system_prompt}] if self.system_prompt else []) + self.messages
+        head = [{"role": "system", "content": self.system_prompt}] if self.system_prompt else []
+        # 清洗放在最后一道：历史文件不改，但发给模型的必须配对合法。
+        return head + sanitize_tool_pairs(self.messages)
 
     def size_chars(self) -> int:
         return len(json.dumps(self.request_messages(), ensure_ascii=False))

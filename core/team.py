@@ -64,6 +64,12 @@ class TeamMember(BaseModel):
     instructions: str = Field(description="成员提示词的相对路径（members/*.md）")
     delegates: list[str] = Field(default_factory=list)
     tools: list[str] = Field(default_factory=list, description="工具白名单，不给就是没有工具")
+    # 注入给该成员的技能子集（按 skills/<name> 取名）。空 = 全部可用，
+    # 这样没写这个字段的老 team.json 行为不变。
+    skills: list[str] = Field(
+        default_factory=list,
+        description="该成员可用的技能名（如 workflow / drama_craft）；空表示全部",
+    )
 
 
 class TeamManifest(BaseModel):
@@ -206,6 +212,7 @@ class TeamRunner:
             task=task,
             tool_names=tools,
             role_prompt=f"# 你的角色：{name}\n\n{instructions}",
+            skill_names=member.skills or None,
         )
         self.bus.emit("team_step_end", member=name, role=role, chars=len(result.answer))
         return StepResult(member=name, role=role, answer=result.answer, usage=result.usage, usage_all=result.usage_all)

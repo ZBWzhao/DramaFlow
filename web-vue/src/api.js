@@ -39,6 +39,12 @@ export async function postJSON(path, body) {
   return res.json();
 }
 
+export async function deleteJSON(path) {
+  const res = await fetch(BASE + path, { method: "DELETE" });
+  if (!res.ok) throw await toError(res);
+  return res.json();
+}
+
 /** 读 NDJSON 流；异常断开后带 last_event_id 转入补发接口，最多重试 5 次。 */
 export async function streamNDJSON(path, body, onEvent, onError, signal, options = {}) {
   let sessionId = body?.session_id || null;

@@ -44,19 +44,77 @@ def make_valid_canvas(root: Path) -> Canvas:
     )
     character = canvas.add_node(
         "asset", "角色·陈默",
-        data={"kind": "character", "name": "陈默", "consistency_tags": ["黄色外卖服", "黑色短发", "左眉旧疤"]},
+        data={
+            "kind": "character",
+            "name": "陈默",
+            "anchors": ["左眉旧疤", "黑色短发"],
+            "consistency_tags": ["黄色外卖服", "黑色短发", "左眉旧疤"],
+            "forbidden": ["不出现现代军装"],
+            "spec": "单角度正面全身，平视，中性表情",
+        },
     )
     scene = canvas.add_node(
         "asset", "场景·便利店",
-        data={"kind": "scene", "name": "便利店", "consistency_tags": ["冷白灯", "玻璃门雨痕", "银色收银台"]},
+        data={
+            "kind": "scene",
+            "name": "便利店",
+            "anchors": ["银色收银台", "玻璃门雨痕"],
+            "consistency_tags": ["冷白灯", "玻璃门雨痕", "银色收银台"],
+            "forbidden": ["不出现招牌文字"],
+            "spec": "单角度总览，平视，冷白顶光",
+        },
     )
     board = canvas.add_node(
         "storyboard", "全片分镜",
         data={
             "target_duration": 10,
             "shots": [
-                {"no": 1, "segment_no": 1, "subject": "陈默", "action": "推门", "shot_size": "中景", "camera_move": "跟拍", "sound": "雨声", "duration": 5},
-                {"no": 2, "segment_no": 1, "subject": "陈雨", "action": "抬头", "shot_size": "近景", "camera_move": "推近", "sound": "台词", "duration": 5},
+                {
+                    "no": 1,
+                    "segment_no": 1,
+                    "duration_s": 5,
+                    "shot_size": "中景",
+                    "camera": {"height": "与胸口齐平", "angle": "正面 0°", "movement": "跟拍后固定"},
+                    "subjects": [
+                        {
+                            "name": "陈默",
+                            "screen_pos": "画面中偏右",
+                            "gaze": "看向店内柜台",
+                            "start_state": "推门进来",
+                            "end_state": "停在门内",
+                        }
+                    ],
+                    "props": [{"name": "外卖袋", "state": "提在右手"}],
+                    "action": "陈默推门进入，雨水顺着外套滴落",
+                    "focus": "门框与人的交界",
+                    "light": {"direction": "店内顶光", "color": "冷白 5600K", "contrast": "中"},
+                    "sound": "雨声、门铃",
+                    "dialogue": {"text": "", "duration_s": 0},
+                    "forbidden": ["不出现第三个人"],
+                },
+                {
+                    "no": 2,
+                    "segment_no": 1,
+                    "duration_s": 5,
+                    "shot_size": "近景",
+                    "camera": {"height": "与眼齐平", "angle": "右前侧 45°", "movement": "缓慢推近"},
+                    "subjects": [
+                        {
+                            "name": "陈雨",
+                            "screen_pos": "画面中偏左",
+                            "gaze": "看向陈默手里的外卖",
+                            "start_state": "低头整理货架",
+                            "end_state": "抬头停住",
+                        }
+                    ],
+                    "props": [],
+                    "action": "陈雨抬头，手停在半空",
+                    "focus": "抬眼的瞬间",
+                    "light": {"direction": "顶光偏右", "color": "冷白 5600K", "contrast": "中"},
+                    "sound": "雨声渐弱",
+                    "dialogue": {"text": "这条手链，你从哪里来的？", "duration_s": 3},
+                    "forbidden": ["不出现第二个柜台"],
+                },
             ],
         },
     )
@@ -110,7 +168,11 @@ class FakeTeam:
     def __init__(self, root: Path, canvases: FileCanvasRepository) -> None:
         self.root = root
         self.bus = EventBus()
-        context = ToolContext(str(root), canvas_repository=canvases)
+        # 画布仓库是**按会话绑定收窄**的（Agent 只能动自己当前那张画布），
+        # 所以测试上下文也要显式声明它工作在哪张画布上。
+        context = ToolContext(
+            str(root), config={"default_canvas": "runner-test"}, canvas_repository=canvases
+        )
         self.manager = SimpleNamespace(parent=SimpleNamespace(context=context))
         self.manifest = SimpleNamespace(
             name="dramaTeam",
@@ -131,8 +193,28 @@ class FakeTeam:
             write_node_text(self.root, canvas, node.id, "场1｜房间｜甲\n人物甲起身。甲：开始制作。" * 20)
             await self.manager.parent.context.canvas_repository.save(canvas)
         elif name == "asset_designer":
-            canvas.add_node("asset", "角色·甲", data={"kind": "character", "consistency_tags": ["黑发", "蓝衣", "青年"]})
-            canvas.add_node("asset", "场景·房间", data={"kind": "scene", "consistency_tags": ["木桌", "暖光", "白墙"]})
+            canvas.add_node(
+                "asset", "角色·甲",
+                data={
+                    "kind": "character",
+                    "name": "甲",
+                    "anchors": ["黑色短发", "眉骨高"],
+                    "consistency_tags": ["黑发", "蓝衣", "青年"],
+                    "forbidden": ["不出现现代军装"],
+                    "spec": "单角度正面全身，平视，中性表情",
+                },
+            )
+            canvas.add_node(
+                "asset", "场景·房间",
+                data={
+                    "kind": "scene",
+                    "name": "房间",
+                    "anchors": ["木桌", "白墙"],
+                    "consistency_tags": ["木桌", "暖光", "白墙"],
+                    "forbidden": ["不出现窗外景物"],
+                    "spec": "单角度总览，平视，暖光",
+                },
+            )
             await self.manager.parent.context.canvas_repository.save(canvas)
         elif name == "storyboarder":
             script = next(node for node in canvas.nodes.values() if node.type == "text")
@@ -140,7 +222,31 @@ class FakeTeam:
                 "storyboard", "全片分镜",
                 data={
                     "target_duration": 5,
-                    "shots": [{"no": 1, "segment_no": 1, "subject": "甲", "action": "起身", "shot_size": "中景", "camera_move": "固定", "sound": "台词", "duration": 5}],
+                    "shots": [
+                        {
+                            "no": 1,
+                            "segment_no": 1,
+                            "duration_s": 5,
+                            "shot_size": "中景",
+                            "camera": {"height": "与胸口齐平", "angle": "正面 0°", "movement": "固定"},
+                            "subjects": [
+                                {
+                                    "name": "甲",
+                                    "screen_pos": "画面中央",
+                                    "gaze": "看向木桌",
+                                    "start_state": "坐在桌边",
+                                    "end_state": "站起",
+                                }
+                            ],
+                            "props": [{"name": "木桌", "state": "在画面中景"}],
+                            "action": "甲从桌边起身",
+                            "focus": "起身的腰线",
+                            "light": {"direction": "右侧窗光", "color": "暖黄 3200K", "contrast": "中"},
+                            "sound": "环境安静",
+                            "dialogue": {"text": "开始制作。", "duration_s": 2},
+                            "forbidden": ["不出现第二个人"],
+                        }
+                    ],
                 },
             )
             canvas.connect(script.id, "text", board.id, "script")

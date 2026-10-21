@@ -11,12 +11,18 @@ export function assetUrl(path) {
   return "/assets/" + String(path).replace(/^\/?assets\//, "").replace(/^\//, "");
 }
 
-/** 从节点的 outputs 里取媒体产物（有就是有，没有返回 null）。 */
+/** 从节点的 outputs 里取媒体产物（有就是有，没有返回 null）。
+ *
+ * `ref` 是 asset 节点的输出端口（角色/场景定妆图）：它承载的也是图片，
+ * 所以一并当作 image 处理 —— 否则资产卡永远显示不出自己的那张图。
+ */
 export function mediaOf(node) {
   const outputs = node?.outputs || {};
-  for (const port of ["image", "video", "audio"]) {
+  for (const port of ["image", "video", "audio", "ref"]) {
     const value = outputs[port]?.value;
-    if (value?.path) return { port, path: value.path, mock: !!value.mock };
+    if (value?.path) {
+      return { port: port === "ref" ? "image" : port, path: value.path, mock: !!value.mock };
+    }
   }
   return null;
 }

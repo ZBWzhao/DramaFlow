@@ -1,4 +1,4 @@
-﻿<script setup>
+<script setup>
 /* 画布页：Vue Flow 负责视口/拖拽/连线交互，我们只提供节点组件与工具栏。
  *
  * 关键取舍：连线**交给后端校验**（POST /api/canvas/connect 会检查端口类型是否兼容），
@@ -7,14 +7,66 @@
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { VueFlow, useVueFlow } from "@vue-flow/core";
 import { Background } from "@vue-flow/background";
-import { Controls } from "@vue-flow/controls";
 import { MiniMap } from "@vue-flow/minimap";
 import { ElMessage, ElMessageBox } from "element-plus";
 import ToonNode from "./ToonNode.vue";
+import NodeStudio from "./NodeStudio.vue";
+import GenerationHistoryDrawer from "./GenerationHistoryDrawer.vue";
+import CanvasSidebar from "./CanvasSidebar.vue";
 import { actions, flowEdges, flowNodes, state, selectedNode, upstreamOfSelected } from "../store.js";
 import { assetUrl, mediaOf } from "../utils.js";
 
-const { fitView, onConnect, screenToFlowCoordinate } = useVueFlow();
+/* 显式 id：父组件里的 useVueFlow 必须和 <VueFlow> 用同一个 store。
+ * 注意 `viewport` 不要解构 — 它从 reactive store 上取值时是个普通快照对象，
+ * 拿到的永远是初始 { zoom: 1 }，所以缩放读数和 LOD 会冻在 100%。
+ * 改成订阅 viewport-change 事件，自己维护一个响应式缩放值。 */
+const FLOW_ID = "canvas-flow";
+const { fitView, zoomTo, zoomIn, zoomOut, setViewport, onViewportChange, onConnect, screenToFlowCoordinate } =
+  useVueFlow(FLOW_ID);
+
+const zoomNow = ref(1);
+onViewportChange((vp) => { zoomNow.value = vp?.zoom ?? 1; });
+/* 语义缩放：远看是缩略图墙，近看才是可读的卡片。
+ * 阈值按"能不能看清卡片标题"定：<0.45 只能看清图和一行标题，0.45~0.85 能读摘要，
+ * >0.85 才放开端口名、进度条、提示语这些细节。 */
+const lodClass = computed(() => {
+  const zoom = zoomNow.value;
+  if (zoom < 0.45) return "lod-far";
+  if (zoom < 0.85) return "lod-mid";
+  return "lod-near";
+});
+const zoomPct = computed(() => `${Math.round(zoomNow.value * 100)}%`);
+
+/* 适应窗口：默认 fitView 会把 60+ 节点的图压到 20%，字全糊成一片。
+ * 所以留一个"可读下限"：真放不下就宁可按 60% 居中（能看清卡片，其余靠拖拽/小地图看），
+ * 也不给一张什么都看不清的全损缩略图。 */
+async function fitReadable({ min = 0.7 } = {}) {
+  await fitView({ padding: 0.14, maxZoom: 0.95, duration: 180 });
+  await new Promise((r) => setTimeout(r, 240));   // 等 viewport-change 回来再判断
+  if (zoomNow.value < min) await zoomTo(min, { duration: 160 });
+}
+/* 首屏不"适应窗口"，而是**按可读比例落到第一张有内容的卡上**。
+ * 原因：52 个节点的画布 fitView 之后只剩 60%~70%，卡片文字被压成 6–7px，
+ * 看起来就是一片小黑板；LibTV 的默认视角是"看得清两三张卡"。
+ * 「适应窗口」按钮仍然保留完整 fitView。 */
+async function focusReadable() {
+  const nodes = state.canvas.nodes || [];
+  if (!nodes.length) return;
+  const hasImage = (n) => Boolean(n.outputs?.image?.value?.path || n.outputs?.ref?.value?.path);
+  const hasVideo = (n) => Boolean(n.outputs?.video?.value?.path);
+  // 首屏落点优先选「真的有画面的卡」，第一眼看到的应该是图，而不是一堆空卡
+  const first = nodes.find(hasImage)
+    || nodes.find((n) => n.type === "asset")
+    || nodes.find(hasVideo)
+    || nodes[0];
+  const zoom = Math.min(1, Math.max(0.9, zoomNow.value || 1));
+  await setViewport(
+    { x: 300 - first.position.x * zoom, y: 220 - first.position.y * zoom, zoom },
+    { duration: 0 },
+  );
+}
+
+const problemsOpen = ref(false);
 const imageFileInput = ref(null);
 const videoFileInput = ref(null);
 const audioFileInput = ref(null);
@@ -48,19 +100,21 @@ function closeMenus() {
 }
 
 function onGlobalKeydown(event) {
-  if (event.key === "Escape") {
-    closeMenus();
-    return;
-  }
   const target = event.target;
   const isEditing = target instanceof HTMLElement
     && (target.matches("input, textarea, select") || target.isContentEditable);
+  if (event.key === "Escape") {
+    closeMenus();
+    if (isEditing) return;           // 正在写提示词/改标题时，Esc 只退出输入
+    if (historyOpen.value) { historyOpen.value = false; return; }
+    if (state.selectedId) { state.selectedId = null; }
+    return;
+  }
   if (["Delete", "Backspace"].includes(event.key) && state.selectedEdgeId && !isEditing) {
     event.preventDefault();
     deleteSelectedEdge();
   }
 }
-
 function onPaneContextMenu(event) {
   event.preventDefault();
   state.selectedId = null;
@@ -80,6 +134,33 @@ function onPaneClick() {
   state.selectedId = null;
   state.selectedEdgeId = null;
   closeMenus();
+}
+
+/* 双击空白画布 → 直接弹「添加到画布」（LibTV 是双击出节点菜单，同一个意思） */
+function onPanelDblClick(event) {
+  const pane = event.target?.closest?.(".vue-flow__pane");
+  if (!pane) return;
+  onPaneContextMenu(event);
+}
+
+/* 空画布起始页的 5 个胶囊：对应 LibTV 那排「图片生成 / 视频生成 / 音频生成 / 剧本生成 / 智能剪辑」。
+ * 点一下就在视口中心建一张卡，不用先右键找菜单。 */
+const startPills = [
+  { type: "image_gen", icon: "▣", label: "图片生成" },
+  { type: "video_gen", icon: "▷", label: "视频生成" },
+  { type: "tts_gen", icon: "♪", label: "音频生成" },
+  { type: "text", icon: "✎", label: "剧本生成" },
+  { type: "timeline", icon: "⧗", label: "智能剪辑" },
+];
+
+async function createCardAtCenter(item) {
+  const found = cardItems.find((card) => card.type === item.type) || { type: item.type, defaultLabel: item.label, data: {} };
+  const point = screenToFlowCoordinate({
+    x: window.innerWidth / 2,
+    y: window.innerHeight / 2,
+  });
+  contextMenu.value = { visible: false, x: 0, y: 0, flow: { x: point.x - 150, y: point.y - 90 } };
+  await createCard(found);
 }
 
 function onNodeClick({ node }) {
@@ -134,21 +215,12 @@ const topoIndex = computed(() => {
   return { at: index + 1, total: state.canvas.topo.length };
 });
 
-const detailMedia = computed(() => mediaOf(selectedNode.value));
-const detailMediaSrc = computed(() => assetUrl(detailMedia.value?.path));
-const detailText = computed(() => {
-  if (typeof selectedNode.value?.content === "string" && selectedNode.value.content) return selectedNode.value.content;
-  const outputs = Object.values(selectedNode.value?.outputs || {});
-  return outputs.find((item) => item?.data_type === "STRING" && typeof item.value === "string")?.value || "";
-});
-
-const detailData = computed(() => {
-  const data = selectedNode.value?.data || {};
-  return Object.entries(data).map(([key, value]) => [
-    key,
-    typeof value === "object" ? JSON.stringify(value) : String(value),
-  ]);
-});
+/* 单卡工作台（P0）：选中任意一张卡，右侧打开它自己的工具面板——
+ * 上面是这张卡能做的事（自己写提示词 / 只生成这一张 / 换素材 / 翻历史版本），
+ * 下面是它的文字内容。取代了以前右下那个"什么类型都长一样"的只读详情框。 */
+const historyOpen = ref(false);
+const selectedSpec = computed(() => state.canvas.spec?.[selectedNode.value?.type] || {});
+watch(() => state.selectedId, () => { historyOpen.value = false; });
 
 const timelineClips = computed(() => {
   if (selectedNode.value?.type !== "timeline") return [];
@@ -171,10 +243,14 @@ async function moveTimelineClip(index, delta) {
   }
 }
 
-// 新建/切换/整理之后自动适应窗口（布局未稳定时等一帧）
+// 新建/切换/整理之后自动适应窗口。要跑两遍：一次在节点挂载后、一次等布局与媒体占位稳定后，
+// 否则第二次渲染会把我们算好的缩放又冲掉。
 watch(
   () => [state.canvasName, state.canvas.nodes.length],
-  () => nextTick(() => setTimeout(() => fitView({ padding: 0.18 }), 60))
+  () => nextTick(() => {
+    setTimeout(() => focusReadable(), 80);
+    setTimeout(() => focusReadable(), 620);
+  })
 );
 
 onConnect(async (params) => {
@@ -235,6 +311,68 @@ async function onReconcile() {
     ElMessage.success(`恢复完成 ${res.done}/${res.total}`);
   } catch (err) {
     ElMessage.error({ message: `无法安全恢复：${err.message || err}`, duration: 5000 });
+  }
+}
+
+/* ---------- 卡片内的「尝试」与卡下提示词框 ---------- */
+
+// 一张卡该按哪种媒体选文件：视频卡给视频、音频卡给音频，其余按图片。
+function mediaKindOf(node) {
+  if (["video", "video_gen"].includes(node.type)) return "video";
+  if (["audio", "tts_gen"].includes(node.type)) return "audio";
+  return "image";
+}
+
+function onNodeAttempt({ node, action }) {
+  if (action === "upload") requestMediaUpload(mediaKindOf(node), node.id);
+  else if (action === "write") state.selectedId = node.id;
+  else if (action === "generate") onNodeGenerate(node);
+  else if (action === "compose") onCompose();
+}
+
+function onNodeUpload(node) {
+  requestMediaUpload(mediaKindOf(node), node.id);
+}
+
+// 卡片上的「详情」/「⋯」：选中即打开右侧工作台
+function onNodeOpenStudio(node) {
+  state.selectedId = node.id;
+}
+
+// 卡片工具条上的「历史」：选中这张卡并直接展开历史抽屉
+function onNodeHistory(node) {
+  state.selectedId = node.id;
+  historyOpen.value = true;
+}
+
+// 文字类卡片的提示词框：直接写回这张卡（服务端会记 rendered_by=human）
+async function onNodeSavePrompt({ node, text }) {
+  try {
+    await actions.savePrompt(node.id, text);
+    ElMessage.success("已保存这段文字");
+  } catch (err) {
+    ElMessage.error(`保存失败：${err.message || err}`);
+  }
+}
+
+// 生成类卡片的 ↑：只跑这一张，别的卡不动
+async function onNodeGenerate(node) {
+  try {
+    await ElMessageBox.confirm(
+      `只跑「${node.label}」这一张卡，模型 ${state.mediaModel}；其它卡片不受影响。`,
+      "单卡生成",
+      { confirmButtonText: "开始生成", cancelButtonText: "先不跑", type: "info" },
+    );
+  } catch {
+    return;
+  }
+  try {
+    const res = await actions.runCanvas({ approved: true, only: [node.id] });
+    if (res.done < res.total) ElMessage.warning(`生成完成 ${res.done}/${res.total}`);
+    else ElMessage.success("这一张生成完成，历史里多了一版");
+    await actions.loadCanvas();
+  } catch (err) {
+    ElMessage.error({ message: `生成失败：${err.message || err}`, duration: 5000 });
   }
 }
 
@@ -326,18 +464,20 @@ async function onMediaFile(event, kind) {
 </script>
 
 <template>
-  <div class="canvas-panel">
+  <div class="canvas-panel" :class="lodClass" @dblclick="onPanelDblClick">
     <VueFlow
+      :id="FLOW_ID"
       :nodes="flowNodes"
       :edges="flowEdges"
-      :min-zoom="0.2"
+      :min-zoom="0.12"
       :max-zoom="2.5"
       :snap-to-grid="true"
       :snap-grid="[16, 16]"
       :delete-key-code="null"
       :zoom-on-double-click="false"
-      :only-render-visible-elements="false"
-      :default-edge-options="{ type: 'smoothstep', animated: false }"
+      :fit-view-on-init="false"
+      :only-render-visible-elements="true"
+      :default-edge-options="{ type: 'default', animated: false, pathOptions: { curvature: 0.32 } }"
       @node-click="onNodeClick"
       @edge-click="onEdgeClick"
       @edge-context-menu="onEdgeContextMenu"
@@ -345,21 +485,50 @@ async function onMediaFile(event, kind) {
       @pane-context-menu="onPaneContextMenu"
       @node-drag-stop="({ node }) => actions.moveNode({ id: node.id, position: node.position }).catch(() => {})"
     >
-      <Background :gap="16" pattern-color="var(--grid-dot)" />
-      <Controls position="bottom-right" />
-      <!-- 缩略图放左下、抬到工具条上方（Toonflow 也是这个位置：bottom:64px） -->
+      <Background :gap="22" pattern-color="var(--grid-dot)" />
+      <!-- 缩略图放右下、抬到工具条与 Agent 悬浮球上方：左侧现在被画布目录占着 -->
       <MiniMap
+        v-if="state.canvas.nodes.length"
         pannable
         zoomable
-        position="bottom-left"
-        :style="{ bottom: '78px' }"
-        :node-color="'rgba(255,255,255,0.22)'"
-        :mask-color="'rgba(8,12,24,0.55)'"
+        position="bottom-right"
+        :style="{ bottom: '152px', right: '20px' }"
+        :node-color="'rgba(150,185,240,0.34)'"
+        :mask-color="'rgba(6,9,14,0.62)'"
       />
       <template #node-toon="nodeProps">
-        <ToonNode :data="nodeProps.data" />
+        <ToonNode
+          :data="{ ...nodeProps.data, model: state.mediaModel, selected: nodeProps.selected }"
+          @attempt="onNodeAttempt"
+          @save-prompt="onNodeSavePrompt"
+          @generate="onNodeGenerate"
+          @upload="onNodeUpload"
+          @open-studio="onNodeOpenStudio"
+          @history="onNodeHistory"
+        />
       </template>
     </VueFlow>
+
+    <!-- 左侧目录：画布 / 资产（LibTV 式） -->
+    <CanvasSidebar />
+
+    <!-- 空画布：照着 LibTV 的起始页给「双击画布」+ 五个胶囊，而不是一整块提示文字 -->
+    <div v-if="!state.canvas.nodes.length" class="canvas-hero">
+      <p class="canvas-hero-hint">
+        <span class="canvas-hero-cursor" aria-hidden="true">▷</span>双击画布 自由生成节点
+      </p>
+      <div class="canvas-hero-pills">
+        <button
+          v-for="pill in startPills"
+          :key="pill.type"
+          type="button"
+          @click.stop="createCardAtCenter(pill)"
+        >
+          <span class="hero-pill-glyph" aria-hidden="true">{{ pill.icon }}</span>
+          {{ pill.label }}
+        </button>
+      </div>
+    </div>
 
     <div
       v-if="contextMenu.visible"
@@ -433,7 +602,7 @@ async function onMediaFile(event, kind) {
       <el-button title="按依赖整理成流程图" @click="onArrange">
         <el-icon><Grid /></el-icon>
       </el-button>
-      <el-button title="适应窗口" @click="fitView({ padding: 0.18 })">
+      <el-button title="适应窗口" @click="fitReadable()">
         <el-icon><FullScreen /></el-icon>
       </el-button>
       <el-button title="刷新画布" @click="onReload">
@@ -449,6 +618,10 @@ async function onMediaFile(event, kind) {
       >
         <el-icon><Delete /></el-icon>
       </el-button>
+      <span class="ctl-divider" aria-hidden="true" />
+      <button type="button" class="ctl-zoom" title="缩小（Ctrl + 滚轮也行）" aria-label="缩小" @click="zoomOut({ duration: 120 })">−</button>
+      <span class="ctl-zoom-val" title="当前缩放">{{ zoomPct }}</span>
+      <button type="button" class="ctl-zoom" title="放大（Ctrl + 滚轮也行）" aria-label="放大" @click="zoomIn({ duration: 120 })">+</button>
       <span class="ctl-meta">{{ meta }}</span>
       <input
         ref="imageFileInput"
@@ -502,109 +675,61 @@ async function onMediaFile(event, kind) {
       </ul>
     </div>
 
-    <!-- 体检问题 -->
-    <div v-if="problems.length" class="problems-bar" :style="state.runResult ? 'bottom: 200px' : ''">
-      <b>体检发现 {{ problems.length }} 个问题</b>
-      <ul>
-        <li v-for="(item, index) in problems.slice(0, 5)" :key="index">{{ item }}</li>
+    <!-- 体检问题：默认收成一颗胶囊，点开才铺开（以前是一整块盖在画布上） -->
+    <div v-if="problems.length" class="problems-chip" :class="{ open: problemsOpen }" :style="state.runResult ? 'bottom: 190px' : ''">
+      <button type="button" class="problems-chip-head" :aria-expanded="problemsOpen" @click="problemsOpen = !problemsOpen">
+        <span class="dot" aria-hidden="true" />
+        体检 {{ problems.length }} 项待修
+        <el-icon><ArrowUp v-if="problemsOpen" /><ArrowDown v-else /></el-icon>
+      </button>
+      <ul v-if="problemsOpen">
+        <li v-for="(item, index) in problems" :key="index">{{ item }}</li>
       </ul>
     </div>
 
-    <!-- 右下：节点详情 -->
-    <aside v-if="selectedNode" class="node-detail">
-      <h3>{{ selectedNode.label }}</h3>
-      <table class="detail-table">
-        <tr>
-          <td>id</td>
-          <td>{{ selectedNode.id }}</td>
-        </tr>
-        <tr>
-          <td>类型</td>
-          <td>{{ selectedNode.type }}</td>
-        </tr>
-        <tr>
-          <td>状态</td>
-          <td>{{ selectedNode.status }}</td>
-        </tr>
-        <tr v-if="topoIndex.total">
-          <td>执行序</td>
-          <td>第 {{ topoIndex.at }} / {{ topoIndex.total }} 步</td>
-        </tr>
-      </table>
-
-      <template v-if="selectedNode.type === 'timeline'">
-        <h4>片段顺序</h4>
-        <p v-if="!timelineClips.length" class="dim">请把视频素材或视频生成节点连接到 timeline 的 video 输入。</p>
-        <ol v-else class="timeline-list">
-          <li v-for="(clip, index) in timelineClips" :key="clip.id">
-            <span>{{ clip.label }}</span>
-            <span class="timeline-actions">
-              <el-button link :disabled="index === 0" @click="moveTimelineClip(index, -1)">上移</el-button>
-              <el-button link :disabled="index === timelineClips.length - 1" @click="moveTimelineClip(index, 1)">下移</el-button>
-            </span>
-          </li>
-        </ol>
-        <p class="dim">输出：{{ selectedNode.data?.output?.width || 1280 }}×{{ selectedNode.data?.output?.height || 720 }} / {{ selectedNode.data?.output?.fps || 24 }}fps</p>
+    <!-- 右侧：单卡工作台（P0）——每张卡自己的工具、正文、历史版本 -->
+    <NodeStudio
+      v-if="selectedNode"
+      :node="selectedNode"
+      :spec="selectedSpec"
+      :upstream="upstreamOfSelected"
+      :order="topoIndex"
+      @close="state.selectedId = null"
+      @history="historyOpen = true"
+      @upload="(kind) => requestMediaUpload(kind, selectedNode.id)"
+    >
+      <template v-if="selectedNode.type === 'timeline'" #extra>
+        <section class="studio-extra">
+          <b>片段顺序</b>
+          <p v-if="!timelineClips.length" class="studio-extra-dim">
+            请把视频素材或视频生成节点连接到 timeline 的 video 输入。
+          </p>
+          <ol v-else class="timeline-list">
+            <li v-for="(clip, index) in timelineClips" :key="clip.id">
+              <span>{{ clip.label }}</span>
+              <span class="timeline-actions">
+                <el-button link :disabled="index === 0" @click="moveTimelineClip(index, -1)">上移</el-button>
+                <el-button link :disabled="index === timelineClips.length - 1" @click="moveTimelineClip(index, 1)">下移</el-button>
+              </span>
+            </li>
+          </ol>
+          <p class="studio-extra-dim">
+            输出：{{ selectedNode.data?.output?.width || 1280 }}×{{ selectedNode.data?.output?.height || 720 }} /
+            {{ selectedNode.data?.output?.fps || 24 }}fps
+          </p>
+        </section>
       </template>
+    </NodeStudio>
 
-      <template v-if="detailMedia">
-        <h4>产物{{ detailMedia.mock ? "（mock 占位）" : "" }}</h4>
-        <video
-          v-if="detailMedia.port === 'video'"
-          class="detail-media"
-          :src="detailMediaSrc"
-          controls
-          preload="metadata"
-        />
-        <audio
-          v-else-if="detailMedia.port === 'audio'"
-          class="detail-audio"
-          :src="detailMediaSrc"
-          controls
-          preload="metadata"
-        />
-        <a v-else :href="detailMediaSrc" target="_blank">
-          <img class="detail-media" :src="detailMediaSrc" :alt="selectedNode.label" />
-        </a>
-        <p class="dim">{{ detailMedia.path }}</p>
-        <el-button
-          v-if="['image', 'video', 'audio'].includes(selectedNode.type)"
-          size="small"
-          :loading="state.mediaUploading"
-          @click="requestMediaUpload(selectedNode.type, selectedNode.id)"
-        >替换{{ { image: "图片", video: "视频", audio: "音频" }[selectedNode.type] }}</el-button>
-        <div v-if="selectedNode.type === 'image'" class="connection-guide">
-          <b>怎么连接</b>
-          从图片卡右侧橙色圆点拖出，连接到资产卡的 <code>image</code>，或提示词/生成卡的 <code>ref</code>。
-        </div>
-        <div v-else-if="selectedNode.type === 'video'" class="connection-guide">
-          <b>怎么连接</b>
-          从视频卡右侧紫色圆点拖出，连接到提示词或视频生成卡的 <code>video_ref</code>。
-        </div>
-      </template>
-
-      <template v-if="selectedNode.data?.content_path">
-        <h4>正文</h4>
-        <p class="dim">{{ selectedNode.data.content_path }}</p>
-        <pre v-if="detailText" class="detail-content">{{ detailText }}</pre>
-      </template>
-
-      <template v-if="detailData.length">
-        <h4>data</h4>
-        <pre>{{ detailData.map(([k, v]) => `${k}: ${v}`).join("\n") }}</pre>
-      </template>
-
-      <template v-if="upstreamOfSelected.length">
-        <h4>上游依赖</h4>
-        <ul>
-          <li v-for="node in upstreamOfSelected" :key="node.id">{{ node.label }}</li>
-        </ul>
-      </template>
-    </aside>
+    <GenerationHistoryDrawer :visible="historyOpen" :node="selectedNode" @close="historyOpen = false" />
   </div>
 </template>
 
 <style scoped>
+.studio-extra { display: flex; flex-direction: column; gap: 6px; }
+.studio-extra b { font-size: 11px; color: var(--text-2); letter-spacing: 0.03em; }
+.studio-extra-dim { margin: 0; color: var(--text-3); font-size: 11px; }
+
 .run-bar { color: var(--text-2); }
 .run-bar b { color: var(--text); }
 .timeline-list { margin: 0; padding-left: 20px; }
