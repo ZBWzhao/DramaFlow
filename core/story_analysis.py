@@ -99,8 +99,8 @@ async def run_story_analysis(
                 {"role": "user", "content": f"上次回复无法解析：{error}。请只输出一个合法 JSON 对象。"}
             ]
             text = await llm.simple(call)
-            if cancel is not None and cancel.is_set():
-                break
+            # 这里不检查 cancel：回复已经到手，算已完成的工作；
+            # 取消的落点在「下一卡开始前」，已完成卡要保留。
             try:
                 parsed = extract_json(text)
                 if card not in parsed:
@@ -110,8 +110,6 @@ async def run_story_analysis(
             except (ValueError, json.JSONDecodeError) as exc:
                 error = str(exc)
                 data = None
-        if cancel is not None and cancel.is_set():
-            break
         if data is None:
             emit({"type": "card_failed", "key": card, "error": error})
             continue

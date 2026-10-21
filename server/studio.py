@@ -16,6 +16,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import re
 import time
 import uuid
@@ -23,10 +24,13 @@ from pathlib import Path
 from typing import Any, Iterable, Mapping
 
 from fastapi import APIRouter, HTTPException
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
 from core.canvas import Canvas, CanvasError
+from core.canvas_repository import mutate_canvas_with_retry
 from core.skills import discover_skills
+from core.story_analysis import CARDS, StoryAnalysis, run_story_analysis
 from core.studio_rules import (
     THRESHOLDS,
     dialogue_from_shots,
@@ -741,6 +745,140 @@ async def patch_project(canvas: str, body: ProjectPatch) -> dict[str, Any]:
     node.meta = meta
     revision = await _save(node)
     return {"ok": True, "revision": revision, "project": _project_meta(node)}
+
+
+# ---------------------------------------------------------------------------
+# 剧本理解 pipeline（确定性四卡链）：NDJSON 流式、单飞 409、卡间可打断。
+# 与资产解析共用 _story_runs 注册表——同一画布同时只允许一个分析/解析任务。
+# ---------------------------------------------------------------------------
+_story_runs: dict[str, dict[str, Any]] = {}
+
+
+class StoryAnalysisRunRequest(BaseModel):
+    canvas: str
+    cards: list[str] | None = None  # 缺省全量；重跑可只指定要重生成的卡
+
+
+class CancelBody(BaseModel):
+    canvas: str
+
+
+def _ndjson_line(payload: dict[str, Any]) -> bytes:
+    return (json.dumps(payload, ensure_ascii=False) + chr(10)).encode("utf-8")
+
+
+def _skill_version(node: Canvas, key: str, fallback: str) -> str:
+    selected = str((_project_meta(node).get("skills") or {}).get(key) or "")
+    return selected.split("@", 1)[1] if "@" in selected else fallback
+
+
+def _story_script_text(node: Canvas) -> str:
+    """全剧本 = 各集正文按集序拼接（读取统一走 Canvas.read_text）。"""
+    parts = []
+    for episode in _episodes(node):
+        node_id = str(episode.get("script_node_id") or "")
+        body = node.read_text(node_id) if node_id and node_id in node.nodes else ""
+        if not body.strip():
+            continue
+        parts.append(f"第{episode.get('no')}集 {episode.get('title') or ''}\n{body}")
+    return chr(10).join(parts)
+
+
+async def _merge_story_analysis(canvas_name: str, patch: dict[str, Any], *, skill_tag: dict | None = None) -> None:
+    """把已完成卡合并落盘——打断/崩溃只丢未完成卡，不丢已完成的。
+
+    per-card 落盘与收尾落盘可能交错，必须走统一的冲突重放，不能拿旧 revision 硬写。
+    """
+    async_repo = _registry.canvas_repository
+
+    def mutate(graph: Canvas) -> bool:
+        meta = dict(graph.meta or {})
+        analysis = dict(meta.get("story_analysis") or {})
+        analysis.update(patch)
+        if skill_tag:
+            analysis["skill"] = skill_tag
+        analysis["updated_at"] = int(time.time())
+        # 归一到 schema 全形状：前端拿到的是完整四卡结构（未完成的卡是空值）
+        meta["story_analysis"] = StoryAnalysis(**analysis).model_dump()
+        graph.meta = meta
+        return True
+
+    await mutate_canvas_with_retry(async_repo, canvas_name, mutate)
+
+
+@router.post("/story-analysis/run")
+async def story_analysis_run(body: StoryAnalysisRunRequest) -> StreamingResponse:
+    _require_configured()
+    node = await _load(body.canvas)
+    active = _story_runs.get(body.canvas)
+    if active is not None and not active["task"].done():
+        raise HTTPException(status_code=409, detail="这个项目正在解析剧本/生成资产表")
+    script_text = _story_script_text(node)
+    if not script_text.strip():
+        raise HTTPException(status_code=400, detail="还没有剧本正文，先在剧本页导入")
+    if body.cards:
+        unknown = [c for c in body.cards if c not in CARDS]
+        if unknown:
+            raise HTTPException(status_code=400, detail=f"未知卡片：{', '.join(unknown)}")
+
+    cancel = asyncio.Event()
+    queue: asyncio.Queue = asyncio.Queue()
+    version = _skill_version(node, "script_analysis", "1.0.0")
+    prior = dict((node.meta or {}).get("story_analysis") or {})
+    llm = _registry.llm
+    canvas_name = body.canvas
+
+    async def pipeline() -> None:
+        def on_event(event: dict[str, Any]) -> None:
+            if event.get("type") == "analysis_done":
+                return  # 落盘后由这里统一发，避免双份
+            queue.put_nowait(event)
+
+        try:
+            analysis = await run_story_analysis(
+                script_text,
+                llm,
+                cards=body.cards or None,
+                prior=prior if body.cards else None,  # 全量重跑不背旧产物；指定卡才保留其余卡
+                skill_tag={"name": "script-analysis", "version": version},
+                on_event=on_event,
+                cancel=cancel,
+            )
+            await _merge_story_analysis(canvas_name, {}, skill_tag={"name": "script-analysis", "version": version})
+            graph = await _load(canvas_name)
+            final = dict((graph.meta or {}).get("story_analysis") or {})
+            queue.put_nowait({"type": "analysis_done", "analysis": final, "cancelled": cancel.is_set()})
+        except asyncio.CancelledError:  # pragma: no cover - 任务被外层取消
+            queue.put_nowait({"type": "analysis_done", "analysis": {}, "cancelled": True})
+        finally:
+            queue.put_nowait(None)
+
+    task = asyncio.create_task(pipeline())
+    _story_runs[canvas_name] = {"task": task, "cancel": cancel}
+
+    async def stream():
+        try:
+            while True:
+                event = await queue.get()
+                if event is None:
+                    break
+                if event.get("type") == "card_done":
+                    await _merge_story_analysis(canvas_name, {event["key"]: event["data"]})
+                yield _ndjson_line(event)
+        finally:
+            _story_runs.pop(canvas_name, None)
+
+    return StreamingResponse(stream(), media_type="application/x-ndjson")
+
+
+@router.post("/story-analysis/cancel")
+async def story_analysis_cancel(body: CancelBody) -> dict[str, Any]:
+    run = _story_runs.get(body.canvas)
+    if run is None or run["task"].done():
+        return {"ok": False}
+    run["cancel"].set()   # 卡间检查用：已完成卡保留
+    run["task"].cancel()  # 打断在飞行中的 LLM 调用（await 点直接抛 CancelledError）
+    return {"ok": True}
 
 
 class SkillsRequest(BaseModel):
