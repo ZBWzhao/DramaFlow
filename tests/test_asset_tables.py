@@ -61,3 +61,80 @@ def test_kind_mismatch_creates_new_asset():
         characters=[{"name": "林生", "description": "丈夫", "bio": "", "looks": []}],
     ))
     assert [a["kind"] for a in plan["create_assets"]] == ["character"]
+
+
+def test_parse_merges_same_character_across_episodes():
+    import asyncio
+
+    from core.asset_tables import parse_asset_tables
+
+    class FakeLLM:
+        def __init__(self, replies):
+            self.replies = list(replies)
+
+        async def simple(self, messages):
+            return self.replies.pop(0)
+
+    r1 = '{"characters": [{"name": "林生", "description": "丈夫", "bio": "b1", "looks": [{"name": "宴会便装"}]}], "scenes": [{"name": "陈家客厅", "description": "s"}], "props": []}'
+    r2 = '{"characters": [{"name": "林 生", "description": "", "bio": "b2", "looks": [{"name": "宴会便装"}, {"name": "家居围裙"}]}], "scenes": [], "props": [{"name": "茶杯", "description": "p"}]}'
+    events = []
+    tables = asyncio.run(parse_asset_tables(
+        [{"no": 1, "text": "第一集"}, {"no": 2, "text": "第二集"}],
+        FakeLLM([r1, r2]), on_event=events.append,
+    ))
+    assert [e["type"] for e in events] == ["parse_progress", "parse_progress", "parse_done"]
+    assert len(tables["characters"]) == 1
+    row = tables["characters"][0]
+    assert row["description"] == "丈夫" and row["bio"] == "b1"  # 首个非空
+    assert [lk["name"] for lk in row["looks"]] == ["宴会便装", "家居围裙"]  # 跨集去重合并
+    assert len(tables["props"]) == 1
+
+
+def test_parse_skips_bad_json_episode_but_keeps_rest():
+    import asyncio
+
+    from core.asset_tables import parse_asset_tables
+
+    class FakeLLM:
+        def __init__(self, replies):
+            self.replies = list(replies)
+
+        async def simple(self, messages):
+            return self.replies.pop(0)
+
+    good = '{"characters": [{"name": "林生", "description": "丈夫", "bio": "", "looks": []}], "scenes": [], "props": []}'
+    tables = asyncio.run(parse_asset_tables(
+        [{"no": 1, "text": "第一集"}, {"no": 2, "text": "第二集"}],
+        FakeLLM(["完全不是JSON", good]),
+    ))
+    assert len(tables["characters"]) == 1  # 坏的那集被跳过，好集照常入库
+
+
+def test_parse_cancel_stops_between_episodes():
+    """取消语义 = 卡间检查：第一集后置位，第二集不再发起调用。"""
+    import asyncio
+
+    from core.asset_tables import parse_asset_tables
+
+    cancel = asyncio.Event()
+    good = '{"characters": [{"name": "林生", "description": "丈夫", "bio": "", "looks": []}], "scenes": [], "props": []}'
+
+    class CancelAfterFirst:
+        def __init__(self):
+            self.calls = 0
+
+        async def simple(self, messages):
+            self.calls += 1
+            if self.calls == 1:
+                cancel.set()
+            return good
+
+    events = []
+    llm = CancelAfterFirst()
+    tables = asyncio.run(parse_asset_tables(
+        [{"no": 1, "text": "第一集"}, {"no": 2, "text": "第二集"}],
+        llm, on_event=events.append, cancel=cancel,
+    ))
+    assert llm.calls == 1  # 第二集没调用
+    assert [e["type"] for e in events] == ["parse_progress", "parse_done"]
+    assert len(tables["characters"]) == 1  # 第一集结果保留
