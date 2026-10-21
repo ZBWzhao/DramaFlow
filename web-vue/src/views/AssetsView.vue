@@ -9,6 +9,7 @@ import { computed, onMounted, ref, watch } from "vue";
 import { useRoute } from "vue-router";
 import {
   createLook,
+  exportLookPromptUrl,
   fetchTtsVoices,
   flattenAssets,
   generateLook,
@@ -92,6 +93,18 @@ async function generate() {
   } finally {
     busy.value = false;
   }
+}
+
+/* 生图占位：不接真实 API，把提示词导出成文本文件，用户拿去任何生图工具用 */
+function generateImagePlaceholder() {
+  const look = currentLook.value;
+  if (!active.value || !look) return;
+  if (!(lookDraft.value.prompt || look.prompt || "").trim()) {
+    toast("该形象还没有提示词——先在「形象描述」里写好外观锚点", 3600);
+    return;
+  }
+  window.open(exportLookPromptUrl(active.value.node_id, look.id), "_blank");
+  toast("生图 API 未接入，已导出提示词文件", 3600);
 }
 
 async function saveLook() {
@@ -326,9 +339,10 @@ onMounted(async () => {
         <div class="gen-bar">
           <span class="sel num">{{ studio.project?.video_model || "mock" }} · {{ studio.project?.aspect_ratio }}</span>
           <span class="hint">参考链：特写/后续形象以第一个形象（正面全身锚点）为参考</span>
-          <button class="btn primary sm" type="button" :disabled="busy" @click="generate">
-            生成当前形象
+          <button class="btn primary sm" type="button" @click="generateImagePlaceholder">
+            生成形象图
           </button>
+          <button class="btn sm" type="button" @click="generateImagePlaceholder">导出提示词</button>
         </div>
       </template>
     </div>
