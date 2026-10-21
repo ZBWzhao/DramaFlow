@@ -6,6 +6,7 @@
 import { computed, onMounted, ref } from "vue";
 import { useRouter } from "vue-router";
 import { loadProjects, openProject } from "./shellStore.js";
+import { getJSON } from "../api.js";
 
 const router = useRouter();
 const emit = defineEmits(["close"]);
@@ -43,7 +44,24 @@ const form = ref({
   video_model: "",
   script: "",
   split: true,
+  skills: { script_analysis: "", director: "", asset: "" },
+  auto_asset_table: false,
 });
+
+/* 制作 Skill：角色 → 可选清单（name@version），后端 /api/skills 已校验白名单 */
+const skillOptions = ref({ script_analysis: [], director: [], asset: [] });
+const SKILL_LABELS = [
+  ["script_analysis", "剧本理解 Skill"],
+  ["director", "导演 Skill"],
+  ["asset", "资产 Skill"],
+];
+
+function newerVersion(a, b) {
+  const pa = String(a.version || "").split(".").map(Number);
+  const pb = String(b.version || "").split(".").map(Number);
+  for (let i = 0; i < 3; i += 1) if ((pa[i] || 0) !== (pb[i] || 0)) return (pb[i] || 0) - (pa[i] || 0);
+  return 0;
+}
 
 const busy = ref(false);
 const error = ref("");
@@ -79,10 +97,15 @@ async function submit() {
   busy.value = true;
   error.value = "";
   try {
+    const skills = {};
+    for (const [key, value] of Object.entries(form.value.skills || {})) {
+      if (value) skills[key] = value;
+    }
+    const payload = { ...form.value, skills };
     const res = await fetch("/api/studio/projects", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(form.value),
+      body: JSON.stringify(payload),
     });
     const data = await res.json().catch(() => ({}));
     if (!res.ok) throw new Error(data.detail || `创建失败（${res.status}）`);
@@ -105,6 +128,21 @@ onMounted(async () => {
     form.value.video_model = videoModels.value[0]?.id || "";
   } catch {
     form.value.video_model = "mock-video-v1";
+  }
+  try {
+    const data = await getJSON("/api/skills");
+    const grouped = { script_analysis: [], director: [], asset: [] };
+    for (const s of data.skills || []) {
+      const key = String(s.role || "").replace(/-/g, "_");
+      if (key in grouped) grouped[key].push(s);
+    }
+    for (const key of Object.keys(grouped)) {
+      grouped[key].sort(newerVersion);
+      if (grouped[key].length) form.value.skills[key] = `${grouped[key][0].name}@${grouped[key][0].version}`;
+    }
+    skillOptions.value = grouped;
+  } catch {
+    skillOptions.value = { script_analysis: [], director: [], asset: [] };
   }
 });
 </script>
@@ -170,6 +208,21 @@ onMounted(async () => {
           </select>
         </label>
 
+        <div class="fld wide">
+          <span>制作 Skill · 决定各环节 AI 的工艺与工具边界</span>
+          <div class="skill-row">
+            <label v-for="[key, label] in SKILL_LABELS" :key="key" class="skill-pick">
+              <span>{{ label }}</span>
+              <select v-model="form.skills[key]" class="inp">
+                <option value="">默认</option>
+                <option v-for="s in skillOptions[key]" :key="`${s.name}@${s.version}`" :value="`${s.name}@${s.version}`">
+                  {{ s.name }} v{{ s.version }}
+                </option>
+              </select>
+            </label>
+          </div>
+        </div>
+
         <label class="fld wide">
           <span>视频生成模型</span>
           <select v-model="form.video_model" class="inp">
@@ -197,11 +250,15 @@ onMounted(async () => {
           <input v-model="form.split" type="checkbox" />
           按「第N集」自动分集
         </label>
+        <label class="fld toggle">
+          <input v-model="form.auto_asset_table" type="checkbox" />
+          创建后自动生成资产表（解析到资产表为止，不生图）
+        </label>
       </div>
 
       <div class="dlg-foot">
         <span v-if="error" class="err">{{ error }}</span>
-        <span v-else class="note"><i>✓</i>创建后自动生成资产表 · 画面比例与画质创建后仍可修改</span>
+        <span v-else class="note"><i>✓</i>画面比例与画质创建后仍可修改</span>
         <button class="btn" type="button" @click="$emit('close')">取消</button>
         <button class="btn primary" type="button" :disabled="busy || !form.title.trim()" @click="submit">
           {{ busy ? "创建中…" : "确认创建" }}
@@ -212,6 +269,9 @@ onMounted(async () => {
 </template>
 
 <style scoped>
+.skill-row { display: grid; grid-template-columns: repeat(3, 1fr); gap: var(--sp-3); }
+.skill-pick { display: flex; flex-direction: column; gap: 5px; font-size: var(--fs-12); color: var(--text-3); }
+.skill-pick .inp { width: 100%; }
 .dlg-mask { position: fixed; inset: 0; background: rgba(5, 4, 3, .7); z-index: 50; display: flex; align-items: center; justify-content: center; backdrop-filter: blur(2px); }
 .dlg, .dlg * { box-sizing: border-box; margin: 0; padding: 0; }
 .dlg { background: var(--panel); border: 1px solid var(--line-2); border-radius: var(--r-3); width: 840px; max-width: 94vw; max-height: 88vh; overflow-y: auto; padding: var(--sp-5) var(--sp-6); }
