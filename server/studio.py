@@ -18,17 +18,19 @@ from __future__ import annotations
 import asyncio
 import json
 import re
+from urllib.parse import quote
 import time
 import uuid
 from pathlib import Path
 from typing import Any, Iterable, Mapping
 
 from fastapi import APIRouter, HTTPException
-from fastapi.responses import StreamingResponse
+from fastapi.responses import PlainTextResponse, StreamingResponse
 from pydantic import BaseModel, Field
 
 from core.canvas import Canvas, CanvasError
 from core.canvas_repository import mutate_canvas_with_retry
+from core.asset_tables import AssetTables, merge_asset_tables, parse_asset_tables
 from core.skills import discover_skills
 from core.story_analysis import CARDS, StoryAnalysis, run_story_analysis
 from core.studio_rules import (
@@ -879,6 +881,220 @@ async def story_analysis_cancel(body: CancelBody) -> dict[str, Any]:
     run["cancel"].set()   # 卡间检查用：已完成卡保留
     run["task"].cancel()  # 打断在飞行中的 LLM 调用（await 点直接抛 CancelledError）
     return {"ok": True}
+
+
+# ---------------------------------------------------------------------------
+# 资产表（草稿区）：parse 只写 meta.asset_tables；sync 幂等只增不改不删。
+# 与剧本理解共用 _story_runs 单飞约束。
+# ---------------------------------------------------------------------------
+def _episodes_texts(node: Canvas) -> list[dict[str, Any]]:
+    out = []
+    for episode in _episodes(node):
+        node_id = str(episode.get("script_node_id") or "")
+        body = node.read_text(node_id) if node_id and node_id in node.nodes else ""
+        if body.strip():
+            out.append({"no": int(episode.get("no") or 1), "text": body})
+    return out
+
+
+def _existing_assets_projection(graph: Canvas) -> list[dict[str, Any]]:
+    """资产库投影（merge 纯函数的输入形状）。图片/锁等库字段不进投影——同步永不碰它们。"""
+    out = []
+    for node in graph.nodes.values():
+        if node.type != "asset":
+            continue
+        kind = str(node.data.get("kind") or "")
+        if kind not in {"character", "scene", "prop"}:
+            continue
+        looks = _asset_looks(graph, node)
+        out.append({
+            "node_id": node.id,
+            "kind": kind,
+            "name": _clean_asset_name(str(node.data.get("name") or node.label or node.id)),
+            "description": str(node.data.get("description") or ""),
+            "bio": str(node.data.get("bio") or ""),
+            "looks": [{"name": str(lk.get("name") or ""), "prompt": str(lk.get("prompt") or "")} for lk in looks],
+        })
+    return out
+
+
+class ParseRequest(BaseModel):
+    canvas: str
+
+
+@router.post("/asset-tables/parse")
+async def asset_tables_parse(body: ParseRequest) -> StreamingResponse:
+    _require_configured()
+    node = await _load(body.canvas)
+    active = _story_runs.get(body.canvas)
+    if active is not None and not active["task"].done():
+        raise HTTPException(status_code=409, detail="这个项目正在解析剧本/生成资产表")
+    episodes = _episodes_texts(node)
+    if not episodes:
+        raise HTTPException(status_code=400, detail="还没有剧本正文，先在剧本页导入")
+
+    cancel = asyncio.Event()
+    queue: asyncio.Queue = asyncio.Queue()
+    version = _skill_version(node, "asset", "2.0.0")
+    known = [str(c.get("name") or "") for c in ((node.meta or {}).get("asset_tables") or {}).get("characters", [])]
+    llm = _registry.llm
+    canvas_name = body.canvas
+
+    async def pipeline() -> None:
+        def on_event(event: dict[str, Any]) -> None:
+            if event.get("type") == "parse_done":
+                return  # 落盘后由这里统一发，避免双份
+            queue.put_nowait(event)
+
+        try:
+            tables = await parse_asset_tables(
+                episodes,
+                llm,
+                known=known,
+                on_event=on_event,
+                cancel=cancel,
+            )
+            tables["skill"] = {"name": "asset", "version": version}
+            tables["updated_at"] = int(time.time())
+            # 只覆写草稿表，绝不触碰资产库（原则：表是草稿区）
+            await mutate_canvas_with_retry(
+                _registry.canvas_repository,
+                canvas_name,
+                lambda graph: _write_asset_tables(graph, tables),
+            )
+            queue.put_nowait({"type": "parse_done", "tables": tables})
+        except asyncio.CancelledError:  # pragma: no cover
+            queue.put_nowait({"type": "parse_done", "tables": {}})
+        finally:
+            queue.put_nowait(None)
+
+    task = asyncio.create_task(pipeline())
+    _story_runs[canvas_name] = {"task": task, "cancel": cancel}
+
+    async def stream():
+        try:
+            while True:
+                event = await queue.get()
+                if event is None:
+                    break
+                yield _ndjson_line(event)
+        finally:
+            _story_runs.pop(canvas_name, None)
+
+    return StreamingResponse(stream(), media_type="application/x-ndjson")
+
+
+def _write_asset_tables(graph: Canvas, tables: dict[str, Any]) -> bool:
+    meta = dict(graph.meta or {})
+    meta["asset_tables"] = AssetTables(**tables).model_dump()
+    graph.meta = meta
+    return True
+
+
+class AssetTablesRequest(BaseModel):
+    canvas: str
+    tables: dict[str, Any]
+
+
+@router.put("/asset-tables")
+async def put_asset_tables(body: AssetTablesRequest) -> dict[str, Any]:
+    """用户在网格里编辑整表提交：schema 校验后覆写（skill/synced_at 沿用旧值）。"""
+    node = await _load(body.canvas)
+    existing = dict((node.meta or {}).get("asset_tables") or {})
+    tables = AssetTables(**{**existing, **body.tables}).model_dump()
+    await mutate_canvas_with_retry(
+        _registry.canvas_repository, body.canvas, lambda graph: _write_asset_tables(graph, tables)
+    )
+    return {"ok": True, "tables": tables}
+
+
+class SyncRequest(BaseModel):
+    canvas: str
+
+
+@router.post("/asset-tables/sync")
+async def sync_asset_tables(body: SyncRequest) -> dict[str, Any]:
+    """表 → 库：幂等合并（只增不改不删），报告可见。"""
+    node = await _load(body.canvas)
+    tables_raw = (node.meta or {}).get("asset_tables") or {}
+    if not isinstance(tables_raw, dict) or not (
+        tables_raw.get("characters") or tables_raw.get("scenes") or tables_raw.get("props")
+    ):
+        raise HTTPException(status_code=400, detail="还没有资产表，先解析或手工编辑")
+    tables = AssetTables(**tables_raw)
+    plan = merge_asset_tables(_existing_assets_projection(node), tables)
+    report: dict[str, Any] = {"merged": plan["merged"], "skipped": plan["untouched"], "synced_at": int(time.time())}
+
+    def mutate(graph: Canvas) -> bool:
+        created_assets = created_looks = 0
+        for item in plan["create_assets"]:
+            data: dict[str, Any] = {
+                "kind": item["kind"],
+                "name": item["name"],
+                "description": str(item.get("description") or ""),
+            }
+            if item.get("bio"):
+                data["bio"] = str(item["bio"])
+            node_new = graph.add_node("asset", item["name"], data=data)
+            looks = []
+            for index, look in enumerate(item.get("looks", []), 1):
+                looks.append({"id": f"look_{node_new.id}_{index}", "name": look["name"], "prompt": ""})
+                created_looks += 1
+            if looks:
+                # add_node 对 data 是浅拷贝：回写必须落在返回的 node 上，不能写回局部 dict
+                node_new.data["looks"] = looks
+                node_new.data["active_look_id"] = looks[0]["id"]
+            created_assets += 1
+        for item in plan["add_looks"]:
+            target = graph.nodes.get(item["node_id"])
+            if target is None or target.type != "asset":
+                continue
+            looks = target.data.get("looks")
+            if not isinstance(looks, list):
+                looks = []
+            looks.append({"id": f"look_{target.id}_{len(looks) + 1}", "name": item["look"]["name"], "prompt": ""})
+            target.data["looks"] = looks
+            created_looks += 1
+        for item in plan["fill_fields"]:
+            target = graph.nodes.get(item["node_id"])
+            if target is None or target.type != "asset":
+                continue
+            if item["field"] == "bio" and not str(target.data.get("bio") or "").strip():
+                target.data["bio"] = str(item["value"])
+            elif item["field"] == "description" and not str(target.data.get("description") or "").strip():
+                target.data["description"] = str(item["value"])
+        meta = dict(graph.meta or {})
+        tables_meta = dict(meta.get("asset_tables") or {})
+        tables_meta["synced_at"] = report["synced_at"]
+        meta["asset_tables"] = AssetTables(**tables_meta).model_dump()
+        graph.meta = meta
+        report["created_assets"] = created_assets
+        report["created_looks"] = created_looks
+        return True
+
+    await mutate_canvas_with_retry(_registry.canvas_repository, body.canvas, mutate)
+    return report
+
+
+@router.get("/looks/export-prompt")
+async def export_look_prompt(canvas: str, asset: str, look: str) -> PlainTextResponse:
+    """生图占位：不接 API，导出提示词文本文件，执行权在用户手里。"""
+    graph = await _load(canvas)
+    node = graph.nodes.get(asset)
+    if node is None or node.type != "asset":
+        raise HTTPException(status_code=404, detail=f"资产不存在：{asset}")
+    target = next((lk for lk in _asset_looks(graph, node) if lk.get("id") == look), None)
+    if target is None:
+        raise HTTPException(status_code=404, detail=f"形象不存在：{look}")
+    prompt = str(target.get("prompt") or "").strip()
+    if not prompt:
+        raise HTTPException(status_code=400, detail="该形象还没有提示词，先在资产页写好描述")
+    name = _clean_asset_name(str(node.data.get("name") or node.label or node.id))
+    filename = quote(f"{name}-{target.get('name', '形象')}-提示词.txt")
+    return PlainTextResponse(
+        prompt,
+        headers={"Content-Disposition": f"attachment; filename*=UTF-8''{filename}"},
+    )
 
 
 class SkillsRequest(BaseModel):
