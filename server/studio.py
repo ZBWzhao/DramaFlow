@@ -991,6 +991,53 @@ def _write_asset_tables(graph: Canvas, tables: dict[str, Any]) -> bool:
     return True
 
 
+def _spawn_auto_pipeline(canvas_name: str) -> None:
+    """auto_asset_table 的后台任务：剧本理解全卡 + 资产解析，停在表不生图。
+
+    已有分析/解析在跑就让位（用户手动触发优先）；失败写进 meta 里可诊断，
+    不打断导入本身的响应。
+    """
+    active = _story_runs.get(canvas_name)
+    if active is not None and not active["task"].done():
+        return
+
+    async def job() -> None:
+        try:
+            graph = await _load(canvas_name)
+            version_s = _skill_version(graph, "script_analysis", "1.0.0")
+            script_text = _story_script_text(graph)
+            if script_text.strip():
+                analysis = await run_story_analysis(
+                    script_text,
+                    _registry.llm,
+                    skill_tag={"name": "script-analysis", "version": version_s},
+                )
+                await _merge_story_analysis(canvas_name, analysis)
+            graph = await _load(canvas_name)
+            episodes = _episodes_texts(graph)
+            if episodes:
+                version_a = _skill_version(graph, "asset", "2.0.0")
+                tables = await parse_asset_tables(episodes, _registry.llm)
+                tables["skill"] = {"name": "asset", "version": version_a}
+                tables["updated_at"] = int(time.time())
+                await mutate_canvas_with_retry(
+                    _registry.canvas_repository, canvas_name, lambda g: _write_asset_tables(g, tables)
+                )
+        except Exception as exc:
+            def note_error(g: Canvas) -> bool:
+                meta = dict(g.meta or {})
+                meta["auto_pipeline_error"] = f"{time.time():.0f}: {exc}"
+                g.meta = meta
+                return True
+
+            try:
+                await mutate_canvas_with_retry(_registry.canvas_repository, canvas_name, note_error)
+            except Exception:  # pragma: no cover - 连错误都写不进去时只能放弃
+                pass
+
+    _story_runs[canvas_name] = {"task": asyncio.create_task(job()), "cancel": asyncio.Event()}
+
+
 class AssetTablesRequest(BaseModel):
     canvas: str
     tables: dict[str, Any]
@@ -2458,6 +2505,7 @@ async def import_script(canvas: str, body: ImportScriptRequest) -> dict[str, Any
 
     meta = dict(graph.meta or {})
     existing = [int(item.get("no") or 0) for item in meta.get("episodes") or []]
+    first_import = not existing  # 首次导入 = 之前没有分集
     next_no = max(existing or [0]) + 1
     script_nodes: list[dict[str, Any]] = []
 
@@ -2493,6 +2541,8 @@ async def import_script(canvas: str, body: ImportScriptRequest) -> dict[str, Any
     ]
     graph.meta = meta
     revision = await _save(graph)
+    if first_import and _project_meta(graph).get("auto_asset_table"):
+        _spawn_auto_pipeline(canvas)
     return {
         "ok": True,
         "revision": revision,
