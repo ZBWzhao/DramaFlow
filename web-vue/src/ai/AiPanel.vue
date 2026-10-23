@@ -378,8 +378,9 @@ defineExpose({ send });
       <button class="ui-btn sm" type="button" @click="stopStaleRun">停止它</button>
     </div>
 
-    <!-- 历史下拉 -->
+    <!-- 历史下拉（只列当前项目的会话） -->
     <div v-if="historyOpen" class="history">
+      <div class="h-cap num">{{ canvas }} · 历史会话 {{ sessions.length ? `(${sessions.length})` : "" }}</div>
       <div v-if="!sessions.length" class="h-empty">这个项目还没有历史会话</div>
       <button v-for="s in sessions" :key="s.id" class="h-item" type="button" @click="loadSession(s)">
         <span class="h-title">{{ s.title || "未命名会话" }}</span>
@@ -544,13 +545,15 @@ defineExpose({ send });
 .h-btn:disabled { opacity: .4; }
 .h-ico { font-size: var(--fs-13); line-height: 1; }
 
-/* 历史下拉（absolute 悬浮，不挤消息流） */
+/* 历史下拉（absolute 悬浮，不挤消息流）。
+ * 底色要和聊天区拉开一档（#1e1d1b vs #121110），否则边界隐形像「盖住内容」。 */
 .history {
   position: absolute; top: 58px; right: 10px; z-index: 40;
-  width: min(300px, calc(100% - 20px)); max-height: 320px; overflow-y: auto;
-  background: var(--panel); border: 1px solid var(--line-2); border-radius: 12px;
-  box-shadow: 0 16px 40px rgba(0, 0, 0, .5); padding: 6px;
+  width: min(320px, calc(100% - 20px)); max-height: 340px; overflow-y: auto;
+  background: #1e1d1b; border: 1px solid rgba(255, 251, 243, .16); border-radius: 12px;
+  box-shadow: 0 20px 56px rgba(0, 0, 0, .72), 0 2px 8px rgba(0, 0, 0, .5); padding: 6px;
 }
+.h-cap { padding: 8px 12px 7px; color: var(--text-3); font-size: var(--fs-11); letter-spacing: .04em; border-bottom: 1px solid var(--line); margin-bottom: 4px; }
 .h-empty { padding: 16px; text-align: center; color: var(--text-3); font-size: var(--fs-12); }
 .h-item { display: flex; flex-direction: column; gap: 3px; width: 100%; text-align: left; padding: 9px 12px; border-radius: 8px; background: none; border: none; }
 .h-item:hover { background: var(--card); }
@@ -558,7 +561,7 @@ defineExpose({ send });
 .h-item .h-meta { font-size: var(--fs-11); color: var(--text-3); }
 
 /* ---------- 消息流 ---------- */
-.ai-body { flex: 1; min-height: 0; overflow-y: auto; padding: 16px 14px 8px; display: flex; flex-direction: column; gap: 16px; }
+.ai-body { flex: 1; min-height: 0; overflow-y: auto; padding: 18px 16px 10px; display: flex; flex-direction: column; gap: 18px; }
 .row { display: flex; flex-direction: column; gap: 6px; }
 .row.u { align-items: flex-end; }
 .row.b { align-items: stretch; }
@@ -566,7 +569,7 @@ defineExpose({ send });
 .b-line .avatar.sm { margin-top: 2px; }
 .b-col { display: flex; flex-direction: column; gap: 8px; min-width: 0; flex: 1; }
 
-.bubble { border-radius: 14px; padding: 10px 14px; font-size: var(--fs-13); line-height: 1.85; color: var(--text-2); max-width: 100%; }
+.bubble { border-radius: 14px; padding: 12px 15px; font-size: var(--fs-14); line-height: 1.9; color: var(--text-2); max-width: 100%; }
 .bubble.user {
   background: var(--card); border: 1px solid var(--line-2); color: var(--text);
   white-space: pre-wrap; max-width: 86%; border-radius: 14px 14px 4px 14px;

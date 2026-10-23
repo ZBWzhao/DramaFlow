@@ -5,8 +5,9 @@
  * script + segments（都按 ?episode 收窄）。编辑保存走 importScript（重新分集
  * 即保存语义，服务端会告警异常集）；「开始制作」复用 produceEpisode。
  */
-import { computed, onMounted, ref } from "vue";
+import { computed, onBeforeUnmount, onMounted, ref } from "vue";
 import { useRoute, useRouter } from "vue-router";
+import { ElMessageBox } from "element-plus";
 import AiPanel from "../ai/AiPanel.vue";
 import { errorText } from "../api.js";
 import { importScript, loadAll, loadProject, loadScript, loadSegments, produceEpisode, studio } from "../studio/studioStore.js";
@@ -41,27 +42,106 @@ const assetsAll = computed(() => {
 
 const producing = computed(() => ["queued", "running"].includes(studio.produceJob?.status));
 
-/* 正文渲染：对白行（说话人：「…」）说话人加粗、台词鎏金；场景行弱化 */
+/* 正文渲染：五类行——场景 / 引导块 / 分隔线 / 动作行 / 对白。
+ * AI 剧本里常见的 markdown 痕迹（*强调*、> 引用、--- 分隔）不再裸奔；
+ * 对白行说话人加粗、台词鎏金，动作行弱化——这页最有价值的视觉资产。 */
 const paragraphs = computed(() =>
   String(script.value?.script || "")
     .split(/\n+/)
     .map((raw) => raw.trim())
     .filter(Boolean)
-    .map((line) => {
-      const m = line.match(/^(#{1,4}\s*.+|第[一二三四五六七八九十0-9]+[场幕].*)$/);
-      if (m) return { kind: "scene", text: line.replace(/^#{1,4}\s*/, "") };
-      const d = line.match(/^([^\s：:]{1,10})[：:]\s*[「“]?([\s\S]+)[」”]?$/);
-      if (d) return { kind: "line", speaker: d[1], text: d[2] };
-      return { kind: "p", text: line };
+    .map((line, index) => {
+      if (/^(-{3,}|\*{3,}|_{3,})$/.test(line)) return { kind: "hr", index };
+      if (/^#{1,4}\s*/.test(line) || /^第[一二三四五六七八九十0-9]+[场幕]/.test(line))
+        return { kind: "scene", index, text: line.replace(/^#{1,4}\s*/, "") };
+      if (/^>\s?/.test(line)) return { kind: "quote", index, text: line.replace(/^>\s?/, "") };
+      // 说话人独立行：**教授**（看了一圈）——markdown 加粗的说话人不再裸奔
+      let m = line.match(/^\*\*([^\s：:*]{1,12})\*\*\s*(（[^）]*）)?\s*$/);
+      if (m) return { kind: "speaker", index, speaker: m[1], aside: (m[2] || "").replace(/[（）]/g, "") };
+      // **说话人**：台词
+      m = line.match(/^\*\*([^\s：:*]{1,12})\*\*\s*[：:]\s*([\s\S]+)$/);
+      if (m) return { kind: "line", index, speaker: m[1], text: m[2].replace(/[」”]\s*$/, "") };
+      const act = line.match(/^\*([^*].*)\*$/);
+      if (act) return { kind: "action", index, text: act[1].replace(/\*\*([^*]+)\*\*/g, "$1").trim() };
+      const d = line.match(/^([^\s：:*]{1,10})[：:]\s*[「“]?([\s\S]+)[」”]?$/);
+      if (d) return { kind: "line", index, speaker: d[1], text: d[2].replace(/^\*+/, "").replace(/\*+$/, "") };
+      return { kind: "p", index, text: line.replace(/\*\*([^*]+)\*\*/g, "$1").replace(/^\*([^*]+)\*$/g, "$1") };
     }),
 );
+
+/* 场景跳转轨（DeepSeek 式大纲）：点场景名平滑跳转，滚动时反向高亮当前场 */
+const scenes = computed(() => paragraphs.value.filter((p) => p.kind === "scene"));
+const sceneLoc = (text) => text.replace(/^场景\s*\d*\s*[｜|]?\s*/, "").trim() || text;
+const activeScene = ref(-1);
+const scrollEl = ref(null);
+let railLockUntil = 0;
+function jumpScene(p) {
+  const el = document.getElementById(`scene-${p.index}`);
+  if (!el) return;
+  const i = scenes.value.indexOf(p);
+  if (i >= 0) activeScene.value = i; // 立即高亮，不等平滑滚动触发 scroll
+  railLockUntil = Date.now() + 900; // 平滑滚动期间不让 scroll 抢高亮
+  el.scrollIntoView({ behavior: "smooth", block: "start" });
+}
+function onBodyScroll() {
+  const root = scrollEl.value;
+  if (!root || Date.now() < railLockUntil) return;
+  const rootTop = root.getBoundingClientRect().top;
+  let cur = -1;
+  scenes.value.forEach((s, i) => {
+    const el = document.getElementById(`scene-${s.index}`);
+    if (el && el.getBoundingClientRect().top - rootTop <= 110) cur = i;
+  });
+  activeScene.value = cur;
+}
+
+/* 三列宽度可拖：左（集列表）/右（AI 面板）记住宽度，中间 1fr 归正文 */
+const COL_KEY = "df.script.cols";
+const savedCols = (() => {
+  try {
+    return JSON.parse(localStorage.getItem(COL_KEY) || "{}");
+  } catch {
+    return {};
+  }
+})();
+const leftW = ref(Number(savedCols.left) || 232);
+const rightW = ref(Number(savedCols.right) || 340);
+let dragCol = "";
+function startColDrag(which) {
+  dragCol = which;
+  document.body.style.cursor = "col-resize";
+  document.body.style.userSelect = "none";
+  window.addEventListener("pointermove", onColDrag);
+  window.addEventListener("pointerup", endColDrag, { once: true });
+}
+function onColDrag(e) {
+  if (dragCol === "left") leftW.value = Math.min(420, Math.max(180, e.clientX));
+  if (dragCol === "right") rightW.value = Math.min(620, Math.max(300, window.innerWidth - e.clientX));
+}
+function endColDrag() {
+  window.removeEventListener("pointermove", onColDrag);
+  document.body.style.cursor = "";
+  document.body.style.userSelect = "";
+  if (dragCol) localStorage.setItem(COL_KEY, JSON.stringify({ left: leftW.value, right: rightW.value }));
+  dragCol = "";
+}
+onBeforeUnmount(() => {
+  window.removeEventListener("pointermove", onColDrag);
+  document.body.style.cursor = "";
+  document.body.style.userSelect = "";
+});
 
 function pickEpisode(no) {
   if (Number(no) === currentEp.value) return;
   studio.project.episode = Number(no);
   busy.value = true;
   Promise.all([loadScript(), loadSegments()])
-    .then(() => (notice.value = ""))
+    .then(() => {
+      notice.value = "";
+      editing.value = false;
+      if (scrollEl.value) scrollEl.value.scrollTop = 0;
+      activeScene.value = -1;
+    })
     .catch((err) => (notice.value = errorText(err)))
     .finally(() => (busy.value = false));
 }
@@ -69,6 +149,29 @@ function pickEpisode(no) {
 function startEdit() {
   editText.value = script.value?.script || "";
   editing.value = true;
+}
+
+/* 编辑安全：改过没保存就不许静默丢弃 */
+const editDirty = computed(() => editing.value && editText.value !== (script.value?.script || ""));
+async function cancelEdit() {
+  if (editDirty.value) {
+    try {
+      await ElMessageBox.confirm("正文已经改过但还没保存，放弃这些修改？", "未保存的修改", {
+        type: "warning",
+        confirmButtonText: "放弃修改",
+        cancelButtonText: "继续编辑",
+      });
+    } catch {
+      return; // 用户选择继续编辑
+    }
+  }
+  editing.value = false;
+}
+function onEditKey(e) {
+  if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "s") {
+    e.preventDefault();
+    if (!busy.value && editText.value.trim()) saveViaResplit();
+  }
 }
 
 async function saveViaResplit() {
@@ -117,7 +220,7 @@ onMounted(refresh);
 </script>
 
 <template>
-  <div class="script-lay">
+  <div class="script-lay" :style="{ gridTemplateColumns: `${leftW}px 6px minmax(0,1fr) 6px ${rightW}px` }">
     <!-- ── 左：集列表 + 制作准备 ── -->
     <aside class="ep-side">
       <div class="side-cap cap">剧本列表</div>
@@ -146,6 +249,9 @@ onMounted(refresh);
       </div>
     </aside>
 
+    <!-- 列宽拖拽把手（左） -->
+    <span class="drag-col" aria-hidden="true" @pointerdown.prevent="startColDrag('left')"></span>
+
     <!-- ── 中：正文 ── -->
     <div class="script-main">
       <div class="script-head">
@@ -161,29 +267,58 @@ onMounted(refresh);
         </template>
       </div>
 
-      <div class="script-scroll">
+      <div ref="scrollEl" class="script-scroll" @scroll="onBodyScroll">
         <StoryAnalysisCards v-if="tab === 'analysis'" />
         <AssetTablesPanel v-else-if="tab === 'tables'" />
         <template v-else>
-        <div v-if="editing" class="script-doc editing">
-          <textarea v-model="editText" class="edit-area" spellcheck="false"></textarea>
-          <div class="edit-tip">保存 = 按新全文重新分集（单集异常会告警）</div>
-        </div>
-        <article v-else class="script-doc">
-          <template v-for="(p, i) in paragraphs" :key="i">
-            <div v-if="p.kind === 'scene'" class="scene">{{ p.text }}</div>
-            <p v-else-if="p.kind === 'line'"><b>{{ p.speaker }}</b>：{{ p.text }}</p>
-            <p v-else>{{ p.text }}</p>
-          </template>
-          <div v-if="!paragraphs.length" class="empty">这一集还没有正文</div>
-        </article>
+          <div class="script-inner">
+            <!-- 场景跳转轨：点场景名直达，滚动时反向高亮当前场（窄屏隐藏） -->
+            <aside v-if="scenes.length > 1 && !editing" class="scene-rail">
+              <div class="sr-stick">
+                <div class="sr-cap">场景大纲</div>
+                <button
+                  v-for="(s, i) in scenes"
+                  :key="s.index"
+                  class="sr-it"
+                  :class="{ on: i === activeScene }"
+                  type="button"
+                  @click="jumpScene(s)"
+                >
+                  <span class="n num">{{ i + 1 }}</span>
+                  <span class="loc">{{ sceneLoc(s.text) }}</span>
+                </button>
+              </div>
+            </aside>
+            <div v-if="editing" class="script-doc editing">
+              <textarea v-model="editText" class="edit-area" spellcheck="false" @keydown="onEditKey"></textarea>
+              <div class="edit-tip">
+                <span :class="{ warn: editDirty }">{{ editText.length }} 字</span>
+                · Ctrl+S 保存 = 按新全文重新分集（单集异常会告警）
+              </div>
+            </div>
+            <article v-else class="script-doc">
+              <template v-for="(p, i) in paragraphs" :key="i">
+                <div v-if="p.kind === 'hr'" class="rule" aria-hidden="true"></div>
+                <div v-else-if="p.kind === 'scene'" :id="`scene-${p.index}`" class="scene">{{ p.text }}</div>
+                <blockquote v-else-if="p.kind === 'quote'" class="quote">{{ p.text }}</blockquote>
+                <div v-else-if="p.kind === 'action'" class="action">{{ p.text }}</div>
+                <div v-else-if="p.kind === 'speaker'" class="speaker">
+                  <b>{{ p.speaker }}</b><span v-if="p.aside" class="aside">（{{ p.aside }}）</span>
+                </div>
+                <p v-else-if="p.kind === 'line'"><b>{{ p.speaker }}</b>：{{ p.text }}</p>
+                <p v-else>{{ p.text }}</p>
+              </template>
+              <div v-if="!paragraphs.length" class="empty">这一集还没有正文</div>
+            </article>
+          </div>
         </template>
       </div>
 
       <div v-if="tab === 'script'" class="script-foot">
         <template v-if="editing">
-          <button class="btn sm" :disabled="busy" @click="editing = false">取消</button>
+          <button class="btn sm" :disabled="busy" @click="cancelEdit">取消</button>
           <button class="btn primary sm" :disabled="busy" @click="saveViaResplit">保存并重新分集</button>
+          <span v-if="editDirty" class="dirty-hint">有未保存的修改</span>
         </template>
         <template v-else>
           <button class="btn sm" @click="startEdit">编辑剧本</button>
@@ -196,6 +331,9 @@ onMounted(refresh);
         </template>
       </div>
     </div>
+
+    <!-- 列宽拖拽把手（右） -->
+    <span class="drag-col" aria-hidden="true" @pointerdown.prevent="startColDrag('right')"></span>
 
     <!-- ── 右：停靠 AI ── -->
     <AiPanel
@@ -232,8 +370,12 @@ onMounted(refresh);
 .dt { border: none; background: none; color: var(--text-3); font-size: var(--fs-14); font-family: var(--serif); letter-spacing: .05em; padding: 5px 14px; cursor: pointer; border-radius: var(--r-1); }
 .dt:hover { color: var(--text-2); }
 .dt.on { color: var(--text); background: var(--card-2); }
-.script-lay { display: grid; grid-template-columns: 232px 1fr 340px; height: 100%; min-height: 0; }
+.script-lay { display: grid; grid-template-columns: 232px 6px minmax(0, 1fr) 6px 340px; height: 100%; min-height: 0; }
 .script-lay, .script-lay * { box-sizing: border-box; }
+
+/* 列宽拖拽把手：平时隐形，悬停露出金线，拖动改对应列宽 */
+.drag-col { cursor: col-resize; background: transparent; transition: background 120ms; z-index: 5; }
+.drag-col:hover, .drag-col:active { background: rgba(194, 163, 107, .28); }
 
 /* 左栏 */
 .ep-side { background: var(--bg-2); border-right: 1px solid var(--line); display: flex; flex-direction: column; min-height: 0; }
@@ -260,12 +402,38 @@ onMounted(refresh);
 .script-head h2 { font-family: var(--serif); font-size: var(--fs-16); font-weight: 600; }
 .script-head .vm { font-size: var(--fs-11); color: var(--text-3); }
 .script-scroll { flex: 1; overflow-y: auto; }
-.script-doc { max-width: 700px; margin: 0 auto; padding: var(--sp-6) var(--sp-6) 96px; font-family: var(--serif); font-size: 16px; line-height: 2.15; color: var(--text); }
+.script-inner { max-width: 700px; margin: 0 auto; position: relative; }
+.script-doc { max-width: 100%; padding: var(--sp-6) var(--sp-6) 96px; font-family: var(--serif); font-size: 16px; line-height: 2.15; color: var(--text); }
 .script-doc p { margin-bottom: var(--sp-3); text-align: justify; }
 .script-doc p b { color: var(--gold); font-weight: 600; }
 .script-doc .scene { color: var(--text-3); font-size: var(--fs-13); letter-spacing: .12em; margin: var(--sp-5) 0 var(--sp-3); }
 .script-doc .scene::before { content: "◇ "; color: var(--accent); font-size: 10px; }
+/* 动作行（舞台指示 / 画外音）：弱化、sans、略小——和对白拉开层次 */
+.script-doc .action { color: var(--text-3); font-family: var(--sans); font-size: 14px; line-height: 1.9; margin-bottom: var(--sp-3); }
+/* 说话人独立行：鎏金加粗 + 括号动作弱化，紧邻台词 */
+.script-doc .speaker { margin: var(--sp-4) 0 var(--sp-1); }
+.script-doc .speaker b { color: var(--gold); font-weight: 600; }
+.script-doc .speaker .aside { color: var(--text-3); font-size: 14px; margin-left: 6px; }
+/* 引导块（> 开头的制作说明）：左边线 + 弱色 */
+.script-doc .quote { margin: 0 0 var(--sp-3); padding: 2px 0 2px 14px; border-left: 2px solid var(--line-2); color: var(--text-3); font-family: var(--sans); font-size: var(--fs-13); line-height: 1.8; }
+/* 分隔线 */
+.script-doc .rule { display: flex; align-items: center; margin: var(--sp-4) 0; }
+.script-doc .rule::before, .script-doc .rule::after { content: ""; flex: 1; height: 1px; background: var(--line-2); }
+
+/* 场景跳转轨（正文左缘，DeepSeek 式大纲；视口不够宽时藏） */
+.scene-rail { position: absolute; left: -192px; top: var(--sp-6); bottom: 96px; width: 176px; }
+.sr-stick { position: sticky; top: 12px; display: flex; flex-direction: column; gap: 1px; max-height: calc(100vh - 220px); overflow-y: auto; }
+.sr-cap { font-size: 10px; letter-spacing: .1em; color: var(--text-3); padding: 0 0 6px 11px; }
+.sr-it { display: flex; gap: 7px; align-items: baseline; text-align: left; border: none; background: none; color: var(--text-3); font-size: var(--fs-12); padding: 5px 10px; cursor: pointer; border-left: 2px solid var(--line); font-family: inherit; }
+.sr-it:hover { color: var(--text-2); }
+.sr-it.on { color: var(--gold); border-left-color: var(--accent); }
+.sr-it .n { flex: none; font-size: 10px; opacity: .7; }
+.sr-it .loc { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+@media (max-width: 1560px) { .scene-rail { display: none; } }
+
 .script-doc .empty, .script-doc .edit-tip { font-family: var(--sans); color: var(--text-3); font-size: var(--fs-13); padding: var(--sp-5) 0; }
+.edit-tip .warn { color: var(--warn); }
+.dirty-hint { color: var(--warn); font-size: var(--fs-12); margin-left: var(--sp-2); }
 .edit-area { width: 100%; min-height: 60vh; background: var(--card); border: 1px solid var(--line-2); border-radius: var(--r-2); color: var(--text); font-family: var(--serif); font-size: 15px; line-height: 2; padding: var(--sp-4); resize: vertical; }
 .edit-area:focus { outline: none; border-color: rgba(201, 85, 61, .5); }
 

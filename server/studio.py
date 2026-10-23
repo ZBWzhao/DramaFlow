@@ -2480,6 +2480,12 @@ async def get_script(canvas: str, episode: int | None = None) -> dict[str, Any]:
         bucket = by_episode.get(int(item.get("no") or 1), [])
         item["segment_total"] = len(bucket)
         item["segment_done"] = sum(1 for seg in bucket if seg.get("status") == "done")
+        # 每集字数：集列表要显示；老画布没有 script_node_id 的当前集退回整段正文
+        node_id = str(item.get("script_node_id") or "")
+        body = graph.read_text(node_id) if node_id and node_id in graph.nodes else ""
+        if not body and int(item.get("no") or 1) == episode_no:
+            body = script
+        item["chars"] = len(body)
     if current is not None:
         current = next(
             (item for item in episodes if int(item.get("no") or 1) == episode_no), current
