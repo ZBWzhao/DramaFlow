@@ -2802,3 +2802,104 @@ textarea {
   .cv2 .node-media .node-menu,
   .cv2 .ring-bar { transition: none; }
 }
+
+
+/* ============================================================
+ * Agent 共创可视化 + 影响传播 + 片段心跳线 + 空间过滤
+ * （信号源：store.js 的 changedNodeIds / canvasActivity，画布端消费）
+ * ============================================================ */
+
+/* Agent 活动浮标：建卡/连线时顶部金丸 */
+.cv2 .ai-hud {
+  position: absolute; top: 14px; left: 50%; transform: translateX(-50%);
+  z-index: 36; display: inline-flex; align-items: center; gap: 8px;
+  padding: 8px 18px; border-radius: 999px;
+  background: rgba(22, 21, 19, .94); border: 1px solid var(--bd-strong);
+  color: var(--tx-2); font-size: 12px; letter-spacing: .04em;
+  box-shadow: var(--elev-2); pointer-events: none; white-space: nowrap;
+}
+.cv2 .ai-hud.is-working { border-color: rgba(194, 163, 107, .55); color: var(--gold); }
+.cv2 .ai-hud .ai-dot {
+  width: 8px; height: 8px; border-radius: 50%; background: var(--gold); flex: none;
+  animation: cv2-ai-pulse 1s var(--ease) infinite;
+}
+@keyframes cv2-ai-pulse { 50% { opacity: .25; transform: scale(.75); } }
+
+/* 新卡出生：缩放落卡 + 鎏金描边；改动的卡：金圈脉冲两次 */
+.cv2 .node.ai-born { animation: cv2-card-born 620ms var(--ease-out) both; }
+.cv2 .node.ai-born .node-card {
+  box-shadow: 0 0 0 2px var(--gold), 0 12px 36px rgba(194, 163, 107, .3);
+}
+@keyframes cv2-card-born {
+  from { opacity: 0; transform: scale(.72) translateY(16px); }
+}
+.cv2 .node.ai-touched .node-card { animation: cv2-card-touched 2.2s var(--ease) both; }
+@keyframes cv2-card-touched {
+  0%, 100% { box-shadow: none; }
+  20%, 60% { box-shadow: 0 0 0 2px var(--gold); }
+}
+
+/* 新连线：描线生长 */
+.cv2 .edges g.edge-born .line {
+  stroke-dasharray: 900;
+  stroke-dashoffset: 900;
+  animation: cv2-edge-draw 900ms var(--ease) forwards;
+}
+@keyframes cv2-edge-draw { to { stroke-dashoffset: 0; } }
+
+/* 影响传播：下游卡琥珀环 + 连线描金 */
+.cv2 .node.is-affected .node-card { box-shadow: 0 0 0 2px rgba(201, 138, 75, .8); }
+.cv2 .edges g.edge-affected .line { stroke: var(--warning); opacity: .95; }
+.cv2 .impact-chip {
+  position: absolute; top: 14px; left: 14px; z-index: 35;
+  padding: 7px 14px; border-radius: 10px; font-size: 11px;
+  color: var(--warning); background: rgba(22, 21, 19, .92);
+  border: 1px solid rgba(201, 138, 75, .4); pointer-events: none;
+}
+
+/* 空间过滤：不符合的卡变暗（不动布局，空间记忆不丢） */
+.cv2 .node.dimmed { opacity: .14; filter: grayscale(.85); }
+.cv2 .stage-filters {
+  position: absolute; top: 14px; right: 14px; z-index: 35;
+  display: flex; gap: 4px; padding: 4px; border-radius: 12px;
+  background: rgba(22, 21, 19, .92); border: 1px solid var(--bd-default);
+}
+.cv2 .stage-filters button {
+  padding: 5px 12px; border-radius: 8px; border: none; background: none;
+  color: var(--tx-3); font-size: 11px; cursor: pointer;
+}
+.cv2 .stage-filters button:hover { color: var(--tx-1); }
+.cv2 .stage-filters button.on { background: var(--bg-s3); color: var(--gold); }
+
+/* 片段心跳线：一段一格，整集进度一眼可读 */
+.cv2 .filmstrip {
+  position: absolute; left: 50%; bottom: 14px; transform: translateX(-50%);
+  z-index: 35; display: flex; align-items: center; gap: 6px;
+  max-width: 72%; padding: 8px 12px; border-radius: 14px;
+  background: rgba(22, 21, 19, .94); border: 1px solid var(--bd-default);
+  box-shadow: var(--elev-2); overflow-x: auto;
+}
+.cv2 .filmstrip .fs-cap {
+  flex: none; font-size: 10px; letter-spacing: .12em; color: var(--tx-3);
+  padding-right: 8px; border-right: 1px solid var(--bd-subtle);
+}
+.cv2 .filmstrip .fs-cell {
+  flex: none; width: 52px; height: 30px; border-radius: 6px;
+  border: 1px solid var(--bd-default); background: var(--bg-input);
+  display: grid; place-items: center; cursor: pointer; overflow: hidden; padding: 0;
+}
+.cv2 .filmstrip .fs-cell img { width: 100%; height: 100%; object-fit: cover; }
+.cv2 .filmstrip .fs-cell .fs-ic { font-size: 12px; color: var(--tx-3); }
+.cv2 .filmstrip .fs-cell.fs-image { border-color: rgba(194, 163, 107, .6); }
+.cv2 .filmstrip .fs-cell.fs-video { border-color: var(--success); }
+.cv2 .filmstrip .fs-cell.fs-video .fs-ic { color: var(--success); }
+.cv2 .filmstrip .fs-cell.fs-error { border-color: var(--danger); }
+.cv2 .filmstrip .fs-cell.fs-error .fs-ic { color: var(--danger); }
+.cv2 .filmstrip .fs-cell:hover { transform: translateY(-2px); border-color: var(--gold); }
+
+/* 减动效：出生/脉冲/描线全部直接呈现 */
+@media (prefers-reduced-motion: reduce) {
+  .cv2 .node.ai-born, .cv2 .node.ai-touched .node-card,
+  .cv2 .edges g.edge-born .line, .cv2 .ai-hud .ai-dot { animation: none; }
+  .cv2 .edges g.edge-born .line { stroke-dasharray: none; stroke-dashoffset: 0; }
+}

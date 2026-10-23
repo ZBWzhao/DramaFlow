@@ -290,6 +290,165 @@ const boardNodes = computed(() => (state.canvas.nodes || []).map((node) => {
 
 const byId = computed(() => Object.fromEntries(boardNodes.value.map((node) => [node.id, node])));
 
+/* ==================== Agent 共创可视化 ====================
+ * store 的 changedNodeIds（指纹 diff）/ canvasActivity（工具活动）早就绪，
+ * 这里补画布消费端：新卡「落卡」动画 + 相机飞过去，改动的卡金圈脉冲，
+ * 新连线描线生长，顶部浮标报告 Agent 正在干什么。 */
+const CANVAS_TOOL_LABELS = {
+  identify_story: "识别故事", add_node: "建节点", add_nodes: "批量建卡", update_node: "更新卡片",
+  connect_nodes: "连线", delete_nodes: "清理节点", set_text: "写入正文", set_storyboard: "写分镜",
+  run_canvas: "运行画布", generate_media: "生成媒体",
+};
+const aiToolLabel = (tool) => CANVAS_TOOL_LABELS[tool] || tool;
+const aiWorking = computed(() => (state.canvasActivity?.phase === "running" ? state.canvasActivity : null));
+const aiDone = computed(() => (state.canvasActivity?.phase === "done" ? state.canvasActivity : null));
+const aiDoneText = computed(() => {
+  if (!aiDone.value) return "";
+  const tail = String(aiDone.value.summary || "").split("·").slice(1).join("·").trim();
+  return `AI${aiToolLabel(aiDone.value.tool)}完成${tail ? ` · ${tail}` : ""}`;
+});
+
+const bornIds = ref(new Set());
+const touchedIds = ref(new Set());
+const bornEdgeIds = ref(new Set());
+let knownNodeIds = new Set();
+let knownEdgeKeys = new Set();
+let seenFirstRevision = false;
+let bornTimer = 0;
+const edgeKey = (edge) => edge.id || `${edge.source || edge.from}->${edge.target || edge.to}`;
+
+watch(
+  // canvasRevision 只在 Agent 刷新/本地落库时自增，初始 loadCanvas 不动它——
+  // 所以连 nodes 数组本体一起监听，否则首次真实改动会被"初次见面"守卫吞掉
+  () => [state.canvasRevision, state.canvas.nodes],
+  () => {
+    const nodes = state.canvas.nodes || [];
+    const edges = state.canvas.edges || [];
+    const nextNodeIds = new Set(nodes.map((n) => n.id));
+    const nextEdgeKeys = new Set(edges.map(edgeKey));
+    if (!seenFirstRevision) {
+      // 首次见到数据（多半是初始加载）：记为基线，不算「AI 刚放下」
+      seenFirstRevision = true;
+      knownNodeIds = nextNodeIds;
+      knownEdgeKeys = nextEdgeKeys;
+      return;
+    }
+    const born = nodes.filter((n) => !knownNodeIds.has(n.id)).map((n) => n.id);
+    const bornE = edges.map(edgeKey).filter((k) => !knownEdgeKeys.has(k));
+    knownNodeIds = nextNodeIds;
+    knownEdgeKeys = nextEdgeKeys;
+    const changed = new Set(state.changedNodeIds || []);
+    const touched = [...changed].filter((id) => !born.includes(id) && nextNodeIds.has(id));
+    if (!born.length && !touched.length && !bornE.length) return;
+    // Agent 连续动作会引发多次快速刷新——累积标记而非覆盖，否则上一发的 born 会被这一发抹掉
+    bornIds.value = new Set([...bornIds.value, ...born]);
+    touchedIds.value = new Set([...touchedIds.value, ...touched]);
+    bornEdgeIds.value = new Set([...bornEdgeIds.value, ...bornE]);
+    window.clearTimeout(bornTimer);
+    bornTimer = window.setTimeout(() => {
+      bornIds.value = new Set();
+      touchedIds.value = new Set();
+      bornEdgeIds.value = new Set();
+    }, 2400);
+    // 相机飞向新落的卡（≤3 张才打断视野，批量铺卡时不乱跳）
+    if (born.length && born.length <= 3) focusNode(born[0]);
+  },
+);
+
+/* ==================== 影响传播 ====================
+ * 画布存在的理由：回答列表答不了的问题。「改了这张卡，下游哪些作废？」
+ * 选中单卡时 BFS 出下游依赖，受影响的卡金环标记、连线描金。 */
+function downstreamOf(root) {
+  if (!root) return new Set();
+  const adj = new Map();
+  for (const edge of state.canvas.edges || []) {
+    const s = edge.source || edge.from;
+    const t = edge.target || edge.to;
+    if (!adj.has(s)) adj.set(s, []);
+    adj.get(s).push(t);
+  }
+  const seen = new Set();
+  const queue = [root];
+  while (queue.length) {
+    const cur = queue.shift();
+    for (const next of adj.get(cur) || []) {
+      if (!seen.has(next)) {
+        seen.add(next);
+        queue.push(next);
+      }
+    }
+  }
+  return seen;
+}
+const downstreamIds = computed(() =>
+  selection.value.length === 1 && state.selectedId ? downstreamOf(state.selectedId) : new Set(),
+);
+const affectedEdgeKeys = computed(() => {
+  const ds = downstreamIds.value;
+  if (!ds.size) return new Set();
+  const root = state.selectedId;
+  const keys = new Set();
+  for (const edge of state.canvas.edges || []) {
+    const s = edge.source || edge.from;
+    const t = edge.target || edge.to;
+    if ((s === root || ds.has(s)) && ds.has(t)) keys.add(edgeKey(edge));
+  }
+  return keys;
+});
+
+/* ==================== 片段心跳线 ====================
+ * 底部胶片条：一张 prompt 卡 = 一段。每格看下游：有成品视频 → ▶，
+ * 有首帧图 → 缩略图，失败 → ✕，还空着 → ✎。点击飞到那张卡。 */
+const stripCells = computed(() => {
+  const prompts = boardNodes.value.filter((n) => n.type === "prompt");
+  return [...prompts]
+    .sort((a, b) => Math.round(a.y / 60) - Math.round(b.y / 60) || a.x - b.x)
+    .map((p) => {
+      let st = "empty";
+      let img = "";
+      for (const id of downstreamOf(p.id)) {
+        const n = byId.value[id];
+        if (!n) continue;
+        if (n.failed || n.status === "error") {
+          if (st !== "video") st = "error";
+        } else if (n.video && n.src) {
+          st = "video";
+          img = "";
+          break;
+        } else if (n.img && (st === "empty" || st === "error")) {
+          st = "image";
+          img = n.img;
+        }
+      }
+      return { id: p.id, title: p.title, st, img };
+    });
+});
+
+/* ==================== 空间过滤 ====================
+ * 60+ 张卡的同屏可读性：过滤只做「变暗」，不动布局——空间记忆不丢。 */
+const FILTERS = [
+  { key: "all", label: "全部" },
+  { key: "media", label: "生成节点" },
+  { key: "asset", label: "资产素材" },
+  { key: "text", label: "文本分镜" },
+  { key: "done", label: "已生成" },
+  { key: "error", label: "失败" },
+];
+const filterKey = ref("all");
+const FILTER_PREDICATES = {
+  all: () => true,
+  media: (n) => GEN_TYPES.has(n.type),
+  asset: (n) => ["asset", "image", "video", "audio"].includes(n.type),
+  text: (n) => ["text", "prompt", "storyboard"].includes(n.type),
+  done: (n) => n.status === "done" || Boolean(n.img || n.src),
+  error: (n) => n.failed || n.status === "error",
+};
+const dimIds = computed(() => {
+  if (filterKey.value === "all") return new Set();
+  const keep = FILTER_PREDICATES[filterKey.value] || (() => true);
+  return new Set(boardNodes.value.filter((n) => !keep(n)).map((n) => n.id));
+});
+
 /* 只给「两端都在视口里」的连线画路径：大画布上连线数量往往是节点数的 1.5 倍，
  * 全画会把 svg 撑爆，而且屏幕外的线本来也看不见。 */
 function portIndex(type, side, handle) {
@@ -318,6 +477,7 @@ const edges = computed(() => visibleEdges.value
       && ((edge.source ?? edge.from) === state.selectedId || (edge.target ?? edge.to) === state.selectedId);
     return {
       id: edge.id,
+      key: edgeKey(edge),
       d: edgePath(edgeAnchor(from, "right", sourceHandle), edgeAnchor(to, "left", targetHandle)),
       chain,
     };
@@ -1444,7 +1604,7 @@ onMounted(() => {
             <g
               v-for="edge in edges"
               :key="edge.id || edge.d"
-              :class="{ 'is-on': selectedEdgeId === edge.id }"
+              :class="{ 'is-on': selectedEdgeId === edge.id, 'edge-born': bornEdgeIds.has(edge.key), 'edge-affected': affectedEdgeKeys.has(edge.key) }"
             >
               <path
                 class="hit"
@@ -1472,6 +1632,9 @@ onMounted(() => {
             :connect-mode="!!connectFrom"
             :zoom="view.z"
             :preview="previewFor(node.id)"
+            :ai-mark="bornIds.has(node.id) ? 'born' : touchedIds.has(node.id) ? 'touched' : ''"
+            :affected="downstreamIds.has(node.id)"
+            :dimmed="dimIds.has(node.id)"
             @select="onSelect"
             @move="onMove"
             @drag="onDragPreview"
@@ -1484,6 +1647,48 @@ onMounted(() => {
         </div>
 
         <div v-if="marquee" class="marquee" :style="marqueeStyle"></div>
+
+        <!-- ── Agent 活动浮标：它正在画布上做什么，必须看得见 ── -->
+        <div v-if="aiWorking" class="ai-hud is-working">
+          <span class="ai-dot" aria-hidden="true"></span>
+          <span>AI 正在{{ aiToolLabel(aiWorking.tool) }}…</span>
+        </div>
+        <div v-else-if="aiDone" class="ai-hud is-done">✓ {{ aiDoneText }}</div>
+
+        <!-- ── 影响传播：选中一张卡后，下游依赖全亮 ── -->
+        <div v-if="downstreamIds.size" class="impact-chip">
+          影响下游 {{ downstreamIds.size }} 张卡（金线相连）· 点空白处取消
+        </div>
+
+        <!-- ── 空间过滤：只变暗不动布局，空间记忆不丢 ── -->
+        <div v-if="boardNodes.length > 4" class="stage-filters">
+          <button
+            v-for="f in FILTERS"
+            :key="f.key"
+            type="button"
+            :class="{ on: filterKey === f.key }"
+            @click="filterKey = f.key"
+          >
+            {{ f.label }}
+          </button>
+        </div>
+
+        <!-- ── 片段心跳线：一段一格，一眼看到整集做到哪了 ── -->
+        <div v-if="stripCells.length" class="filmstrip">
+          <span class="fs-cap">片段线</span>
+          <button
+            v-for="c in stripCells"
+            :key="c.id"
+            type="button"
+            class="fs-cell"
+            :class="'fs-' + c.st"
+            :title="`${c.title}（${c.st === 'video' ? '有成品' : c.st === 'image' ? '有首帧' : c.st === 'error' ? '失败' : '未生成'}）`"
+            @click="focusNode(c.id)"
+          >
+            <img v-if="c.img" :src="c.img" alt="" />
+            <span v-else class="fs-ic" aria-hidden="true">{{ c.st === "video" ? "▶" : c.st === "error" ? "✕" : "✎" }}</span>
+          </button>
+        </div>
 
         <div v-if="selection.length > 1" class="multi-bar">
           <span class="multi-count">已选中 {{ selection.length }} 张</span>

@@ -26,6 +26,12 @@ const props = defineProps({
   // 连线交互：这张卡能否作为当前连线的落点 / 是否正在「点击式连线」模式
   connectable: { type: Boolean, default: false },
   connectMode: { type: Boolean, default: false },
+  // Agent 共创可视化：born=AI 刚建（落卡动画） / touched=AI 刚改（金圈脉冲）
+  aiMark: { type: String, default: "" },
+  // 影响传播：这张卡在选中卡的下游依赖里
+  affected: { type: Boolean, default: false },
+  // 空间过滤：不符合当前过滤器，只变暗
+  dimmed: { type: Boolean, default: false },
 });
 const emit = defineEmits([
   "select", "move", "drag", "edge-start", "open-video", "retry", "context-menu", "detail",
@@ -147,6 +153,10 @@ function onOpenVideo() {
       'gen-done': node.justDone,
       'is-fail': statusKind === 'error',
       connectable,
+      'ai-born': aiMark === 'born',
+      'ai-touched': aiMark === 'touched',
+      'is-affected': affected && !selected,
+      dimmed,
       ['status-' + statusKind]: !!statusKind,
     }"
     :style="{ left: left + 'px', top: top + 'px', width: cardW + 'px' }"
