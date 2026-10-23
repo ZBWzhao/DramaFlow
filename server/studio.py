@@ -938,6 +938,7 @@ async def asset_tables_parse(body: ParseRequest) -> StreamingResponse:
     queue: asyncio.Queue = asyncio.Queue()
     version = _skill_version(node, "asset", "2.0.0")
     known = [str(c.get("name") or "") for c in ((node.meta or {}).get("asset_tables") or {}).get("characters", [])]
+    canon = _canon_for_parse(node)
     llm = _registry.llm
     canvas_name = body.canvas
 
@@ -952,6 +953,7 @@ async def asset_tables_parse(body: ParseRequest) -> StreamingResponse:
                 episodes,
                 llm,
                 known=known,
+                canon=canon,
                 on_event=on_event,
                 cancel=cancel,
             )
@@ -1038,7 +1040,7 @@ def _spawn_auto_job(canvas_name: str) -> None:
             episodes = _episodes_texts(graph)
             if episodes:
                 version_a = _skill_version(graph, "asset", "2.0.0")
-                tables = await parse_asset_tables(episodes, _registry.llm)
+                tables = await parse_asset_tables(episodes, _registry.llm, canon=_canon_for_parse(graph))
                 tables["skill"] = {"name": "asset", "version": version_a}
                 tables["updated_at"] = int(time.time())
                 await mutate_canvas_with_retry(
@@ -1088,7 +1090,7 @@ def _spawn_parse_job(canvas_name: str) -> None:
             return
         version = _skill_version(graph, "asset", "2.0.0")
         known = [str(c.get("name") or "") for c in ((graph.meta or {}).get("asset_tables") or {}).get("characters", [])]
-        tables = await parse_asset_tables(episodes, _registry.llm, known=known)
+        tables = await parse_asset_tables(episodes, _registry.llm, known=known, canon=_canon_for_parse(graph))
         tables["skill"] = {"name": "asset", "version": version}
         tables["updated_at"] = int(time.time())
         await mutate_canvas_with_retry(
@@ -3012,6 +3014,47 @@ def _produce_session_id(canvas: str) -> str:
     return f"studio-{slug}"
 
 
+def _canon_for_parse(graph: Canvas) -> str:
+    """资产抽取口径：世界观 + 视听风格（来自剧本理解四件套；没解析过就空串，行为退回原样）。"""
+    a = (graph.meta or {}).get("story_analysis") or {}
+    if not isinstance(a, dict):
+        return ""
+    parts = []
+    world = str(a.get("worldview") or "").strip()
+    if world:
+        parts.append("世界观：" + world[:500])
+    style = a.get("audiovisual_style")
+    if isinstance(style, dict) and style:
+        parts.append("视听风格：" + "；".join(f"{k}:{v}" for k, v in style.items() if v))
+    return "\n".join(parts)
+
+
+def _canon_block_for_produce(graph: Canvas, episode: int) -> str:
+    """制作指令口径块：分集大纲定叙事锚（拆镜后核对不漏拍），视听风格定镜头决策，世界观防脑补。"""
+    a = (graph.meta or {}).get("story_analysis") or {}
+    if not isinstance(a, dict) or not a:
+        return ""
+    lines = []
+    outline = a.get("episode_outline")
+    if isinstance(outline, list):
+        ep = next((e for e in outline if int(e.get("no") or 0) == int(episode)), None)
+        if ep:
+            beats = "；".join(str(b) for b in (ep.get("beats") or [])[:8])
+            head = f"第{ep.get('no')}集 {ep.get('title') or ''}——{ep.get('hook') or ''}"
+            lines.append("本集大纲（叙事锚，拆完镜逐条核对不漏拍）：" + head + (f"。节拍：{beats}" if beats else ""))
+    style = a.get("audiovisual_style")
+    if isinstance(style, dict) and style:
+        kv = "；".join(f"{k}:{v}" for k, v in style.items() if v)
+        if kv:
+            lines.append(f"视听风格（shot_size / camera / duration_s 的决策依据）：{kv}")
+    world = str(a.get("worldview") or "").strip()
+    if world:
+        lines.append("世界观口径（资产、场景、时代细节不得违背）：" + world[:600])
+    if not lines:
+        return ""
+    return "\n\n【项目口径（来自剧本理解四件套，约束你的拆镜与资产字段；与剧本正文冲突时以正文为准）】\n" + "\n".join(lines)
+
+
 def _produce_prompt(graph: Canvas, episode: int, extra: str) -> tuple[str, str]:
     episodes = _episodes(graph)
     current = next((item for item in episodes if int(item.get("no") or 1) == int(episode)), None)
@@ -3021,6 +3064,7 @@ def _produce_prompt(graph: Canvas, episode: int, extra: str) -> tuple[str, str]:
     if not node_id or node_id not in graph.nodes:
         raise HTTPException(status_code=400, detail="这一集还没有剧本正文，先在剧本页导入")
     prompt = _PRODUCE_INSTRUCTION.format(no=int(episode), node_id=node_id)
+    prompt += _canon_block_for_produce(graph, episode)
     if (extra or "").strip():
         prompt += f"\n\n补充要求（优先级最高）：{extra.strip()}"
     return prompt, node_id

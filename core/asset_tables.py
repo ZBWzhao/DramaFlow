@@ -105,8 +105,8 @@ def merge_asset_tables(existing: list[dict[str, Any]], tables: AssetTables) -> d
     return plan
 
 
-def build_parse_prompt(episode_text: str, known_names: list[str]) -> list[dict[str, str]]:
-    """按集抽取的消息组装；known_names 让跨集同名沿用同一写法。"""
+def build_parse_prompt(episode_text: str, known_names: list[str], canon: str = "") -> list[dict[str, str]]:
+    """按集抽取的消息组装；known_names 让跨集同名沿用同一写法；canon 是项目口径（四件套）。"""
     known = "、".join(known_names[:80]) if known_names else "（无）"
     system = (
         "你是短剧资产抽取助手。只输出一个 JSON 对象。从剧本抽取："
@@ -114,9 +114,11 @@ def build_parse_prompt(episode_text: str, known_names: list[str]) -> list[dict[s
         '"looks": [{"name"(服装/状态形象名)}]}], '
         '"scenes": [{"name", "description"(一句功能)}], "props": [{"name", "description"}]}。'
         "规则：同一角色的多个形象拆成多条 looks，只写差异（服装/发型）；不编造剧本没有的条目；"
+        "描述须符合项目口径（世界观与调性），口径与剧本冲突时以剧本为准；"
         "禁止输出图片、URL，或声称已生成任何图片。"
     )
-    user = f"【已见过的资产名（同名请沿用同一写法）】{known}\n\n【本集剧本】\n{episode_text}"
+    canon_block = f"【项目口径（世界观/视听风格，抽取须符合此口径）】\n{canon}\n\n" if canon.strip() else ""
+    user = f"【已见过的资产名（同名请沿用同一写法）】{known}\n\n{canon_block}【本集剧本】\n{episode_text}"
     return [{"role": "system", "content": system}, {"role": "user", "content": user}]
 
 
@@ -125,6 +127,7 @@ async def parse_asset_tables(
     llm: Any,
     *,
     known: list[str] | None = None,
+    canon: str = "",
     on_event: Callable[[dict], None] | None = None,
     cancel: asyncio.Event | None = None,
 ) -> dict[str, Any]:
@@ -138,7 +141,7 @@ async def parse_asset_tables(
         if cancel is not None and cancel.is_set():
             break
         emit({"type": "parse_progress", "episode_no": episode["no"]})
-        messages = build_parse_prompt(episode["text"], sorted(known_norm))
+        messages = build_parse_prompt(episode["text"], sorted(known_norm), canon=canon)
         try:
             data = extract_json(await llm.simple(messages))
         except (ValueError, json.JSONDecodeError):
