@@ -1,6 +1,7 @@
 <script setup>
 import { computed, ref, watch } from "vue";
 import { ElMessage, ElMessageBox } from "element-plus";
+import { useRouter } from "vue-router";
 import { actions, state } from "../store.js";
 
 const props = defineProps({ open: { type: Boolean, default: false } });
@@ -49,10 +50,14 @@ function markRecent(name) {
   saveRecent();
 }
 
+const router = useRouter();
+
 async function openProject(name) {
   if (name === state.canvasName) { emit("close"); return; }
   try {
     await actions.switchCanvas(name);
+    // URL 同步（replace：切项目不算一次新导航，返回键不该落在这里）
+    router.replace(`/project/${name}/canvas`);
     markRecent(name);
     emit("close");
   } catch (err) {

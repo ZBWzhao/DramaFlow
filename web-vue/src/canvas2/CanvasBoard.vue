@@ -8,12 +8,13 @@
  */
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { ElMessage, ElMessageBox } from "element-plus";
+import { useRouter } from "vue-router";
 import { actions, state } from "../store.js";
 import { assetUrl, mediaOf } from "../utils.js";
 import { bodyHeight, cardHeight, cardWidth, clamp, edgePath, nodeAnchor, portOffset } from "./geometry.js";
 import { dragMoves } from "./positions.js";
 import { generationProgress } from "./progress.js";
-import { goHome, openStudioForCurrent, openStudioTab } from "../shell/shellStore.js";
+import { openStudioForCurrent, openStudioTab } from "../shell/shellStore.js";
 import NodeCard from "./NodeCard.vue";
 import CardInspector from "./CardInspector.vue";
 import HeroPage from "./HeroPage.vue";
@@ -29,6 +30,14 @@ import ApprovalSheet from "./ApprovalSheet.vue";
 
 /* 顶栏的项目管理入口由工作台外壳（CanvasWorkspace）负责，这里只转发 */
 const emit = defineEmits(["open-project"]);
+
+const router = useRouter();
+
+function onBack() {
+  // 惯例：从哪进来回哪去（制作页/剧本页…）；直接输 URL 进画布时没有来路，兜底回制作页
+  if (window.history.state?.back) router.back();
+  else openStudioForCurrent(state.canvasName);
+}
 
 const TYPE_LABEL = {
   asset: "资产", image: "图片", image_gen: "图片生成",
@@ -189,16 +198,13 @@ const projectTitle = computed(() => (
   || "未命名项目"
 ));
 
-function onBack() {
-  goHome();
-}
 function onSwitchView(id) {
   if (id === "canvas") return;
   if (id === "studio") {
-    openStudioForCurrent();
+    openStudioForCurrent(state.canvasName);
     return;
   }
-  if (id === "assets" && !openStudioTab("assets")) showToast("先在项目里打开一集，再看素材库");
+  if (id === "assets" && !openStudioTab("assets", state.canvasName)) showToast("先在项目里打开一集，再看素材库");
 }
 function onChangeModel({ provider, model }) {
   if (provider && provider !== state.mediaProvider) actions.setMediaProvider(provider);

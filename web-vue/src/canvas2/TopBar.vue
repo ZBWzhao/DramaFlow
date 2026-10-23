@@ -104,7 +104,7 @@ onBeforeUnmount(() => {
 <template>
   <header ref="root" class="cv2-topbar">
     <div class="tb-left">
-      <button class="tb-icon" type="button" title="返回项目列表" aria-label="返回项目列表" @click="emit('back')">←</button>
+      <button class="tb-icon" type="button" title="返回上一页" aria-label="返回上一页" @click="emit('back')">←</button>
       <button class="tb-project" type="button" title="打开项目管理" @click="emit('open-project')">
         <span class="tb-project-name">{{ title || "未命名项目" }}</span>
         <span class="tb-caret" aria-hidden="true">▾</span>

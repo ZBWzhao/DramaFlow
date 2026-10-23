@@ -47,7 +47,7 @@ const currentProjectTitle = computed(
 
     <!-- 旧画布（?legacy=1）仍用悬浮 dock；新画布的项目上下文/视图切换/主操作已进顶栏 -->
     <template v-if="useLegacyCanvas">
-      <!-- 左上：返回项目列表 + 项目入口 + 制片台。画布已降级，制片台才是主界面。 -->
+      <!-- 左上：返回 + 项目入口 + 制片台。画布已降级，制片台才是主界面。 -->
       <div class="dock dock-left">
         <button class="btn ghost" type="button" title="返回项目列表" @click="goHome">← 项目</button>
         <span class="dock-sep" />
@@ -69,7 +69,7 @@ const currentProjectTitle = computed(
           type="button"
           title="回到制片台：剧本 / 资产 / 制作 / 预览"
           :disabled="!state.canvasName"
-          @click="openStudioForCurrent"
+          @click="openStudioForCurrent(state.canvasName)"
         >
           制片台
         </button>

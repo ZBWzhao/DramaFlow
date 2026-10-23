@@ -7,7 +7,10 @@
  *
  * 这个顺序是产品判断，不是导航细节：谁在入口，谁就是主体。
  */
+/* 跳转全部走 vue-router（shell.view 是迁移前的内部状态机，已无人消费——
+ * 之前这里只写字段不推路由，画布顶栏的返回/制片台/素材库全是死按钮）。 */
 import { reactive } from "vue";
+import { router } from "../router.js";
 import { studio } from "../studio/studioStore.js";
 
 export const shell = reactive({
@@ -51,24 +54,31 @@ export function openProject(canvas) {
 }
 
 export function goHome() {
-  shell.view = "home";
-  loadProjects();
+  router.push("/");
 }
 
 /** 画布降级为「结构视图」：从制片台主动进来，看完能回去。 */
 export function openCanvas() {
-  shell.view = "canvas";
+  const name = studio.canvas;
+  router.push(name ? `/project/${name}/canvas` : "/");
 }
 
-export function openStudioForCurrent() {
-  if (!studio.canvas) return;
-  shell.view = "studio";
+/** 切到制片台（制作页）。canvasName 兜底：直接从 URL 进画布时 studio.canvas 还没绑上。 */
+export function openStudioForCurrent(canvasName) {
+  const name = canvasName || studio.canvas;
+  if (!name) return;
+  router.push(`/project/${name}/production`);
 }
 
-/** 切到制片台并指定页签（素材库等入口用）。返回是否成功。 */
-export function openStudioTab(tab) {
-  if (!studio.canvas) return false;
+/** 切到制片台并指定页签对应的路由（素材库等入口用）。返回是否成功。 */
+export function openStudioTab(tab, canvasName) {
+  const name = canvasName || studio.canvas;
+  if (!name) return false;
   studio.tab = tab;
-  shell.view = "studio";
+  const path = (
+    { script: "script", production: "production", wall: "wall", assets: "assets", preview: "preview", dashboard: "dashboard" }[tab]
+    || "production"
+  );
+  router.push(`/project/${name}/${path}`);
   return true;
 }
