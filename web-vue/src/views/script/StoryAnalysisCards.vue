@@ -5,7 +5,7 @@
  * 运行态在 studio.analysis.cards（逐卡：idle/running/done/failed）。
  * 结构化产物走按钮触发的 pipeline；自由修改走右栏 AI 助手（聊天改字段）。
  */
-import { computed } from "vue";
+import { computed, ref } from "vue";
 import { cancelStoryAnalysis, runStoryAnalysis, studio } from "../../studio/studioStore.js";
 
 const CARDS = [
@@ -35,9 +35,30 @@ function stateLabel(status) {
 const outline = computed(() => (Array.isArray(analysis.value.episode_outline) ? analysis.value.episode_outline : []));
 const styleObj = computed(() => (analysis.value.audiovisual_style && typeof analysis.value.audiovisual_style === "object" ? analysis.value.audiovisual_style : {}));
 
+/* 文本卡：解析中优先显示流式文本（card_delta 实时累积），否则显示落库产物 */
+function cardText(key) {
+  const live = studio.analysis.cards[key];
+  if (live?.status === "running" && live.text) return live.text;
+  return String(analysis.value[key] || "");
+}
+/* 长文折叠：默认收起 8 行，展开后全文；手动展开状态按卡记忆 */
+const LONG = 160;
+const expanded = ref({});
+const isLong = (key) => cardText(key).length > LONG;
+const clamped = (key) => !expanded.value[key] && isLong(key) && cardState(key).status !== "running";
+
 async function start() {
   try {
     await runStoryAnalysis();
+  } catch (err) {
+    studio.error = err?.message || String(err);
+  }
+}
+
+/* 单卡重生成：后端 cards 参数只跑这张卡，其余卡保留旧产物 */
+async function regen(key) {
+  try {
+    await runStoryAnalysis({ cards: [key] });
   } catch (err) {
     studio.error = err?.message || String(err);
   }
@@ -71,6 +92,14 @@ async function start() {
         <header>
           <span class="ct">{{ c.title }}</span>
           <span class="stx" :class="cardState(c.key).status">{{ stateLabel(cardState(c.key).status) }}</span>
+          <span style="flex: 1"></span>
+          <button
+            v-if="!running"
+            class="regen"
+            type="button"
+            :title="`只重新生成「${c.title}」，其余卡不动`"
+            @click="regen(c.key)"
+          >↻ 重生成</button>
         </header>
 
         <div v-if="c.key === 'episode_outline'" class="outline">
@@ -88,7 +117,12 @@ async function start() {
           <div v-else class="none">{{ cardState(c.key).status === 'running' ? '生成中…' : '—' }}</div>
         </div>
 
-        <p v-else class="text">{{ analysis[c.key] || (cardState(c.key).status === 'running' ? '生成中…' : '—') }}</p>
+        <template v-else>
+          <p class="text" :class="{ clamp: clamped(c.key) }">{{ cardText(c.key) || (cardState(c.key).status === 'running' ? '生成中…' : '—') }}</p>
+          <button v-if="isLong(c.key)" class="fold" type="button" @click="expanded[c.key] = !expanded[c.key]">
+            {{ expanded[c.key] ? "收起 ▲" : `展开全文（${cardText(c.key).length} 字）▼` }}
+          </button>
+        </template>
       </section>
     </div>
   </div>
@@ -110,6 +144,11 @@ async function start() {
 .card .stx.running { color: var(--gold); }
 .card .stx.failed { color: #c44a3a; }
 .card .text { white-space: pre-wrap; color: var(--text-2); font-size: var(--fs-13); line-height: 1.9; }
+.card .text.clamp { display: -webkit-box; -webkit-line-clamp: 8; -webkit-box-orient: vertical; overflow: hidden; }
+.fold { border: none; background: none; color: var(--gold); font-size: var(--fs-12); padding: 4px 0 0; cursor: pointer; font-family: inherit; }
+.fold:hover { color: var(--text); }
+.regen { border: 1px solid var(--line); background: none; color: var(--text-3); font-size: var(--fs-11); padding: 3px 9px; border-radius: var(--r-1); cursor: pointer; font-family: inherit; }
+.regen:hover { color: var(--gold); border-color: rgba(194, 163, 107, .5); }
 .card .none { color: var(--text-3); font-size: var(--fs-12); }
 
 .outline .ep { padding: 6px 0; border-bottom: 1px solid var(--line); }

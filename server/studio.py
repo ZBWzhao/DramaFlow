@@ -1115,6 +1115,25 @@ async def put_asset_tables(body: AssetTablesRequest) -> dict[str, Any]:
     return {"ok": True, "tables": tables}
 
 
+def _row_sig(row: dict[str, Any]) -> str:
+    """行指纹：name/desc/bio/形象名集合拼接（前端用同一算法比对同步状态）。"""
+    looks = "|".join(sorted(str(lk.get("name") or "") for lk in (row.get("looks") or [])))
+    return "␟".join([
+        str(row.get("name") or ""),
+        str(row.get("description") or ""),
+        str(row.get("bio") or ""),
+        looks,
+    ])
+
+
+def _tables_sync_state(tables: AssetTables) -> dict[str, Any]:
+    dump = tables.model_dump()
+    return {
+        kind: {str(row.get("name") or ""): _row_sig(row) for row in dump.get(kind, [])}
+        for kind in ("characters", "scenes", "props")
+    }
+
+
 class SyncRequest(BaseModel):
     canvas: str
 
@@ -1130,7 +1149,12 @@ async def sync_asset_tables(body: SyncRequest) -> dict[str, Any]:
         raise HTTPException(status_code=400, detail="还没有资产表，先解析或手工编辑")
     tables = AssetTables(**tables_raw)
     plan = merge_asset_tables(_existing_assets_projection(node), tables)
-    report: dict[str, Any] = {"merged": plan["merged"], "skipped": plan["untouched"], "synced_at": int(time.time())}
+    report: dict[str, Any] = {
+        "merged": plan["merged"],
+        "skipped": plan["untouched"],
+        "synced_at": int(time.time()),
+        "synced_state": _tables_sync_state(tables),
+    }
 
     def mutate(graph: Canvas) -> bool:
         created_assets = created_looks = 0
@@ -1173,6 +1197,7 @@ async def sync_asset_tables(body: SyncRequest) -> dict[str, Any]:
         meta = dict(graph.meta or {})
         tables_meta = dict(meta.get("asset_tables") or {})
         tables_meta["synced_at"] = report["synced_at"]
+        tables_meta["synced_state"] = report["synced_state"]
         meta["asset_tables"] = AssetTables(**tables_meta).model_dump()
         graph.meta = meta
         report["created_assets"] = created_assets

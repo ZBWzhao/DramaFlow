@@ -34,6 +34,8 @@ class AssetTables(BaseModel):
     skill: dict = Field(default_factory=dict)
     updated_at: int = 0
     synced_at: int = 0
+    # 上次同步时的每行指纹（kind → {name: sig}）：前端据此标「已入库/有改动/未同步」
+    synced_state: dict = Field(default_factory=dict)
     characters: list[CharacterRow] = Field(default_factory=list)
     scenes: list[dict] = Field(default_factory=list)
     props: list[dict] = Field(default_factory=list)

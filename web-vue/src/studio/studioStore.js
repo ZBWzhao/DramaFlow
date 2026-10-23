@@ -295,7 +295,7 @@ export async function syncAssetTables() {
   studio.syncing = true;
   try {
     const report = await postJSON("/api/studio/asset-tables/sync", { canvas: studio.canvas });
-    studio.assetTables = { ...(studio.assetTables || {}), synced_at: report.synced_at };
+    studio.assetTables = { ...(studio.assetTables || {}), synced_at: report.synced_at, synced_state: report.synced_state || {} };
     await loadAssets();
     return report;
   } finally {

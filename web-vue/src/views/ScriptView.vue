@@ -75,6 +75,9 @@ const sceneLoc = (text) => text.replace(/^场景\s*\d*\s*[｜|]?\s*/, "").trim()
 const activeScene = ref(-1);
 const scrollEl = ref(null);
 let railLockUntil = 0;
+/* 轨显隐看实际中栏宽度（拖拽列宽后媒体查询就不够准了）：700 正文 + 左侧 190 轨位 */
+const winW = ref(window.innerWidth);
+const railOk = computed(() => winW.value - leftW.value - rightW.value - 24 >= 950);
 function jumpScene(p) {
   const el = document.getElementById(`scene-${p.index}`);
   if (!el) return;
@@ -129,6 +132,24 @@ onBeforeUnmount(() => {
   window.removeEventListener("pointermove", onColDrag);
   document.body.style.cursor = "";
   document.body.style.userSelect = "";
+});
+
+/* 窄屏（≤1000px）：放弃三列，正文全宽 + AI 面板落底部一行 */
+const narrow = ref(false);
+let narrowMq = null;
+function onNarrowChange(e) {
+  narrow.value = e.matches;
+}
+onMounted(() => {
+  narrowMq = window.matchMedia("(max-width: 1000px)");
+  narrow.value = narrowMq.matches;
+  narrowMq.addEventListener("change", onNarrowChange);
+  window.addEventListener("resize", onResize);
+});
+const onResize = () => (winW.value = window.innerWidth);
+onBeforeUnmount(() => {
+  narrowMq?.removeEventListener("change", onNarrowChange);
+  window.removeEventListener("resize", onResize);
 });
 
 function pickEpisode(no) {
@@ -220,7 +241,11 @@ onMounted(refresh);
 </script>
 
 <template>
-  <div class="script-lay" :style="{ gridTemplateColumns: `${leftW}px 6px minmax(0,1fr) 6px ${rightW}px` }">
+  <div
+    class="script-lay"
+    :class="{ narrow }"
+    :style="narrow ? null : { gridTemplateColumns: `${leftW}px 6px minmax(0,1fr) 6px ${rightW}px` }"
+  >
     <!-- ── 左：集列表 + 制作准备 ── -->
     <aside class="ep-side">
       <div class="side-cap cap">剧本列表</div>
@@ -257,8 +282,14 @@ onMounted(refresh);
       <div class="script-head">
         <div class="doc-tabs">
           <button class="dt" :class="{ on: tab === 'script' }" type="button" @click="switchTab('script')">剧本</button>
-          <button class="dt" :class="{ on: tab === 'analysis' }" type="button" @click="switchTab('analysis')">项目设定</button>
-          <button class="dt" :class="{ on: tab === 'tables' }" type="button" @click="switchTab('tables')">资产表</button>
+          <span class="dt-sep" aria-hidden="true"></span>
+          <span class="dt-group">项目</span>
+          <button class="dt" :class="{ on: tab === 'analysis' }" type="button" @click="switchTab('analysis')">
+            项目设定<span v-if="studio.analysis.running" class="dt-spin" title="正在解析"></span>
+          </button>
+          <button class="dt" :class="{ on: tab === 'tables' }" type="button" @click="switchTab('tables')">
+            资产表<span v-if="studio.parsing.running" class="dt-spin" title="正在解析资产表"></span>
+          </button>
         </div>
         <template v-if="tab === 'script'">
           <h2>{{ episodes.find((e) => Number(e.no) === currentEp)?.title || `第 ${currentEp} 集` }}</h2>
@@ -272,8 +303,8 @@ onMounted(refresh);
         <AssetTablesPanel v-else-if="tab === 'tables'" />
         <template v-else>
           <div class="script-inner">
-            <!-- 场景跳转轨：点场景名直达，滚动时反向高亮当前场（窄屏隐藏） -->
-            <aside v-if="scenes.length > 1 && !editing" class="scene-rail">
+            <!-- 场景跳转轨：点场景名直达，滚动时反向高亮当前场（中栏不够宽时藏） -->
+            <aside v-if="scenes.length > 1 && !editing && railOk" class="scene-rail">
               <div class="sr-stick">
                 <div class="sr-cap">场景大纲</div>
                 <button
@@ -366,16 +397,28 @@ onMounted(refresh);
 </template>
 
 <style scoped>
-.doc-tabs { display: flex; gap: var(--sp-1); }
-.dt { border: none; background: none; color: var(--text-3); font-size: var(--fs-14); font-family: var(--serif); letter-spacing: .05em; padding: 5px 14px; cursor: pointer; border-radius: var(--r-1); }
+.doc-tabs { display: flex; gap: var(--sp-1); align-items: stretch; }
+.dt { border: none; background: none; color: var(--text-3); font-size: var(--fs-14); font-family: var(--serif); letter-spacing: .05em; padding: 5px 14px; cursor: pointer; border-radius: var(--r-1); display: inline-flex; align-items: center; gap: 6px; }
 .dt:hover { color: var(--text-2); }
 .dt.on { color: var(--text); background: var(--card-2); }
+/* 项目级 tab 与本集 tab 之间的分界 */
+.dt-sep { width: 1px; background: var(--line-2); margin: 5px 8px; }
+.dt-group { align-self: center; color: var(--text-3); font-size: 10px; letter-spacing: .14em; }
+/* 解析运行徽标：跨 tab 可见（不用切过去才知道在跑） */
+.dt-spin { width: 8px; height: 8px; border-radius: 50%; border: 1.5px solid rgba(194, 163, 107, .3); border-top-color: var(--gold); animation: dt-rot 0.9s linear infinite; }
+@keyframes dt-rot { to { transform: rotate(360deg); } }
 .script-lay { display: grid; grid-template-columns: 232px 6px minmax(0, 1fr) 6px 340px; height: 100%; min-height: 0; }
 .script-lay, .script-lay * { box-sizing: border-box; }
 
 /* 列宽拖拽把手：平时隐形，悬停露出金线，拖动改对应列宽 */
 .drag-col { cursor: col-resize; background: transparent; transition: background 120ms; z-index: 5; }
 .drag-col:hover, .drag-col:active { background: rgba(194, 163, 107, .28); }
+
+/* 窄屏堆叠：集列表让位（制作准备流程在制作页还有），AI 面板落到正文下方 */
+.script-lay.narrow { grid-template-columns: minmax(0, 1fr); grid-template-rows: minmax(0, 1fr) 340px; grid-template-areas: "main" "ai"; }
+.script-lay.narrow .ep-side, .script-lay.narrow .drag-col { display: none; }
+.script-lay.narrow .script-main { grid-area: main; }
+.script-lay.narrow .dock { grid-area: ai; border-left: none; border-top: 1px solid var(--line); }
 
 /* 左栏 */
 .ep-side { background: var(--bg-2); border-right: 1px solid var(--line); display: flex; flex-direction: column; min-height: 0; }
@@ -429,7 +472,6 @@ onMounted(refresh);
 .sr-it.on { color: var(--gold); border-left-color: var(--accent); }
 .sr-it .n { flex: none; font-size: 10px; opacity: .7; }
 .sr-it .loc { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
-@media (max-width: 1560px) { .scene-rail { display: none; } }
 
 .script-doc .empty, .script-doc .edit-tip { font-family: var(--sans); color: var(--text-3); font-size: var(--fs-13); padding: var(--sp-5) 0; }
 .edit-tip .warn { color: var(--warn); }
