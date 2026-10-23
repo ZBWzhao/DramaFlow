@@ -33,7 +33,7 @@ from core.canvas_repository import mutate_canvas_with_retry
 from core.asset_tables import AssetTables, merge_asset_tables, parse_asset_tables
 from core.skills import discover_skills
 from core.pipelines import register_spawner
-from core.story_analysis import CARDS, StoryAnalysis, run_story_analysis
+from core.story_analysis import _CARD_INSTRUCTION, CARDS, StoryAnalysis, run_story_analysis
 from core.studio_rules import (
     THRESHOLDS,
     dialogue_from_shots,
@@ -844,6 +844,7 @@ async def story_analysis_run(body: StoryAnalysisRunRequest) -> StreamingResponse
                 cards=body.cards or None,
                 prior=prior if body.cards else None,  # 全量重跑不背旧产物；指定卡才保留其余卡
                 skill_tag={"name": "script-analysis", "version": version},
+                instructions=_analysis_instructions(node),
                 on_event=on_event,
                 cancel=cancel,
             )
@@ -872,6 +873,42 @@ async def story_analysis_run(body: StoryAnalysisRunRequest) -> StreamingResponse
             _story_runs.pop(canvas_name, None)
 
     return StreamingResponse(stream(), media_type="application/x-ndjson")
+
+
+class PromptRequest(BaseModel):
+    canvas: str
+    card: str
+    prompt: str = ""
+
+
+@router.get("/story-analysis/prompts")
+async def get_story_prompts(canvas: str) -> dict[str, Any]:
+    """每卡解析指令：custom（用户改过的）+ default（内置）。UI 浮窗展示用。"""
+    node = await _load(canvas)
+    custom = dict((node.meta or {}).get("story_analysis_prompts") or {})
+    return {"cards": {c: {"custom": str(custom.get(c) or ""), "default": _CARD_INSTRUCTION[c]} for c in CARDS}}
+
+
+@router.post("/story-analysis/prompts")
+async def post_story_prompt(body: PromptRequest) -> dict[str, Any]:
+    """保存/清除一张卡的自定义解析指令；空串 = 恢复默认。重生成时生效。"""
+    if body.card not in CARDS:
+        raise HTTPException(status_code=400, detail=f"未知卡片：{body.card}")
+    value = str(body.prompt or "").strip()
+
+    def mutate(graph: Canvas) -> bool:
+        meta = dict(graph.meta or {})
+        prompts = dict(meta.get("story_analysis_prompts") or {})
+        if value:
+            prompts[body.card] = value
+        else:
+            prompts.pop(body.card, None)
+        meta["story_analysis_prompts"] = prompts
+        graph.meta = meta
+        return True
+
+    await mutate_canvas_with_retry(_registry.canvas_repository, body.canvas, mutate)
+    return {"ok": True, "card": body.card, "custom": value}
 
 
 @router.post("/story-analysis/cancel")
@@ -1034,6 +1071,7 @@ def _spawn_auto_job(canvas_name: str) -> None:
                     script_text,
                     _registry.llm,
                     skill_tag={"name": "script-analysis", "version": version_s},
+                    instructions=_analysis_instructions(graph),
                 )
                 await _merge_story_analysis(canvas_name, analysis)
             graph = await _load(canvas_name)
@@ -1061,6 +1099,14 @@ def _spawn_auto_job(canvas_name: str) -> None:
     _story_runs[canvas_name] = {"task": asyncio.create_task(job()), "cancel": asyncio.Event()}
 
 
+def _analysis_instructions(graph: Canvas) -> dict[str, str]:
+    """读用户自定义的每卡解析指令（meta.story_analysis_prompts；空串/缺卡 = 用默认）。"""
+    raw = (graph.meta or {}).get("story_analysis_prompts") or {}
+    if not isinstance(raw, dict):
+        return {}
+    return {str(k): str(v) for k, v in raw.items() if str(v or "").strip()}
+
+
 def _spawn_analysis_job(canvas_name: str) -> None:
     """只跑剧本理解四卡（聊天触发 / 手动重跑共用）。"""
 
@@ -1074,6 +1120,7 @@ def _spawn_analysis_job(canvas_name: str) -> None:
             script_text,
             _registry.llm,
             skill_tag={"name": "script-analysis", "version": version},
+            instructions=_analysis_instructions(graph),
         )
         await _merge_story_analysis(canvas_name, analysis)
 

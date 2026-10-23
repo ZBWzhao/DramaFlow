@@ -256,6 +256,15 @@ export async function cancelStoryAnalysis() {
   return postJSON("/api/studio/story-analysis/cancel", { canvas: studio.canvas });
 }
 
+/* 每卡解析指令（提示词库）：custom 为空串表示用内置默认 */
+export async function getStoryPrompts() {
+  return getJSON(`/api/studio/story-analysis/prompts?canvas=${encodeURIComponent(studio.canvas)}`);
+}
+
+export async function saveStoryPrompt(card, prompt) {
+  return postJSON("/api/studio/story-analysis/prompts", { canvas: studio.canvas, card, prompt });
+}
+
 export async function parseAssetTables(onEvent) {
   if (studio.parsing.running) throw new Error("已经在解析中");
   studio.parsing.running = true;

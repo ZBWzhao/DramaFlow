@@ -5,8 +5,8 @@
  * 运行态在 studio.analysis.cards（逐卡：idle/running/done/failed）。
  * 结构化产物走按钮触发的 pipeline；自由修改走右栏 AI 助手（聊天改字段）。
  */
-import { computed, ref } from "vue";
-import { cancelStoryAnalysis, runStoryAnalysis, studio } from "../../studio/studioStore.js";
+import { computed, onMounted, ref } from "vue";
+import { cancelStoryAnalysis, getStoryPrompts, runStoryAnalysis, saveStoryPrompt, studio } from "../../studio/studioStore.js";
 
 const CARDS = [
   { key: "worldview", title: "世界观" },
@@ -63,6 +63,52 @@ async function regen(key) {
     studio.error = err?.message || String(err);
   }
 }
+
+/* ---------- 每卡解析指令（提示词浮窗） ---------- */
+const promptOpenKey = ref("");
+const promptDraft = ref("");
+const promptSaving = ref(false);
+const promptCache = ref({}); // key -> {custom, default}，进 tab 时拉一次
+async function loadPrompts() {
+  try {
+    const data = await getStoryPrompts();
+    promptCache.value = data.cards || {};
+  } catch {
+    promptCache.value = {}; // 拉不到就用内置默认（浮窗里显示空再保存即自定义）
+  }
+}
+function openPrompt(key) {
+  // 再点一次同一张卡的按钮 = 收起
+  promptOpenKey.value = promptOpenKey.value === key ? "" : key;
+  const entry = promptCache.value[key] || {};
+  promptDraft.value = entry.custom || entry.default || "";
+}
+const hasCustom = (key) => Boolean(promptCache.value[key]?.custom);
+async function savePrompt(key) {
+  promptSaving.value = true;
+  try {
+    await saveStoryPrompt(key, promptDraft.value);
+    promptCache.value[key] = { ...(promptCache.value[key] || {}), custom: promptDraft.value.trim() };
+    promptOpenKey.value = "";
+  } catch (err) {
+    studio.error = err?.message || String(err);
+  } finally {
+    promptSaving.value = false;
+  }
+}
+async function resetPrompt(key) {
+  promptSaving.value = true;
+  try {
+    await saveStoryPrompt(key, "");
+    promptCache.value[key] = { ...(promptCache.value[key] || {}), custom: "" };
+    promptDraft.value = promptCache.value[key]?.default || "";
+  } catch (err) {
+    studio.error = err?.message || String(err);
+  } finally {
+    promptSaving.value = false;
+  }
+}
+onMounted(loadPrompts);
 </script>
 
 <template>
@@ -93,6 +139,7 @@ async function regen(key) {
           <span class="ct">{{ c.title }}</span>
           <span class="stx" :class="cardState(c.key).status">{{ stateLabel(cardState(c.key).status) }}</span>
           <span style="flex: 1"></span>
+          <button v-if="!running" class="regen" type="button" :title="`查看/修改「${c.title}」的解析指令`" @click="openPrompt(c.key)">✎ 提示词</button>
           <button
             v-if="!running"
             class="regen"
@@ -101,6 +148,23 @@ async function regen(key) {
             @click="regen(c.key)"
           >↻ 重生成</button>
         </header>
+
+        <!-- 提示词浮窗：看当前指令 / 改成自定义 / 恢复默认；保存后点「↻ 重生成」生效 -->
+        <div v-if="promptOpenKey === c.key" class="pw-pop" @click.stop>
+          <div class="pw-cap">
+            {{ c.title }} · 解析指令
+            <span class="pw-tag" :class="{ custom: hasCustom(c.key) }">{{ hasCustom(c.key) ? "自定义" : "默认" }}</span>
+          </div>
+          <textarea v-model="promptDraft" class="pw-ta" spellcheck="false"></textarea>
+          <div class="pw-foot">
+            <button v-if="hasCustom(c.key)" class="pw-btn" type="button" @click="resetPrompt(c.key)">恢复默认</button>
+            <span style="flex: 1"></span>
+            <button class="pw-btn ghost" type="button" @click="promptOpenKey = ''">取消</button>
+            <button class="pw-btn primary" type="button" :disabled="promptSaving" @click="savePrompt(c.key)">
+              {{ promptSaving ? "保存中…" : "保存" }}
+            </button>
+          </div>
+        </div>
 
         <div v-if="c.key === 'episode_outline'" class="outline">
           <div v-for="ep in outline" :key="ep.no" class="ep">
@@ -135,7 +199,7 @@ async function regen(key) {
 .sa-scroll { flex: 1; min-height: 0; overflow-y: auto; display: flex; flex-direction: column; gap: var(--sp-3); padding-bottom: var(--sp-4); }
 .sa-empty { padding: var(--sp-4); border: 1px dashed var(--line-2); border-radius: var(--r-2); color: var(--text-2); font-size: var(--fs-13); line-height: 1.8; }
 
-.card { border: 1px solid var(--line); border-radius: var(--r-2); padding: var(--sp-3) var(--sp-4); background: var(--card); }
+.card { border: 1px solid var(--line); border-radius: var(--r-2); padding: var(--sp-3) var(--sp-4); background: var(--card); position: relative; }
 .card.run { border-color: rgba(194, 163, 107, .55); }
 .card.fail { border-color: rgba(196, 74, 58, .55); }
 .card header { display: flex; align-items: baseline; justify-content: space-between; margin-bottom: 6px; }
@@ -149,6 +213,31 @@ async function regen(key) {
 .fold:hover { color: var(--text); }
 .regen { border: 1px solid var(--line); background: none; color: var(--text-3); font-size: var(--fs-11); padding: 3px 9px; border-radius: var(--r-1); cursor: pointer; font-family: inherit; }
 .regen:hover { color: var(--gold); border-color: rgba(194, 163, 107, .5); }
+
+/* 提示词浮窗（提层样式与历史下拉同族） */
+.pw-pop {
+  position: absolute; top: 40px; right: var(--sp-4); z-index: 30;
+  width: min(520px, 90%);
+  background: #1e1d1b; border: 1px solid rgba(255, 251, 243, .16); border-radius: 12px;
+  box-shadow: 0 20px 56px rgba(0, 0, 0, .72); padding: 10px;
+}
+.pw-cap { display: flex; align-items: center; gap: 8px; color: var(--text-3); font-size: var(--fs-11); margin-bottom: 7px; }
+.pw-tag { padding: 1px 8px; border-radius: var(--r-pill); background: var(--card-2); }
+.pw-tag.custom { color: var(--gold); }
+.pw-ta {
+  width: 100%; min-height: 150px; max-height: 280px; overflow-y: auto;
+  background: var(--card); border: 1px solid var(--line-2); border-radius: 8px;
+  color: var(--text); font-family: var(--mono, monospace); font-size: 12px; line-height: 1.7;
+  padding: 9px 11px; resize: vertical; box-sizing: border-box;
+}
+.pw-ta:focus { outline: none; border-color: rgba(194, 163, 107, .5); }
+.pw-foot { display: flex; align-items: center; gap: 8px; margin-top: 8px; }
+.pw-btn { border: 1px solid var(--line-2); background: none; color: var(--text-2); font-size: var(--fs-12); padding: 4px 12px; border-radius: 8px; cursor: pointer; font-family: inherit; }
+.pw-btn:hover { color: var(--text); }
+.pw-btn.ghost { border-color: transparent; color: var(--text-3); }
+.pw-btn.primary { background: var(--accent); border-color: transparent; color: #FFF7F0; }
+.pw-btn.primary:hover { background: var(--accent-hi); color: #FFF7F0; }
+.pw-btn:disabled { opacity: .5; cursor: not-allowed; }
 .card .none { color: var(--text-3); font-size: var(--fs-12); }
 
 .outline .ep { padding: 6px 0; border-bottom: 1px solid var(--line); }

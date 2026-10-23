@@ -72,14 +72,14 @@ def extract_json(text: str) -> dict:
     raise ValueError("JSON 未闭合")
 
 
-def _card_messages(card: StoryAnalysisCard, script_text: str, prior: dict) -> list[dict]:
+def _card_messages(card: StoryAnalysisCard, script_text: str, prior: dict, instruction: str = "") -> list[dict]:
     done = {k: prior[k] for k in CARDS if prior.get(k)}
     prior_text = json.dumps(done, ensure_ascii=False) if done else "（无）"
     system = (
         "你是短剧剧本理解助手。只输出一个 JSON 对象，不要输出解释文字或 markdown 围栏。"
         "不擅自增加剧本没有的剧情事件、人物、前史；台词引用必须是原文。"
     )
-    user = f"【剧本全文】\n{script_text}\n\n【已完成产物】\n{prior_text}\n\n【本次任务】\n{_CARD_INSTRUCTION[card]}"
+    user = f"【剧本全文】\n{script_text}\n\n【已完成产物】\n{prior_text}\n\n【本次任务】\n{instruction or _CARD_INSTRUCTION[card]}"
     return [{"role": "system", "content": system}, {"role": "user", "content": user}]
 
 
@@ -90,21 +90,24 @@ async def run_story_analysis(
     cards: list[StoryAnalysisCard] | None = None,
     prior: dict | None = None,
     skill_tag: dict | None = None,
+    instructions: dict[str, str] | None = None,
     on_event: Callable[[dict], None] | None = None,
     cancel: asyncio.Event | None = None,
 ) -> dict:
     """逐卡执行；单卡 JSON 解析失败回喂错误重试 1 次，再失败记 card_failed 但继续。
 
     每卡开始前检查 cancel——已取消则跳过剩余卡，保留 prior 与已完成卡。
+    instructions：按卡覆盖默认指令（用户在 UI 里改过的提示词）；缺卡的卡用默认。
     """
     emit = on_event or (lambda event: None)
     todo = list(cards or CARDS)
+    overrides = {k: str(v) for k, v in (instructions or {}).items() if str(v or "").strip()}
     analysis = StoryAnalysis(**(prior or {}))
     for card in todo:
         if cancel is not None and cancel.is_set():
             break
         emit({"type": "card_start", "key": card})
-        messages = _card_messages(card, script_text, analysis.model_dump())
+        messages = _card_messages(card, script_text, analysis.model_dump(), overrides.get(card, ""))
         data = None
         error = ""
         for attempt in range(2):  # 首次 + 回喂重试 1 次
