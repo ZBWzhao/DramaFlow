@@ -6,6 +6,7 @@
  * 结构化产物走按钮触发的 pipeline；自由修改走右栏 AI 助手（聊天改字段）。
  */
 import { computed, onMounted, ref } from "vue";
+import { ElMessage } from "element-plus";
 import { cancelStoryAnalysis, getStoryPrompts, runStoryAnalysis, saveStoryPrompt, studio } from "../../studio/studioStore.js";
 
 const CARDS = [
@@ -47,11 +48,16 @@ const expanded = ref({});
 const isLong = (key) => cardText(key).length > LONG;
 const clamped = (key) => !expanded.value[key] && isLong(key) && cardState(key).status !== "running";
 
+/* 失败必须看得见：studio.error 没有任何地方渲染，全靠这里弹 toast */
+function reportError(action, err) {
+  ElMessage.error(`${action}失败：${err?.message || String(err)}`);
+}
+
 async function start() {
   try {
     await runStoryAnalysis();
   } catch (err) {
-    studio.error = err?.message || String(err);
+    reportError("解析", err);
   }
 }
 
@@ -61,7 +67,7 @@ async function regen(key) {
   try {
     await runStoryAnalysis({ cards: [key] });
   } catch (err) {
-    studio.error = err?.message || String(err);
+    reportError("重生成", err);
   }
 }
 
@@ -92,7 +98,7 @@ async function savePrompt(key) {
     promptCache.value[key] = { ...(promptCache.value[key] || {}), custom: promptDraft.value.trim() };
     promptOpenKey.value = "";
   } catch (err) {
-    studio.error = err?.message || String(err);
+    reportError("保存提示词", err);
   } finally {
     promptSaving.value = false;
   }
@@ -104,7 +110,7 @@ async function resetPrompt(key) {
     promptCache.value[key] = { ...(promptCache.value[key] || {}), custom: "" };
     promptDraft.value = promptCache.value[key]?.default || "";
   } catch (err) {
-    studio.error = err?.message || String(err);
+    reportError("恢复默认", err);
   } finally {
     promptSaving.value = false;
   }
