@@ -55,8 +55,9 @@ async function start() {
   }
 }
 
-/* 单卡重生成：后端 cards 参数只跑这张卡，其余卡保留旧产物 */
+/* 单卡重生成：后端 cards 参数只跑这张卡，其余卡保留旧产物；收起浮窗避免「改了没存」的歧义 */
 async function regen(key) {
+  promptOpenKey.value = "";
   try {
     await runStoryAnalysis({ cards: [key] });
   } catch (err) {
@@ -139,7 +140,7 @@ onMounted(loadPrompts);
           <span class="ct">{{ c.title }}</span>
           <span class="stx" :class="cardState(c.key).status">{{ stateLabel(cardState(c.key).status) }}</span>
           <span style="flex: 1"></span>
-          <button v-if="!running" class="regen" type="button" :title="`查看/修改「${c.title}」的解析指令`" @click="openPrompt(c.key)">✎ 提示词</button>
+          <button v-if="!running" class="regen" :class="{ 'has-custom': hasCustom(c.key) }" type="button" :title="hasCustom(c.key) ? '当前使用自定义指令，点击查看/修改' : '查看/修改这张卡的解析指令'" @click="openPrompt(c.key)">✎ 提示词</button>
           <button
             v-if="!running"
             class="regen"
@@ -149,16 +150,16 @@ onMounted(loadPrompts);
           >↻ 重生成</button>
         </header>
 
-        <!-- 提示词浮窗：看当前指令 / 改成自定义 / 恢复默认；保存后点「↻ 重生成」生效 -->
+        <!-- 提示词浮窗：显示当前正在使用的指令；保存后点「↻ 重生成」按它重跑该卡 -->
         <div v-if="promptOpenKey === c.key" class="pw-pop" @click.stop>
           <div class="pw-cap">
-            {{ c.title }} · 解析指令
+            {{ c.title }} · 解析指令（当前生效）
             <span class="pw-tag" :class="{ custom: hasCustom(c.key) }">{{ hasCustom(c.key) ? "自定义" : "默认" }}</span>
           </div>
           <textarea v-model="promptDraft" class="pw-ta" spellcheck="false"></textarea>
           <div class="pw-foot">
+            <span class="pw-hint">保存后点「↻ 重生成」按此指令重跑该卡</span>
             <button v-if="hasCustom(c.key)" class="pw-btn" type="button" @click="resetPrompt(c.key)">恢复默认</button>
-            <span style="flex: 1"></span>
             <button class="pw-btn ghost" type="button" @click="promptOpenKey = ''">取消</button>
             <button class="pw-btn primary" type="button" :disabled="promptSaving" @click="savePrompt(c.key)">
               {{ promptSaving ? "保存中…" : "保存" }}
@@ -213,6 +214,8 @@ onMounted(loadPrompts);
 .fold:hover { color: var(--text); }
 .regen { border: 1px solid var(--line); background: none; color: var(--text-3); font-size: var(--fs-11); padding: 3px 9px; border-radius: var(--r-1); cursor: pointer; font-family: inherit; }
 .regen:hover { color: var(--gold); border-color: rgba(194, 163, 107, .5); }
+/* 这张卡正在用自定义指令：提示词按钮亮金，不开浮窗也看得出 */
+.regen.has-custom { color: var(--gold); border-color: rgba(194, 163, 107, .4); }
 
 /* 提示词浮窗（提层样式与历史下拉同族） */
 .pw-pop {
@@ -232,6 +235,7 @@ onMounted(loadPrompts);
 }
 .pw-ta:focus { outline: none; border-color: rgba(194, 163, 107, .5); }
 .pw-foot { display: flex; align-items: center; gap: 8px; margin-top: 8px; }
+.pw-hint { margin-right: auto; color: var(--text-3); font-size: var(--fs-11); }
 .pw-btn { border: 1px solid var(--line-2); background: none; color: var(--text-2); font-size: var(--fs-12); padding: 4px 12px; border-radius: 8px; cursor: pointer; font-family: inherit; }
 .pw-btn:hover { color: var(--text); }
 .pw-btn.ghost { border-color: transparent; color: var(--text-3); }

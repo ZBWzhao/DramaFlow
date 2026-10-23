@@ -244,8 +244,13 @@ export async function runStoryAnalysis({ cards, onEvent } = {}) {
         onEvent?.(event);
       },
     );
+    // 流正常结束必然以 analysis_done 收尾；不是它 = 连接中途断了，
+    // 此时旧产物虽在但「这次跑没跑成」必须说出来，不能静默装作无事发生。
     const done = events[events.length - 1];
-    studio.storyAnalysis = done?.analysis || studio.storyAnalysis;
+    if (done?.type !== "analysis_done") {
+      throw new Error("解析流提前结束，这次可能没跑完，请重试");
+    }
+    studio.storyAnalysis = done.analysis;
     return done;
   } finally {
     studio.analysis.running = false;
