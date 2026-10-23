@@ -18,7 +18,20 @@ StoryAnalysisCard = Literal["worldview", "synopsis", "episode_outline", "audiovi
 CARDS: list[StoryAnalysisCard] = ["worldview", "synopsis", "episode_outline", "audiovisual_style"]
 
 _CARD_INSTRUCTION: dict[str, str] = {
-    "worldview": '输出世界观 JSON：{"worldview": "≤800字，时代地点/社会规则/设定/调性，只写剧本里成立的事实"}',
+    # 世界观 = 设定层（世界如何运作），不是事件层（发生了什么）。
+    # 若只写「只写剧本里成立的事实」，模型最安全的策略就是复述剧情——必须显式禁止叙事。
+    # 注意：skills/script-analysis/SKILL.md 的「产物口径」与本表须同步修改。
+    "worldview": (
+        '输出世界观 JSON：{"worldview": "..."}。世界观是**设定层**——这个世界如何运作，'
+        '不是剧情——发生了什么。按小节组织：'
+        '【时代与地点】【社会与规则】【设定与法则】【势力与组织】【调性关键词】。'
+        '每节只写静态事实（是什么/怎么运作/边界在哪），不写任何事件的经过；'
+        '禁止出现「故事开始/随后/最终/这时」等叙事词，禁止复述任何一场戏的情节。'
+        '正反例（示例仅示意写法）：'
+        '✗「教授在阶梯教室授课时，学生发现符号画反了」（这是剧情）；'
+        '✓「此世界的雨天会吞没声音，居民以手语交谈」（这是设定——写世界如何运作，不写谁遇到了什么）。'
+        '≤800字，只写剧本里成立的设定，不脑补前史。'
+    ),
     "synopsis": '基于世界观输出故事梗概 JSON：{"synopsis": "≤600字，主线因果链：欲望→阻碍→代价→结局"}',
     "episode_outline": (
         '输出分集大纲 JSON：{"episode_outline": [{"no": 1, "title": "…", "hook": "本集开头3秒的钩子事件", '
