@@ -471,7 +471,7 @@ onMounted(refresh);
       mode="dock"
       assistant-mode="script_qa"
       :canvas="String(route.params.name)"
-      :chips="['解析出资产表', '细化林小满的人物小传', '把世界观改得更黑暗', '分析本集对白节奏']"
+      :chips="['概括本剧的故事梗概', '细化林小满的人物小传', '把世界观改得更黑暗', '分析本集对白节奏']"
       @canvas-changed="refresh"
     />
 

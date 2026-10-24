@@ -170,8 +170,8 @@
 
 - Postgres 表 `pipeline_artifacts`，PRIMARY KEY (project_id, artifact_type)，latest-wins upsert；
 - schema_version 随产物落库，上游升级时导入层做版本迁移；
-- `character_refs` 上游为**每角色一份** `asset.json`，但落库仍是**一项目一行**：`content` 存全部角色 asset 的合并集；合并的具体形状（按角色名映射或数组）由阶段 1 导入层定义。导入时逐角色解析上游文件，不得互相覆盖；
-- `script` 一份文件只覆盖一个集数区间（一批 ≤ 3 集）。当前 latest-wins 语义仅对"单批导入"成立；长篇多批次导入时的合并/覆盖策略（`source_run_id` 列已预留批次区分）由阶段 1 导入层定义，导入超过 3 集的项目前必须先定。
+- **character_refs 一项目一行**：上游为**每角色一份** `asset.json`，落库 `content` 存全部角色 asset 的合并集（合并形状见下文「character_refs 合并形状（阶段 1 定案）」）；导入时逐角色解析上游文件，不得互相覆盖；
+- **script 集数区间**：一份文件只覆盖一个集数区间（一批 ≤ 3 集），latest-wins 语义仅对"单批导入"成立（多批次合并策略见下文「script 分批合并（阶段 1 定案）」，`source_run_id` 列已预留批次区分）。
 - **项目身份**：`pipeline_artifacts.project_id` = 画布名（`/api/studio/*` 的 canvas 键）。画布即项目，不另建映射；
 - **character_refs 合并形状（阶段 1 定案）**：落库 content 为 `{"characters": [<上游 asset 对象>, ...]}`。导入端接受两种输入：单个 asset 对象（自动包装）或已合并对象；合并时按角色标识逐角色并入，同角色整对象替换，不得丢失其他角色；
 - **script 分批合并（阶段 1 定案）**：导入端按集数合并——新批次中的集按集号替换对应集，未出现的集保留原样；集号字段以本契约 script 节字段表为准；非预期结构（无法识别集数组）时整行替换并记录告警。

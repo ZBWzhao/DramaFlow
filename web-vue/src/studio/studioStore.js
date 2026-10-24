@@ -43,8 +43,9 @@ export const studio = reactive({
   syncing: false,
 
   // 管线产物（阶段 1）：artifacts = 列表接口元数据按类型索引；detail = 单条 GET 全形状（含 content）。
-  // 画布老项目没有导入产物 → 列表为空，剧本页零变化。
-  pipeline: { loaded: false, artifacts: {}, detail: {} },
+  // 画布老项目没有导入产物 → 列表为空，剧本页零变化。canvas = 缓存归属的项目，
+  // loadPipeline 换项目先清缓存（SPA 内不重建 store，防串项目）。
+  pipeline: { loaded: false, canvas: "", artifacts: {}, detail: {} },
 });
 
 const qs = () => {
@@ -579,10 +580,17 @@ export async function cancelJob(jobId) {
 
 /* ── 管线产物（阶段 1）：剧本页「管线大纲」tab 的只读数据源 ─────────
  * GET artifacts 列表 → 有 outline 再 GET 详情（404/网络错都吞掉只记 console：
- * 剧本页是画布项目的家，不能因为管线查询不可用而跟着挂）。loaded 防双拉。
+ * 剧本页是画布项目的家，不能因为管线查询不可用而跟着挂）。loaded 防双拉；
+ * 换项目先清缓存（SPA 里 Home → 开另一个项目不会重建 store，不 reset 会把
+ * A 的产物摆在 B 的名字下）；空列表/读取失败不落锁——导入后回到本页、或
+ * 下次进页面，都能重新拉到。
  */
 export async function loadPipeline() {
-  if (!studio.canvas || studio.pipeline.loaded) return;
+  if (!studio.canvas) return;
+  if (studio.pipeline.canvas !== studio.canvas) {
+    studio.pipeline = { loaded: false, canvas: studio.canvas, artifacts: {}, detail: {} };
+  }
+  if (studio.pipeline.loaded) return;
   studio.pipeline.loaded = true;
   try {
     const base = `/api/pipeline/projects/${encodeURIComponent(studio.canvas)}/artifacts`;
@@ -603,7 +611,11 @@ export async function loadPipeline() {
         studio.pipeline.detail[type] = await getJSON(`${base}/${type}`);
       }
     }
+    // 空列表不算定稿：导入前打开过本页时，导入后回到本页要靠这次重拉才能
+    // 看到产物（「管线大纲」tab / 制片台面板），落锁就永远出不来了。
+    studio.pipeline.loaded = list.length > 0;
   } catch (err) {
+    studio.pipeline.loaded = false; // 失败不占坑：下次进页面再试，而不是永久空白
     console.error("管线产物读取失败（不影响剧本页）", err);
   }
 }
