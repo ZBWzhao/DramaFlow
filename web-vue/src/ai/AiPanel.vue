@@ -18,6 +18,9 @@ import MarkdownText from "../components/MarkdownText.vue";
 const props = defineProps({
   mode: { type: String, default: "dock" }, // dock | drawer
   canvas: { type: String, required: true },
+  /* 助手语义（随请求体 mode 送达后端）：canvas = 整图画布助手（默认）；
+   * script_qa = 剧本页只读问答，服务端不给任何工具，只依据项目概要回答。 */
+  assistantMode: { type: String, default: "canvas" },
   title: { type: String, default: "AI 助手" },
   chips: { type: Array, default: () => [] },
   /* async (diff) => boolean：应用字段修改；返回 true 则卡片置「已应用」 */
@@ -269,7 +272,7 @@ async function reply(prompt) {
     }
     await streamNDJSON(
       "/api/agent",
-      { prompt, session_id: sessionId.value || null, canvas: props.canvas, media_policy: "plan_only", llm_model: aiModel.value || "" },
+      { prompt, session_id: sessionId.value || null, canvas: props.canvas, media_policy: "plan_only", llm_model: aiModel.value || "", mode: props.assistantMode },
       (ev) => handleAgentEvent(ev, bot),
       (err) => {
         bot.error = err?.message || String(err);
@@ -599,6 +602,7 @@ defineExpose({ send, attachProduce });
 
     <!-- ── 快捷指令 + 大输入框 ── -->
     <div class="composer">
+      <div v-if="assistantMode === 'script_qa'" class="ro-hint">只读模式：不会修改项目数据</div>
       <div v-if="chips.length" class="ai-quick">
         <button v-for="c in chips" :key="c" class="q-chip" type="button" :disabled="running" @click="send(c)">{{ c }}</button>
       </div>
@@ -796,6 +800,7 @@ defineExpose({ send, attachProduce });
 
 /* ---------- 输入区 ---------- */
 .composer { padding: 8px 14px 14px; flex: none; }
+.ro-hint { padding: 0 2px 7px; font-size: var(--fs-11); color: var(--text-3); }
 .ai-quick { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 8px; }
 .q-chip { font-size: var(--fs-12); color: var(--text-3); border: 1px solid var(--line-2); border-radius: 999px; padding: 6px 14px; background: none; }
 .q-chip:hover { color: var(--gold); border-color: rgba(194, 163, 107, .4); }

@@ -157,6 +157,8 @@ class ChatRequest(BaseModel):
     focus_node: str = ""
     # 用户切换的对话模型（"" = 服务端默认，如 deepseek-chat；deepseek-reasoner = 深度思考）
     llm_model: str = ""
+    # 剧本页只读问答：script_qa 时零工具 + 项目概要提示块；默认 canvas 行为不变。
+    mode: Literal["canvas", "script_qa"] = "canvas"
 
 
 class CancelRequest(BaseModel):
@@ -641,6 +643,43 @@ async def list_llm_models() -> dict[str, Any]:
     return {"default": default_model, "models": models}
 
 
+async def _script_qa_block(canvas_name: str) -> str:
+    """script_qa（剧本页只读问答）的系统提示附加块。
+
+    概要读 canvas meta（story_title/story_summary/episodes，同制片台 /project 视图）；
+    画布读不到或 meta 为空就退化为只给画布名——问答不因此挂掉。
+    """
+    name, title, summary = canvas_name, "", ""
+    episodes: list[Any] = []
+    try:
+        canvas = await registry.canvas_repository.load(canvas_name)
+        meta = dict(canvas.meta or {})
+        name = canvas.name or canvas_name
+        title = str(meta.get("story_title") or "")
+        summary = str(meta.get("story_summary") or "")
+        raw = meta.get("episodes")
+        if isinstance(raw, list):
+            episodes = [item for item in raw if isinstance(item, dict)]
+    except Exception:  # noqa: BLE001 - 仓库缺席就退化，问答仍可用
+        pass
+    lines = [f"画布：{name}"]
+    if title:
+        lines.append(f"故事：{title}")
+    if summary:
+        lines.append(f"梗概：{summary}")
+    episode_lines = [f"第{item.get('no')}集 {str(item.get('title') or '').strip()}".strip() for item in episodes]
+    if episode_lines:
+        lines.append("分集：")
+        lines.extend(episode_lines)
+    return (
+        '\n<assistant_mode mode="script_qa">\n'
+        "你是剧本页的只读问答助手。你不能调用任何工具、不能修改任何数据；只依据下方项目概要和对话内容回答问题。\n"
+        "<project_summary>\n"
+        + "\n".join(lines)
+        + "\n</project_summary>\n</assistant_mode>"
+    )
+
+
 @app.post("/api/agent")
 async def chat(req: ChatRequest) -> StreamingResponse:
     try:
@@ -655,7 +694,10 @@ async def chat(req: ChatRequest) -> StreamingResponse:
     # 会让这个会话之后的每次请求都变少工具（开关粘住）。
     # Agent 只负责把方案做到可生成。真实生成始终走独立审批接口，防止模型自己
     # 调用外部付费 Provider。list_media_models 仍保留，便于它按可用模型写提示词。
-    live.agent.tools = live.tools_for(req.use_sub_agent, allow_media_generation=False)
+    # 剧本页只读问答（script_qa）：白名单给空集 —— 连 read_file 都不给，模型手里
+    # 没有任何可调用的工具，只依据系统提示里的项目概要回答。
+    allowed_tools: list[str] | None = [] if req.mode == "script_qa" else None
+    live.agent.tools = live.tools_for(req.use_sub_agent, allow_media_generation=False, allowed_tools=allowed_tools)
     # 单卡工作台：只留能读写这一张卡的工具，其它结构类工具本轮不给，
     # 这样「只服务这张卡」不只是嘴上说，模型手里也没有改别处的工具。
     focus_block = ""
@@ -675,6 +717,7 @@ async def chat(req: ChatRequest) -> StreamingResponse:
         + "\n任何图片或视频生成都必须经过前端审批卡的本次明确确认；不要声称已生成尚未生成的媒体。"
         + "\n需要询问时直接在对话正文中提出清晰、可回答的问题，然后结束本轮等待用户。\n</media-approval>"
         + ("\n" + focus_block if focus_block else "")
+        + (await _script_qa_block(req.canvas) if req.mode == "script_qa" else "")
     )
 
     try:
