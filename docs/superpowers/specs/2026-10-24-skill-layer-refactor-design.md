@@ -66,14 +66,14 @@
 ### 阶段 0：定契约、落技能（约 2–3 天）
 
 任务分解：
-1. 将 shuohao 7 技能并入仓库 `skills/`（保留各技能目录结构：SKILL.md / references / scripts）；
+1. 将 shuohao 7 技能 vendored 进仓库 `pipeline_skills/`（不进 `skills/`，避免画布装载器扫描；原样拷贝记录上游 SHA）；
 2. 逐个审阅 7 类产物 JSON schema，输出字段清单文档；
 3. 设计 Postgres 表并撰写 migration 草稿；
 4. 撰写数据契约文档（schema→表映射、导入/导出与幂等规则）；
 5. 选定样例小说，在 Claude Code 中端到端跑通技能链，产物留作阶段 1 测试夹具。
 
 验收清单：
-- [ ] `skills/` 下 7 个新技能就位且有清单说明；
+- [ ] `pipeline_skills/` 下 7 个新技能就位且有清单说明；
 - [ ] 数据契约文档定稿；
 - [ ] 样例小说端到端跑通 6 个文本管线技能（outline/script/characters/art/staging/storyboard），产出 JSON + 评审报告；`character-refs` 依赖出图后端（ComfyUI/OpenAI），后端就绪则跑通，未就绪则只验收其提示词产物并在文档记录缺口；
 - [ ] migration 脚本草稿完成（阶段 1 执行）。
