@@ -96,8 +96,12 @@ function blankBot() {
   });
 }
 function blankUser(text) {
-  return { role: "user", text };
+  return reactive({ role: "user", text, open: false });
 }
+
+/* 用户气泡超过这个字数默认收起（produce 注入的任务指令动辄上千字，把会话墙糊满） */
+const USER_FOLD = 600;
+const isUserClamped = (m) => m.text.length > USER_FOLD && !m.open;
 
 /* ---------- 历史恢复 / 会话切换 ---------- */
 function renderEntries(entries) {
@@ -106,8 +110,14 @@ function renderEntries(entries) {
     const content = entry?.content;
     if (typeof content !== "string" || !content.trim() || content === "[之前的对话摘要]") continue;
     if (entry.role === "user") out.push(blankUser(content));
-    else if (entry.role === "assistant" && !(entry.tool_calls || []).length)
-      out.push({ ...blankBot(), streaming: false, text: content, think: null });
+    else if (entry.role === "assistant" && !(entry.tool_calls || []).length) {
+      // 思考过程在 to_history_item 里已随 assistant 条目落盘（reasoning_content），
+      // 这里恢复成可折叠的思考块 —— 不恢复的话重开页面就只剩正文，DeepSeek 是能重看的。
+      const think = entry.reasoning_content
+        ? { text: entry.reasoning_content, streaming: false, startedAt: 0, seconds: 0, expanded: false, pinned: true }
+        : null;
+      out.push({ ...blankBot(), streaming: false, text: content, think });
+    }
   }
   return out;
 }
@@ -399,9 +409,14 @@ defineExpose({ send });
       </div>
 
       <template v-for="(m, mi) in messages" :key="mi">
-        <!-- 用户：右气泡 + 复制 -->
+        <!-- 用户：右气泡 + 复制。长任务指令（如 produce 注入）默认收起，Markdown 渲染 -->
         <div v-if="m.role === 'user'" class="row u">
-          <div class="bubble user">{{ m.text }}</div>
+          <div class="bubble user" :class="{ clamp: isUserClamped(m) }">
+            <MarkdownText :content="m.text" class="md" />
+            <button v-if="m.text.length > USER_FOLD" class="fold" type="button" @click="m.open = !m.open">
+              {{ m.open ? "收起 ▲" : `展开全文（${m.text.length} 字）▼` }}
+            </button>
+          </div>
           <button class="copy" type="button" @click="copyText(m.text)">复制</button>
         </div>
 
@@ -572,8 +587,12 @@ defineExpose({ send });
 .bubble { border-radius: 14px; padding: 12px 15px; font-size: var(--fs-14); line-height: 1.9; color: var(--text-2); max-width: 100%; }
 .bubble.user {
   background: var(--card); border: 1px solid var(--line-2); color: var(--text);
-  white-space: pre-wrap; max-width: 86%; border-radius: 14px 14px 4px 14px;
+  max-width: 86%; border-radius: 14px 14px 4px 14px; position: relative;
 }
+/* 超长用户消息（produce 任务指令等）：默认收起到 24 行左右，底部渐隐示意还有更多 */
+.bubble.user.clamp .md { max-height: 34em; overflow: hidden; -webkit-mask-image: linear-gradient(180deg, #000 82%, transparent); mask-image: linear-gradient(180deg, #000 82%, transparent); }
+.bubble.user .fold { border: none; background: none; color: var(--gold); font-size: var(--fs-12); padding: 6px 0 0; cursor: pointer; font-family: inherit; display: block; }
+.bubble.user .fold:hover { color: var(--text); }
 .bubble.bot { background: var(--card); border: 1px solid var(--line); border-radius: 4px 14px 14px 14px; position: relative; }
 .bubble.errb { color: var(--bad); background: rgba(196, 74, 58, .08); border: 1px solid rgba(196, 74, 58, .25); display: inline-block; width: fit-content; }
 .cursor { display: inline-block; width: 7px; height: 15px; margin-left: 2px; vertical-align: -2px; background: var(--gold); animation: blink 1s steps(2) infinite; }
