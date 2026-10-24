@@ -155,6 +155,8 @@ class ChatRequest(BaseModel):
     media_policy: Literal["plan_only", "ask", "auto_review"] = "ask"
     # 单卡工作台：带上节点 id 表示「本轮只改这一张卡」，服务端据此收窄工具与系统提示。
     focus_node: str = ""
+    # 用户切换的对话模型（"" = 服务端默认，如 deepseek-chat；deepseek-reasoner = 深度思考）
+    llm_model: str = ""
 
 
 class CancelRequest(BaseModel):
@@ -627,6 +629,17 @@ async def _node_focus_block(canvas_name: str, node_id: str) -> str:
     return "\n".join(lines)
 
 
+@app.get("/api/llm/models")
+async def list_llm_models() -> dict[str, Any]:
+    """可切换的对话模型。default 来自环境配置（LLM_MODEL）；DeepSeek 双模型供 AI 助手切换。"""
+    default_model = registry.llm.model
+    models: list[str] = [default_model]
+    for extra in ("deepseek-chat", "deepseek-reasoner"):
+        if extra not in models:
+            models.append(extra)
+    return {"default": default_model, "models": models}
+
+
 @app.post("/api/agent")
 async def chat(req: ChatRequest) -> StreamingResponse:
     try:
@@ -634,6 +647,9 @@ async def chat(req: ChatRequest) -> StreamingResponse:
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
     registry.bind_canvas(live, req.canvas)
+    # 用户切换的对话模型（"" = 默认）。压 64 位防乱写；校验交给请求时——
+    # 写错模型名会得到 provider 的可见报错，toast 能看到，比在这里维护白名单更诚实。
+    live.agent.llm_model = str(req.llm_model or "").strip()[:64]
     # 工具集从 full_tools **派生**：不就地改会话状态，否则一次 use_sub_agent=False
     # 会让这个会话之后的每次请求都变少工具（开关粘住）。
     # Agent 只负责把方案做到可生成。真实生成始终走独立审批接口，防止模型自己

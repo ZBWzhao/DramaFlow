@@ -162,7 +162,45 @@ async function stopStaleRun() {
   }
   staleRun.value = false;
 }
-onMounted(restoreHistory);
+onMounted(() => {
+  restoreHistory();
+  loadModels();
+});
+
+/* ---------- 对话模型切换（标准 / 深度思考） ----------
+ * 选择存 localStorage，随每次 /api/agent 请求带上；服务端只对本会话生效，
+ * produce/解析等 pipeline 不受影响。空串 = 服务端默认（环境 LLM_MODEL）。
+ */
+const MODEL_LABELS = { "deepseek-chat": "标准", "deepseek-reasoner": "深度思考" };
+const modelOpen = ref(false);
+const aiModel = ref(localStorage.getItem("df.ai.model") || "");
+const modelDefault = ref("");
+const modelOptions = ref([]);
+const modelLabel = computed(() => (aiModel.value ? MODEL_LABELS[aiModel.value] || aiModel.value : "标准"));
+const modelOptLabel = (id) => MODEL_LABELS[id] || id;
+async function loadModels() {
+  try {
+    const data = await getJSON("/api/llm/models");
+    modelDefault.value = data.default || "";
+    modelOptions.value = data.models || [];
+    if (aiModel.value && !modelOptions.value.includes(aiModel.value)) {
+      aiModel.value = ""; // 存的是服务端已不认识的模型：回落默认
+      localStorage.setItem("df.ai.model", "");
+    }
+  } catch {
+    modelOptions.value = []; // 拉不到就不展开列表，按钮仍显示当前选择
+  }
+}
+function toggleModelMenu() {
+  modelOpen.value = !modelOpen.value;
+  // 挂载时拉取失败（网络/服务端瞬时不可用）会静默——打开菜单时补拉一次自愈
+  if (modelOpen.value && !modelOptions.value.length) loadModels();
+}
+function pickModel(id) {
+  aiModel.value = id === modelDefault.value ? "" : id;
+  localStorage.setItem("df.ai.model", aiModel.value);
+  modelOpen.value = false;
+}
 onBeforeUnmount(() => controller?.abort());
 
 /* ---------- 新建 / 历史 ---------- */
@@ -231,7 +269,7 @@ async function reply(prompt) {
     }
     await streamNDJSON(
       "/api/agent",
-      { prompt, session_id: sessionId.value || null, canvas: props.canvas, media_policy: "plan_only" },
+      { prompt, session_id: sessionId.value || null, canvas: props.canvas, media_policy: "plan_only", llm_model: aiModel.value || "" },
       (ev) => {
         if (ev.type === "message_update") {
           if (bot.think && !bot.think.pinned) bot.think.expanded = false;
@@ -373,6 +411,9 @@ defineExpose({ send });
         <span class="status" :class="{ wait: running }">{{ statusText }}</span>
       </span>
       <span class="grow"></span>
+      <button class="h-btn" type="button" :class="{ on: modelOpen }" title="切换对话模型" @click="toggleModelMenu">
+        <span class="h-ico">⚡</span>{{ modelLabel }}
+      </button>
       <button class="h-btn" type="button" :disabled="running" title="开启新对话" @click="newChat">
         <span class="h-ico">＋</span>新建
       </button>
@@ -386,6 +427,17 @@ defineExpose({ send });
     <div v-if="staleRun" class="stale-bar">
       <span class="s-txt">上一次运行还没结束（可能在等你回答）</span>
       <button class="ui-btn sm" type="button" @click="stopStaleRun">停止它</button>
+    </div>
+
+    <!-- 模型下拉：标准 / 深度思考（只影响 AI 助手对话） -->
+    <div v-if="modelOpen" class="history">
+      <div class="h-cap num">对话模型 · 默认 {{ modelDefault || "（服务端配置）" }}</div>
+      <div v-if="!modelOptions.length" class="h-empty">模型列表拿不到（服务端没起或版本旧）</div>
+      <button v-for="opt in modelOptions" :key="opt" class="h-item" type="button" @click="pickModel(opt)">
+        <span class="h-title" :class="{ cur: aiModel === opt || (!aiModel && opt === modelDefault) }">{{ modelOptLabel(opt) }}</span>
+        <span class="h-sub num" :class="{ cur: aiModel === opt || (!aiModel && opt === modelDefault) }">{{ opt }}</span>
+      </button>
+      <div class="h-empty">深度思考（reasoner）更慢更贵，适合复杂规划；只影响 AI 助手对话，制作/解析不受影响</div>
     </div>
 
     <!-- 历史下拉（只列当前项目的会话） -->
@@ -574,6 +626,9 @@ defineExpose({ send });
 .h-item:hover { background: var(--card); }
 .h-item .h-title { font-size: var(--fs-13); color: var(--text-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .h-item .h-meta { font-size: var(--fs-11); color: var(--text-3); }
+/* 模型下拉：当前选中的项亮金 */
+.h-item .h-sub { font-size: var(--fs-11); color: var(--text-3); }
+.h-item .h-title.cur, .h-item .h-sub.cur { color: var(--gold); }
 
 /* ---------- 消息流 ---------- */
 .ai-body { flex: 1; min-height: 0; overflow-y: auto; padding: 18px 16px 10px; display: flex; flex-direction: column; gap: 18px; }

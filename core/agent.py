@@ -60,6 +60,9 @@ class Agent:
     # 仍保留硬上限防止无限工具循环，但达到上限属于 limited，不伪装成 completed。
     max_turns: int = field(default_factory=lambda: _positive_env_int("AGENT_MAX_TURNS", 40))
     usage_label: str = "main"
+    # 用户切换的对话模型（"" = 用 LLM 实例默认，如 deepseek-chat / deepseek-reasoner）。
+    # 只影响模型请求；上下文压缩摘要仍走默认模型，不为总结付推理价。
+    llm_model: str = ""
     cancel: asyncio.Event | None = None  # 取消信号（子 Agent 的取消级联靠它 + task.cancel）
     # 压缩阈值（字符数）。None = 用全局默认；子 Agent 会传更小的值。
     # 为什么能压得更狠：子 Agent 的产物都落盘成了画布节点正文，历史里丢掉的细节随时能重读。
@@ -308,6 +311,7 @@ class Agent:
                 [t.to_openai_schema() for t in self.tools] or None,
                 on_text=on_text,
                 on_reasoning=on_reasoning,
+                model=self.llm_model or "",
             )
         except asyncio.CancelledError:
             self._emit("message_end", role="assistant", block_id=block, interrupted=True)

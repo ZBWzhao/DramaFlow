@@ -109,9 +109,11 @@ class LLM:
         tools: list[dict[str, Any]] | None = None,
         on_text: Callable[[str], None] | None = None,
         on_reasoning: Callable[[str], None] | None = None,
+        model: str = "",
     ) -> AssistantMessage:
+        # model 覆盖：AI 助手的用户级模型切换走这里；空串 = 实例默认
         kwargs: dict[str, Any] = {
-            "model": self.model,
+            "model": model or self.model,
             "messages": messages,
             "stream": True,
             "stream_options": {"include_usage": True},
