@@ -32,6 +32,8 @@ art（3 场景 + 3 道具）、staging（3 地点 / 6 场走位）、storyboard�
 本机无出图后端，`gen` 在配置门处失败（「还没完成初次设置，缺：主图（锚点）用哪个模型……」）。
 因此 `asset.json` 处于「零图片、无过期」状态，`check` exit 0——测试不断言图片存在。
 
+顶层 `asset.json` 当前仅含程野一人的资产（本样例只跑了一个角色）；多角色时为合并集，形状见 `docs/pipeline/data-contract.md` 存储与导入约定。
+
 - `character_refs/chengye-intake.json`、`zhouxiaotong-intake.json`：Step 1 一次性输入（主角 C01 程野、C04 周晓桐）
 - `character_refs/*-front-full-prompt.json`：`prompt <asset> front-full` 打印的锚点提示词 / 反向词 / 比例
 - `character_refs/zhouxiaotong-asset.json`：第二角色的 asset.json

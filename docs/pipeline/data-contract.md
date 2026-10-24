@@ -169,6 +169,8 @@
 
 - Postgres 表 `pipeline_artifacts`，PRIMARY KEY (project_id, artifact_type)，latest-wins upsert；
 - schema_version 随产物落库，上游升级时导入层做版本迁移；
+- `character_refs` 上游为**每角色一份** `asset.json`，但落库仍是**一项目一行**：`content` 存全部角色 asset 的合并集；合并的具体形状（按角色名映射或数组）由阶段 1 导入层定义。导入时逐角色解析上游文件，不得互相覆盖；
+- `script` 一份文件只覆盖一个集数区间（一批 ≤ 3 集）。当前 latest-wins 语义仅对"单批导入"成立；长篇多批次导入时的合并/覆盖策略（`source_run_id` 列已预留批次区分）由阶段 1 导入层定义，导入超过 3 集的项目前必须先定。
 
 ## 已知缺口
 
