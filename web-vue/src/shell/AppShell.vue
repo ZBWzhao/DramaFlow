@@ -1,7 +1,7 @@
 <script setup>
 /* 系统外壳：顶栏（品牌 / 主导航 / 工具区）+ 路由出口。
  *
- * 主导航按产品流程划分：剧本 → 制作 → 画布 → 预览；
+ * 主导航按产品流程划分：剧本 → 制作 → 管线产物 → 画布 → 预览；
  * 工具区放跨流程的入口：项目资产 / 数据看板 / 项目信息 / 任务中心。
  * AI 助手是全局件：剧本页与画布页停靠（页面自挂 AiPanel mode="dock"），
  * 其余页面用右下浮球唤起全局抽屉（AiPanel mode="drawer"）。
@@ -87,6 +87,7 @@ async function applyDiff(d) {
 const tabs = [
   { label: "剧本", to: (n) => `/project/${n}/script`, match: (p) => p.endsWith("/script") },
   { label: "制作", to: (n) => `/project/${n}/production`, match: (p) => p.endsWith("/production") || p.endsWith("/wall") },
+  { label: "管线产物", to: (n) => `/project/${n}/pipeline`, match: (p) => p.endsWith("/pipeline") },
   { label: "画布", to: (n) => `/project/${n}/canvas`, match: (p) => p.endsWith("/canvas") },
   { label: "预览", to: (n) => `/project/${n}/preview`, match: (p) => p.endsWith("/preview") },
 ];

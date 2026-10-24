@@ -596,6 +596,13 @@ export async function loadPipeline() {
     if (studio.pipeline.artifacts.script) {
       studio.pipeline.detail.script = await getJSON(`${base}/script`);
     }
+    // Task 6：制片台四类产物（角色/美术/站位/分镜）详情同样有则取。
+    // PipelineView 是唯一消费方；与上面同权吞错（面板页只读，读取失败不炸页面）。
+    for (const type of ["characters", "art", "staging", "storyboard"]) {
+      if (studio.pipeline.artifacts[type]) {
+        studio.pipeline.detail[type] = await getJSON(`${base}/${type}`);
+      }
+    }
   } catch (err) {
     console.error("管线产物读取失败（不影响剧本页）", err);
   }
