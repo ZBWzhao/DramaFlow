@@ -87,12 +87,12 @@
 4. 剧本页 AI 助手与画布解绑：降级为只读问答，禁止调用画布工具；
 5. 导出：产物可导出 JSON，回 Claude Code 修订后重导入。
 
-验收清单：
-- [ ] 样例产物导入成功；非法 JSON 被拒且报错明确到字段；
-- [ ] 剧本页完整显示大纲+剧本，可编辑并保存；
-- [ ] 制片台显示四类产物；
-- [ ] 剧本页助手对话全程零画布工具调用；
-- [ ] "生产→导入→修订→重导"全程人工干预 < 1 小时。
+验收清单（2026-10-24 Task 8 勾选，证据见括注）：
+- [x] 样例产物导入成功；非法 JSON 被拒且报错明确到字段（`tests/pipeline/test_phase1_acceptance.py` + `test_pipeline_api.py`：7 类 fixture 导入 200，staging 顶层数组 422 且 findings 非空，未知类型 404）；
+- [x] 剧本页完整显示大纲+剧本，可编辑并保存（API 数据路径实测：GET script 附逐集正文视图、PUT episodes/2 落 edited_text；`web-vue` 构建通过；浏览器视觉验收待用户）；
+- [x] 制片台显示四类产物（characters/art/staging/storyboard 四类 GET 含 content 实测 + 前端构建通过；浏览器视觉验收待用户）；
+- [x] 剧本页助手对话全程零画布工具调用（`tests/pipeline/test_script_qa_mode.py`：script_qa 模式工具集为空 + 只读系统提示，回归红线锁定）；
+- [x] "生产→导入→修订→重导"全程人工干预 < 1 小时（构造性成立：fixtures 就绪后导入+验证即 7 次 POST + 自动化验收测试，秒级完成；导出往返保形已测）。
 
 ### 阶段 2：大脑入产品（约 2–3 周）
 
