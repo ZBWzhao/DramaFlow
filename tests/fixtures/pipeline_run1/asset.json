@@ -1,0 +1,92 @@
+{
+  "name": "程野",
+  "source": "最后一单 · run1",
+  "lang": "zh",
+  "layers": {
+    "identity": {
+      "age": 29,
+      "gender": "male",
+      "en": "An athletic lean Chinese man of about twenty-nine, present-day urban China, a night-shift designated driver",
+      "text": "约二十九岁的夜班代驾司机，当代中国都市",
+      "source": "stated"
+    },
+    "face": {
+      "en": "Slightly hollow cheeks under a healthy deepened complexion from night riding, high brow ridges over deep-set quiet eyes that watch more than they speak, a mouth settling into a flat neutral line, a tight jaw",
+      "text": "颧骨略凹，常年夜骑肤色偏深，眉骨略高，眼窝稍深，眼神安静克制，嘴抿成平直线，下颌收紧",
+      "source": "inferred"
+    },
+    "hair": {
+      "en": "Close-cropped black hair with a clean hairline",
+      "text": "黑色短寸头，发际线干净",
+      "source": "stated"
+    },
+    "build": {
+      "en": "Shoulders rolled a little forward from years over a scooter handlebar, lean waist, upright but compact stance",
+      "text": "常年扶车把肩膀微微前倾，腰身精瘦，站姿利落但不张扬",
+      "source": "inferred"
+    },
+    "skin": {
+      "en": "Healthy night-rider complexion with a thin handlebar callus on the right palm, no makeup",
+      "text": "夜骑晒出的健康深肤色，右掌一层薄茧，素颜",
+      "source": "inferred"
+    }
+  },
+  "outfits": {
+    "default": {
+      "label": "常态 · 代驾制服",
+      "top": {
+        "en": "a navy blue stand-collar driver uniform jacket with a thin reflective-piped placket over a heather-grey crew-neck tee, a laminated work badge on a lanyard at the chest, and in the breast pocket the corner of an old phone in a worn pale snake-textured case, the pocket seam shiny from nightly use",
+        "text": "藏蓝立领代驾制服夹克带细反光滚条，内搭麻灰圆领T恤，胸前挂塑封工牌，胸袋露出磨白蛇纹壳旧手机一角",
+        "source": "stated"
+      },
+      "bottom": {
+        "en": "dark straight-cut work trousers and black sneakers scuffed pale at the toe",
+        "text": "深色直筒工装裤，鞋头磨白的黑色运动鞋",
+        "source": "stated"
+      },
+      "details": [
+        {
+          "slot": "custom",
+          "id": "phone-pocket",
+          "part": "body",
+          "en": "the corner of an old phone in a worn pale snake-textured case riding in a shiny-seamed breast pocket",
+          "text": "胸袋里磨白蛇纹壳的旧手机一角",
+          "source": "stated"
+        },
+        {
+          "slot": "neck",
+          "en": "the navy stand collar with its thin reflective-piped placket open over a heather-grey crew-neck tee",
+          "text": "藏蓝立领与反光滚条，敞开露出麻灰T恤领口",
+          "source": "inferred"
+        },
+        {
+          "slot": "sleeve",
+          "en": "the navy uniform cuff with a thin reflective pipe, hem straight and work-worn",
+          "text": "带细反光条的藏蓝制服袖口，平直耐旧",
+          "source": "inferred"
+        },
+        {
+          "slot": "feet",
+          "en": "black sneakers scuffed pale at the toe from nights of walking garage ramps",
+          "text": "鞋头磨白的黑色运动鞋",
+          "source": "inferred"
+        }
+      ],
+      "overrides": {},
+      "look": {
+        "id": "realistic-photo",
+        "label": {
+          "zh": "写实照片",
+          "en": "Realistic photo",
+          "ja": "写実写真"
+        },
+        "medium": "photo",
+        "style": "A real photograph, not a render: shot on a full-frame digital camera with an 85mm portrait lens at f/5.6, natural true-to-life colors and white balance. Natural skin texture with the pores and fine lines the person's age calls for, a no-makeup look, no retouching, no beauty filter. Real fabric with natural creases. Subtle film grain.",
+        "clean": "White seamless paper backdrop lit to pure white. A soft directional key light from the front-left with a weaker fill, so the face and clothes have gentle natural shadows and volume. Exactly one person, empty hands, no props, no text, no watermark.",
+        "neg": "CGI, 3D render, digital painting, illustration, anime, airbrushed skin, smooth plastic skin, waxy skin, doll face, beauty filter, overly symmetrical face, oversharpened, HDR, glossy, over-saturated, flat lighting, porcelain skin, big anime eyes"
+      },
+      "views": {},
+      "upgrades": []
+    }
+  }
+}

@@ -6,3 +6,4 @@ mcp>=2.0.0,<3.0.0
 jsonschema>=4.23.0
 redis>=5.0.0,<8.0.0
 asyncpg>=0.29.0,<1.0.0
+pytest>=8.0.0

@@ -1,0 +1,378 @@
+# 最后一单 — 角色表
+
+共 5 位角色：程野、唐启山、白恬、周晓桐、保安队长老葛
+
+## 故事摘要
+
+现代都市的深夜，代驾司机程野照例在接单后按下录像——这是他被讹过一次之后给自己立的规矩。这一单的醉酒富商唐启山在地下车库丢了限量腕表，一口咬定司机偷窃，助理白恬轻声作证，保安围拢，一场围堵眼看要把小人物钉死。物业值班经理周晓桐带着登记簿和监控线路的知识赶来，把局面一寸寸拉回流程的轨道上。一块表的去向、一通打给母亲的电话、一本卷了角的登记簿，把这个深夜里五个人的底牌一张张翻开。
+
+---
+
+## 程野（小程）
+
+> 主角 · 二十九岁的深夜代驾司机，每一单都按下录像——规矩是给讲不清理的人准备的。
+
+### 画像
+
+- **性别**：男
+- **年龄**：二十九岁上下（推断）
+- **身份**：代驾司机，常年接深夜单
+- 克制 / 守规矩 / 耐烦 / 不卑不亢
+
+**外貌**　精瘦，肩背因常年骑车微微前倾，肤色是夜班晒出的深色。短寸头，发际线干净，眉骨略高，眼窝稍深，眼神安静克制，嘴习惯性抿平。穿深蓝色立领代驾制服夹克，内灰T恤，深色直筒工装裤和磨白的黑运动鞋，胸前挂工牌。胸袋里总揣着那台贴身旧手机，壳子磨白；胸袋缝线被手机磨得发亮。（推断）右掌有一层薄茧。
+
+**性情**　说话平直省字，不高声，一句是一句。被围住时不跑不吵，先把自己的证件举起来，再把要求一条条说清楚。爆发不在嗓门里，在他不接名片、不接钱的那一下。
+
+**动机**　把每一单平平安安送完，不被讹、不亏心。录音不是为了害人，是为了自保证清白。
+
+**人物弧光**　从被讹过所以只求自保的沉默规矩人，到当众翻案后敢于拒绝名片与收买、把规矩还给别人的代驾司机。
+
+**关系**
+
+- 唐启山 — 深夜最后一单的醉酒客人，反咬他偷表的失主
+- 白恬 — 指认他碰过表盒的助理，真正的偷表人
+- 周晓桐 — 替他把局面拉回流程的值班经理
+- 保安队长老葛 — 围堵他、又搜出腕表的保安队长
+
+**原文依据**
+
+> 他只说，规矩是给讲不清理的人准备的。
+
+> 程野没接名片。
+
+> 被讹出来的习惯。
+
+> 每一单都录，是为保护我自己。今天算头一回，它保护的是别人。
+
+### 形象
+
+`character design`, `contemporary china`, `night city`, `work uniform`, `blue-grey palette`, `streetlight rim light`
+
+**出图提示词 · 喂出图模型用这条**
+
+```text
+An athletic lean Chinese man of about twenty-nine, present-day urban China, a night-shift designated driver. Slightly hollow cheeks under a healthy deepened complexion from night riding, close-cropped hair with a clean hairline, high brow ridges over deep-set quiet eyes that watch more than they speak, a mouth settling into a flat neutral line, jaw tight. Shoulders rolled a little forward from years over a scooter handlebar, lean waist; right palm carrying a faint handlebar callus. He wears a navy blue stand-collar driver uniform jacket with a thin reflective-piped placket, a heather-grey crew-neck tee underneath, dark straight work trousers and black sneakers scuffed pale at the toe; a laminated work badge on a lanyard, and in his breast pocket the corner of an old phone in a worn pale snake-textured case, the pocket seam shiny from the phone riding there every night. One hand steadying an unseen handlebar, the other smoothing the phone into the pocket. Three-quarter view, waist-up, plain neutral background. Soft directional key light from the upper left with a cool fill, natural falloff, ambient occlusion under the chin, shallow depth of field, face in sharpest focus. Cool blue-grey and asphalt palette with one warm sodium-streetlight rim on the shoulder, present-day Chinese metropolis at night.
+```
+
+约二十九岁的精瘦中国男性，当代中国都市，夜班代驾司机。常年夜骑晒出的深肤色下颧骨略凹，短寸头、发际线干净，眉骨略高，眼窝稍深，眼神安静克制，嘴抿成平直的线，下颌收紧。常年扶车把让肩膀微微前倾，腰身精瘦，右掌有一层薄茧。穿藏蓝色立领代驾制服夹克，门襟有细反光滚条，内搭麻灰色圆领T恤，深色直筒工装裤，黑色运动鞋鞋头磨白；胸前挂塑封工牌挂绳，胸袋里露出贴身旧手机的一角——磨白的浅色蛇纹壳，袋口缝线被夜夜揣着的手机磨得发亮。一只手扶着画外的车把，另一只手把手机按进胸袋。四分之三视角，半身，纯中性背景。左上方柔和方向主光配冷调补光，光线衰减自然，下巴下方有环境遮蔽，浅景深，面部最实。冷蓝灰与柏油色的调子，肩头留一线暖黄路灯光边，当代中国都市深夜。
+
+**反向提示词**
+
+```text
+plastic waxy skin, poreless airbrushed complexion, perfectly symmetrical face, dead flat eyes without catchlights, helmet-like hair with no flyaway strands, flat untextured fabric without weave or wear, stiff mannequin pose, extra fingers, malformed hands, text, watermark, signature, busy patterned background
+```
+
+**角色设定图提示词 EN**
+
+```text
+Single character model sheet on ONE 16:9 landscape canvas (width to height exactly 16:9), pure white background with even margins, divided into three zones by thin hairline rules. LEFT ZONE, a vertical column about 34% of the canvas width: one bust portrait, head and shoulders, front-facing, centred like an ID photograph, both shoulders fully visible, the bottom edge ending in a clean straight horizontal cut; the face is the design reference, rendered in full detail — close-cropped hair, high brow ridges, deep-set quiet eyes, flat settled mouth, faintly tanned skin. LIGHTING IN THE LEFT ZONE ONLY: soft directional key from the upper left with natural falloff and ambient occlusion under the jaw, so the face has volume. RIGHT-TOP ZONE: three FULL-BODY standing views (front, side, back) side by side on one shared ground line, navy stand-collar driver jacket with reflective-piped placket, heather-grey tee, dark work trousers, black sneakers, lanyard badge; LIGHTING IN THE RIGHT ZONES: flat even orthographic lighting, no directional key, no cast shadows, so silhouettes can be measured and cut out. PROPORTIONS ARE CRITICAL: the three figures equal in height, consistent head-to-body ratio, correct limb lengths, clear space above heads and below feet, never stretched or squashed. RIGHT-BOTTOM ZONE: four small isolated close-up studies in one even row — the worn pale snake-texture phone case, the shiny jacket pocket seam, the lanyard work badge, the scuffed sneaker toe; small, clearly subordinate to the figures, and if space runs short the detail studies give way, not the figures. One face only across all views: the right zone copies the left-zone portrait.
+```
+
+### 声音
+
+- **音色**：偏低的男中音，音色平直干净，喉位稳，几乎不带气声
+- **音高**：中低
+- **语速**：语速稳，短句为主，字与字之间省净
+- **口音**：标准普通话，城市口音，不带地域腔
+- **情绪**：克制平静，压着的话多于说出的话
+- **类比**：像一个深夜开了三年车、把每句话都说成规章条款的司机
+
+**音色提示词 · 喂 TTS 引擎用这条**
+
+```text
+Chinese male around 29, mid-low baritone, flat clean timbre, steady chest placement, low-to-mid pitch, narrow dynamic range. Moderate volume, economical pace, short measured phrases, level statements with little inflection. Standard Mandarin, plain city accent, no regional coloring. Default emotion: calm restraint, quietly firm.
+```
+
+---
+
+## 唐启山（唐总）
+
+> 主要角色 · 五十岁上下的醉酒富商，腕上一块限量表，一句话能把别人的明天说没。
+
+### 画像
+
+- **性别**：男
+- **年龄**：五十岁上下（推断）
+- **身份**：私企老板，唐总的唐（推断）
+- 傲慢 / 多疑 / 酒后失控 / 色厉内荏
+
+**外貌**　体格发厚，肚子先挺出来，双下巴，鼻头微红。鬓角花白往后梳，发际线后退，眼皮沉，眼睛里常带着酒气。炭灰细条纹西装皱得不成形，领带松到第三颗扣，衬衫下摆从腰里挣出来；左腕上一块大表盘钢链机械腕表，习惯把袖口捋到小臂亮表；皮鞋鞋头蹭花。（推断）中年后发福的体态，走路要人搀。
+
+**性情**　说话先沉后冲，命令句尾往下砸，酒意上头时字黏成串。得意时慢条斯理地炫，受惊时嗓门劈叉、音调发飘，指责人时手指先到。
+
+**动机**　面子和掌控。表丢了一秒都不能忍，谁在场谁可疑，最好当场有人跪下来认。
+
+**人物弧光**　从酒桌上随意处置他人的施压者，到一夜之间接连沦为惊慌的失主、反咬的诬告者与被讨薪的被告。
+
+**关系**
+
+- 白恬 — 被他当众宣布开除的助理，偷他表的人
+- 程野 — 被他诬指偷表的深夜代驾司机
+- 周晓桐 — 按流程压住他的物业值班经理
+
+**原文依据**
+
+> 限量款，他冲程野晃了晃手腕，有钱也买不着，得排队。
+
+> 你这是盗窃，我有录音。
+
+> 唐启山僵在原地。
+
+### 形象
+
+`character design`, `contemporary china`, `business suit`, `luxury watch`, `warm gold palette`, `drunk posture`
+
+**出图提示词 · 喂出图模型用这条**
+
+```text
+A heavyset Chinese man of about fifty-three, present-day urban China, a wealthy company owner deep in his cups. Thickening torso with the belly leading, soft double chin, prominent nose flushed red at the tip; grey-flecked hair combed back over a receding hairline, heavy-lidded bloodshot eyes, jowls beginning to settle, deepened nasolabial folds following the natural expression lines. He wears a charcoal pinstripe business suit badly rumpled at the shoulders and elbows, silk tie yanked loose to the third knot, dress shirt pulled out at the waist, black leather oxfords scuffed across the toe; on his left wrist an oversized luxury mechanical watch with a steel bracelet, the shirt cuff habitually shoved up the forearm to show it off. He leans to one side as if much of his weight is being taken by someone out of frame, one hand raised mid-boast with the wrist turned outward so the watch face catches the light. Three-quarter view, waist-up, plain neutral background. Soft directional key light from the upper left with a cool fill, gentle falloff, shallow depth of field, face in sharpest focus. charcoal, oxblood and warm gold palette, banquet-room warmth, present-day Chinese city night.
+```
+
+约五十三岁的发福中国男性，当代中国都市，喝深的私企老板。肚腹前挺，双下巴松软，鼻头泛红；花白掺半的头发往后梳、发际线后退，眼皮沉重，眼里带血丝，下颌肉开始往下坠，法令纹顺着表情纹路走深。炭灰细条纹西装肩肘全皱，真丝领带松到第三颗扣，衬衫下摆从腰里挣出来，黑色皮鞋鞋头蹭花；左腕一块大表盘钢链机械腕表，衬衫袖口习惯性捋到小臂，专把表亮出来。他整个人往一侧歪，像大半重量都靠在画外搀他的人身上，一只手抬在半空正说到得意处，手腕外翻让表盘接光。四分之三视角，半身，纯中性背景。左上方柔和方向主光配冷调补光，衰减自然，浅景深，面部最实。炭灰、酒红与暖金的调子，宴席包间式的暖意，当代中国城市深夜。
+
+**反向提示词**
+
+```text
+plastic waxy skin, poreless airbrushed complexion, perfectly symmetrical face, dead flat eyes without catchlights, helmet-like hair with no flyaway strands, flat untextured suit fabric without weave or wrinkle, stiff mannequin pose, extra fingers, malformed hands, text, watermark, signature, busy patterned background
+```
+
+**角色设定图提示词 EN**
+
+```text
+Single character model sheet on ONE 16:9 landscape canvas (width to height exactly 16:9), pure white background with even margins, three zones divided by thin hairline rules. LEFT ZONE, a vertical column about 34% of the canvas width: one bust portrait, head and shoulders, front-facing, centred like an ID photograph, both shoulders fully shown, bottom edge a clean straight horizontal cut; the face is the design reference — receding grey-flecked hair combed back, heavy-lidded bloodshot eyes, flushed nose tip, settling jowls with natural expression-line wrinkles. LIGHTING IN THE LEFT ZONE ONLY: soft directional key from the upper left with natural falloff and ambient occlusion under the chin, giving the face volume. RIGHT-TOP ZONE: three FULL-BODY standing views (front, side, back) sharing one ground line, rumpled charcoal pinstripe suit, loosened silk tie, shirt out at the waist, oversized steel-bracelet watch on the left wrist, scuffed black oxfords; LIGHTING IN THE RIGHT ZONES: flat even orthographic lighting, no directional key, no cast shadows, so silhouettes can be measured and cut out. PROPORTIONS ARE CRITICAL: three figures equal in height, consistent head-to-body ratio, correct limb lengths, clear space above heads and below feet, never stretched or squashed. RIGHT-BOTTOM ZONE: four small isolated close-up studies in one even row — the oversized mechanical watch face, the loosened silk tie knot, the rumpled pinstripe weave at the elbow, the scuffed oxford toe; small and subordinate to the figures, and if space runs short the detail studies give way, not the figures. One face only across all views: the right zone copies the left-zone portrait.
+```
+
+### 声音
+
+- **音色**：沉厚的男中音，带酒后黏滞的喉音，字音偶尔黏连
+- **音高**：中低，发怒时反而发飘
+- **语速**：先慢后冲，得意时拖长，受惊时抢拍
+- **口音**：标准普通话，句尾带不容置喙的下沉
+- **情绪**：倨傲、不耐烦，酒后带一点甜腻的随意
+- **类比**：像在酒桌上惯于让全场安静下来听他说话的人
+
+**音色提示词 · 喂 TTS 引擎用这条**
+
+```text
+Chinese male around 53, heavy mid-low baritone with a drink-thickened throaty edge, mid pitch that lifts and cracks when alarmed, wide dynamic range. Loud commanding volume, pace that drags when boastful and rushes when panicked, falling authoritative phrase ends. Standard Mandarin, imperious tone. Default emotion: arrogant impatience with tipsy looseness.
+```
+
+---
+
+## 白恬
+
+> 主要角色 · 被欠薪半年的年轻助理，声音又轻又稳，稳到敢把偷来的表缠上别人的车把。
+
+### 画像
+
+- **性别**：女
+- **年龄**：二十七八岁（推断）
+- **身份**：唐启山的私人助理，深夜还在陪酒加班
+- 隐忍 / 缜密 / 克制到冷淡 / 走投无路时的狠
+
+**外貌**　清瘦，肩窄，站姿笔挺。鹅蛋脸近年显瘦，眼下有淡青的倦色，眉修得细而平，一双干燥稳定的眼睛，唇色淡。黑发拢成低马尾，鬓角散着几缕碎发，妆很淡。米白衬衫外罩炭灰色短款西装外套，同色直筒裤，黑色低跟；颈间挂工牌，透明卡套边缘磨出了毛痕，挂绳被拇指捻得发亮。（推断）衬衫袖口有被反复捻过的起毛。
+
+**性情**　说话又轻又稳，句尾收得平平的，听不出情绪。被逼到墙角时也不拔高，只是语速快半拍、字与字咬得更紧。崩溃是从笑着流泪开始的，不是从喊叫开始的。
+
+**动机**　母亲躺在医院等手术费，半年工资被拖欠，当晚又被当众宣布开除。她要一笔钱，也要一个说法。
+
+**人物弧光**　从忍气吞声半年被欠薪的助理，到铤而走险偷表栽赃的困兽，再到当众崩溃、反手揭发老板的破局者。
+
+**关系**
+
+- 唐启山 — 拖欠她工资、当晚开除她的老板
+- 程野 — 被她推出来顶罪的深夜代驾司机
+- 周晓桐 — 用登记簿戳破她谎言的值班经理
+
+**原文依据**
+
+> 妈，钱明天一定到，你先别催了。
+
+> 工资欠了半年，今天下午他还在酒桌上说要开除我。
+
+> 白恬的声音又轻又稳
+
+### 形象
+
+`character design`, `contemporary china`, `office attire`, `badge lanyard`, `cool fluorescent palette`, `quiet tension`
+
+**出图提示词 · 喂出图模型用这条**
+
+```text
+A slender Chinese woman of about twenty-seven, present-day urban China, an executive assistant kept at the office past midnight. Narrow shoulders held very straight, an oval face grown thin at the cheeks, faint bluish fatigue shadows under dry steady eyes, fine level brows, pale lipstick on a small composed mouth. Black hair drawn into a low neat ponytail with a few loosened strands at the temples, minimal office makeup. She wears a pale ivory button-up blouse under a charcoal-grey cropped suit jacket, matching straight trousers, low black heels; a staff badge in a scuffed transparent card holder hangs at her chest on a printed lanyard, the holder edge worn fuzzy where a thumb has worried it, one blouse cuff lightly pilled from the same nervous rubbing. Her hands are quiet at her front, one thumb pressing flat against the badge holder. Three-quarter view, waist-up, plain neutral background. Soft directional key light from the upper left with a cool fill, gentle falloff, ambient occlusion under the jaw, shallow depth of field, face in sharpest focus. ivory, charcoal and cold fluorescent palette, present-day Chinese business district at night.
+```
+
+约二十七岁的清瘦中国女性，当代中国都市，深夜还留在酒局边缘的私人助理。肩窄，站得笔直，鹅蛋脸两颊见瘦，眼下有淡青倦色，眉细而平，一双干燥稳定的眼睛，唇色淡、唇形安静。黑发拢成低马尾，鬓角散着碎发，妆极淡。米白衬衫外罩炭灰色短款西装外套，同色直筒裤，黑色低跟鞋；颈间挂绳上坠着磨出毛痕的透明工牌卡套，挂绳被拇指捻得发亮，一侧衬衫袖口有同样反复捻出的起毛。双手安静地收在身前，一只拇指平压在卡套上。四分之三视角，半身，纯中性背景。左上方柔和方向主光配冷调补光，衰减自然，下颌下方有环境遮蔽，浅景深，面部最实。米白、炭灰与冷白荧光的调子，当代中国商务区深夜。
+
+**反向提示词**
+
+```text
+plastic waxy skin, poreless airbrushed complexion, perfectly symmetrical face, dead flat eyes without catchlights, helmet-like hair with no flyaway strands, flat untextured blouse fabric without weave, stiff mannequin pose, extra fingers, malformed hands, text, watermark, signature, busy patterned background
+```
+
+**角色设定图提示词 EN**
+
+```text
+Single character model sheet on ONE 16:9 landscape canvas (width to height exactly 16:9), pure white background with even margins, three zones divided by thin hairline rules. LEFT ZONE, a vertical column about 34% of the canvas width: one bust portrait, head and shoulders, front-facing, centred like an ID photograph, both shoulders fully visible, bottom edge a clean straight horizontal cut; the face is the design reference — low ponytail with temple wisps, thin level brows, dry steady eyes with faint fatigue shadows, small composed mouth. LIGHTING IN THE LEFT ZONE ONLY: soft directional key from the upper left with natural falloff and ambient occlusion under the jaw, giving the face volume. RIGHT-TOP ZONE: three FULL-BODY standing views (front, side, back) sharing one ground line, ivory blouse, charcoal cropped suit jacket, straight trousers, low black heels, lanyard badge; LIGHTING IN THE RIGHT ZONES: flat even orthographic lighting, no directional key, no cast shadows, so silhouettes can be measured and cut out. PROPORTIONS ARE CRITICAL: three figures equal in height, consistent head-to-body ratio, correct limb lengths, clear space above heads and below feet, never stretched or squashed. RIGHT-BOTTOM ZONE: four small isolated close-up studies in one even row — the scuffed transparent badge holder, the worn fuzzy lanyard, the lightly pilled blouse cuff, the low black heel; small and subordinate to the figures, and if space runs short the detail studies give way, not the figures. One face only across all views: the right zone copies the left-zone portrait.
+```
+
+### 声音
+
+- **音色**：偏轻的女中低音，气声偏多，音色干净偏冷
+- **音高**：中低
+- **语速**：语速平稳，字与字收得整齐，紧急时只快半拍
+- **口音**：标准普通话，几乎听不出地域
+- **情绪**：表面平静，压着的东西在字缝里
+- **类比**：像深夜还在替老板订机酒、语气永远不出错的助理
+
+**音色提示词 · 喂 TTS 引擎用这条**
+
+```text
+Chinese female around 27, light mid-low alto with noticeable breathiness, clean cool timbre, mid pitch, thin chest support, narrow dynamic range. Quiet volume, even composed pace, flat level phrase endings, only half a step faster under pressure. Standard Mandarin, barely any regional accent. Default emotion: surface calm with tension held between the words.
+```
+
+---
+
+## 周晓桐（周经理）
+
+> 配角 · 睡衣外面套制服就被叫起来的物业值班经理，一本登记簿、一句我管流程，替小人物把规矩守住。
+
+### 画像
+
+- **性别**：女
+- **年龄**：三十二岁上下（推断）
+- **身份**：写字楼物业大堂值班经理
+- 讲流程 / 冷静 / 护规矩 / 外冷内热
+
+**外貌**　身量高，站姿利落，方肩直背。下颌线干净，眉平而稳，一双不慌不忙的眼睛，看登记簿和看人用同一种眼神。黑发在脑后挽成低发髻，碎发别到耳后，妆极淡。深藏青物业制服外套内搭白衬衫，肩袢整齐，左胸别对讲机；一册翻卷了角的登记簿常在手边或压在臂弯，笔别在门襟里；制服裤与干净的平跟皮鞋。（推断）手掌有常年翻簿子的利落劲儿。
+
+**性情**　说话清亮利落，咬字干净，句尾收得干脆，像盖了一个章。不动声色地把场面拨回流程，谁抬身份她抬规章。帮人时也不多话，扶正一辆车、递一句提醒，就当没发生过。
+
+**动机**　值好这个夜班，让每一件事都有登记、有出处、有流程。监控可以坏，规矩不能坏。
+
+**人物弧光**　从只认登记簿的冷面孔值班经理，到用流程和进出口监控替小人物挡住栽赃的同盟。
+
+**关系**
+
+- 程野 — 她按流程护住的深夜代驾司机
+- 白恬 — 被她用登记簿与监控回放戳破谎言的助理
+- 唐启山 — 被她按下火气、提醒劳动监察的业主
+
+**原文依据**
+
+> 物业大堂值班经理周晓桐是被电话从值班室里叫上来的，睡衣外面套着制服外套。
+
+> 我管流程。
+
+### 形象
+
+`character design`, `contemporary china`, `staff uniform`, `walkie-talkie`, `navy white palette`, `composed stance`
+
+**出图提示词 · 喂出图模型用这条**
+
+```text
+A tall Chinese woman of about thirty-two, present-day urban China, the night-duty lobby manager of a commercial property. Straight capable posture with square set shoulders, a clean jawline, level calm brows, clear unhurried eyes that read documents and people with the same flat attention. Black hair pinned into a low practical bun with the side strands tucked behind the ears, very light makeup. She wears a dark navy property-management uniform jacket over a crisp white shirt, neat shoulder tabs, a walkie-talkie clipped at the left chest; a registration ledger with curled dog-eared corners tucked under one arm, a ballpoint pen clipped inside the jacket placket; matching uniform trousers and clean low-heeled shoes, the ledger cover matted shiny at the corners from nightly use. One hand flattens the ledger closed, mid-motion. Three-quarter view, waist-up, plain neutral background. Soft directional key light from the upper left with a cool fill, gentle falloff, shallow depth of field, face in sharpest focus. navy, white and cold lobby-fluorescent palette, present-day Chinese office tower lobby at night.
+```
+
+约三十二岁的身量高挑的中国女性，当代中国都市，写字楼物业的夜班大堂经理。站姿利落，方肩直背，下颌线干净，眉平而稳，一双不慌不忙的眼睛，看文件与看人用同一种平静。黑发在脑后挽成利落的低发髻，侧边碎发别到耳后，妆极淡。深藏青物业制服外套内搭挺括白衬衫，肩袢整齐，左胸别着对讲机；臂弯里夹一册卷了角、封面被夜夜摩挲得发亮的登记簿，门襟里别一支圆珠笔；同色制服裤与干净的平跟皮鞋。一只手正把登记簿合平，动作停在半途。四分之三视角，半身，纯中性背景。左上方柔和方向主光配冷调补光，衰减自然，浅景深，面部最实。藏青、白与冷白大堂荧光的调子，当代中国写字楼大堂深夜。
+
+**反向提示词**
+
+```text
+plastic waxy skin, poreless airbrushed complexion, perfectly symmetrical face, dead flat eyes without catchlights, helmet-like hair with no flyaway strands, flat untextured uniform fabric without weave, stiff mannequin pose, extra fingers, malformed hands, text, watermark, signature, busy patterned background
+```
+
+**角色设定图提示词 EN**
+
+```text
+Single character model sheet on ONE 16:9 landscape canvas (width to height exactly 16:9), pure white background with even margins, three zones divided by thin hairline rules. LEFT ZONE, a vertical column about 34% of the canvas width: one bust portrait, head and shoulders, front-facing, centred like an ID photograph, both shoulders fully visible, bottom edge a clean straight horizontal cut; the face is the design reference — low practical bun with tucked strands, level brows, clear calm eyes, clean jawline. LIGHTING IN THE LEFT ZONE ONLY: soft directional key from the upper left with natural falloff and ambient occlusion under the jaw, giving the face volume. RIGHT-TOP ZONE: three FULL-BODY standing views (front, side, back) sharing one ground line, dark navy uniform jacket with shoulder tabs over a white shirt, walkie-talkie at the left chest, uniform trousers, low-heeled shoes, ledger under the arm; LIGHTING IN THE RIGHT ZONES: flat even orthographic lighting, no directional key, no cast shadows, so silhouettes can be measured and cut out. PROPORTIONS ARE CRITICAL: three figures equal in height, consistent head-to-body ratio, correct limb lengths, clear space above heads and below feet, never stretched or squashed. RIGHT-BOTTOM ZONE: four small isolated close-up studies in one even row — the curled dog-eared ledger corner, the chest-clipped walkie-talkie, the shoulder tab, the pen inside the placket; small and subordinate to the figures, and if space runs short the detail studies give way, not the figures. One face only across all views: the right zone copies the left-zone portrait.
+```
+
+### 声音
+
+- **音色**：清亮的女中音，音色干净，收尾利落
+- **音高**：中
+- **语速**：中等偏快，咬字分明，句尾像盖章
+- **口音**：标准普通话，字正
+- **情绪**：平稳笃定，带值夜班的人特有的清醒
+- **类比**：像把规章制度背得滚瓜烂熟、却肯为陌生人多走一步的经理
+
+**音色提示词 · 喂 TTS 引擎用这条**
+
+```text
+Chinese female around 32, clear mid-range alto, clean bright timbre, steady support, mid pitch, moderate dynamic range. Businesslike volume, slightly brisk pace, crisp articulation, decisive falling phrase ends like a stamp on paper. Standard Mandarin, precise neutral accent. Default emotion: calm, assured, quietly protective.
+```
+
+---
+
+## 保安队长老葛（老葛）
+
+> 龙套 · 翠湖一号的保安队长，一串钥匙走起路来哗哗响，围堵是他，搜出表的也是他。
+
+### 画像
+
+- **性别**：男
+- **年龄**：五十五岁上下（推断）
+- **身份**：小区物业保安队长
+- 听指挥 / 守程序 / 风风火火 / 就事论事
+
+**外貌**　壮实，胸厚，肩膀开始往下坠。风霜的方脸，平头鬓角花白，嘴边纹路深，常年喊话练出的大嗓门底子。深色保安制服外罩荧光反光背心，左臂套红袖标，右肩挂对讲机，腰间一大串钥匙走动时哗哗响；黑色值勤鞋鞋头蹭白。手电筒不离手，查东西时戴白手套。（推断）站姿习惯性前倾，像随时要赶去下一个事发点。
+
+**性情**　嗓门大、语速快，对讲机一响人就动。对业主弯腰请示，对可疑的人说话冲，但真动手时按程序来：翻口袋摊开给你看，搜包戴手套，开后备箱前先说一句按程序。
+
+**动机**　把现场稳住，别让事态在小区里闹大，该谁负责谁负责。
+
+**人物弧光**　静止的执行者——围堵是他，翻口袋是他，最后按程序搜出腕表的也是他；规矩在他手里，谁的事他就照谁的办。（推断）
+
+**关系**
+
+- 唐启山 — 他弯腰请示的业主
+- 程野 — 被他围堵、又被他按程序搜出自证的车库当事人
+
+**原文依据**
+
+> 保安队长老葛带着两个人围过来，对讲机哗哗地响。
+
+> 老葛戴着手套，把包里里外外摸了三遍。
+
+> 老葛按程序开后备箱。
+
+### 形象
+
+`character design`, `contemporary china`, `security uniform`, `reflective vest`, `hi-vis palette`, `night patrol`
+
+**出图提示词 · 喂出图模型用这条**
+
+```text
+A stocky Chinese man of about fifty-five, present-day urban China, the night security squad leader of a riverside residential compound. Barrel chest starting to go soft, shoulders beginning to stoop, a weathered square face with a grey crew cut, deep creases around a mouth long used to shouting over wind, heavy brows. He wears a dark security uniform shirt under a high-visibility reflective vest, a red armband on the left sleeve, a walkie-talkie hanging at the right shoulder strap; a large ring of keys at his belt that jingles as he moves, black duty shoes scuffed white across the toe. A flashlight in his right hand pointed down, white cotton search gloves tucked into his belt, standing planted with his weight tipping forward mid-stride toward a commotion. Three-quarter view, waist-up, plain neutral background. Soft directional key light from the upper left with a cool fill, gentle falloff, shallow depth of field, face in sharpest focus. charcoal, hi-vis yellow-green and cold night palette, present-day Chinese residential compound at night.
+```
+
+约五十五岁的壮实中国男性，当代中国都市，江畔小区的夜班保安队长。胸厚渐松，肩膀开始下坠，风霜的方脸，平头鬓角花白，眉重，嘴边有常年喊话勒出的深纹。深色保安制服衬衫外罩荧光反光背心，左臂红袖标，右肩带上挂对讲机；腰间一大串钥匙，走动时哗哗作响，黑色值勤鞋鞋头蹭白。右手提一支向下的手电筒，腰带上别着白棉手套，整个人站定却重心前倾，像正迈步赶向事发现场。四分之三视角，半身，纯中性背景。左上方柔和方向主光配冷调补光，衰减自然，浅景深，面部最实。炭黑、荧光黄绿与冷夜色的调子，当代中国小区深夜。
+
+**反向提示词**
+
+```text
+plastic waxy skin, poreless airbrushed complexion, perfectly symmetrical face, dead flat eyes without catchlights, helmet-like hair with no flyaway strands, flat untextured uniform fabric without weave or wear, stiff mannequin pose, extra fingers, malformed hands, text, watermark, signature, busy patterned background
+```
+
+**角色设定图提示词 EN**
+
+```text
+Single character model sheet on ONE 16:9 landscape canvas (width to height exactly 16:9), pure white background with even margins, three zones divided by thin hairline rules. LEFT ZONE, a vertical column about 34% of the canvas width: one bust portrait, head and shoulders, front-facing, centred like an ID photograph, both shoulders fully visible, bottom edge a clean straight horizontal cut; the face is the design reference — grey crew cut, heavy brows, weathered square face with deep mouth creases. LIGHTING IN THE LEFT ZONE ONLY: soft directional key from the upper left with natural falloff and ambient occlusion under the jaw, giving the face volume. RIGHT-TOP ZONE: three FULL-BODY standing views (front, side, back) sharing one ground line, dark security shirt, high-visibility reflective vest, red armband, walkie-talkie strap, duty belt with a large key ring, black duty shoes; LIGHTING IN THE RIGHT ZONES: flat even orthographic lighting, no directional key, no cast shadows, so silhouettes can be measured and cut out. PROPORTIONS ARE CRITICAL: three figures equal in height, consistent head-to-body ratio, correct limb lengths, clear space above heads and below feet, never stretched or squashed. RIGHT-BOTTOM ZONE: four small isolated close-up studies in one even row — the jingling key ring, the flashlight, the red armband, the scuffed duty shoe toe; small and subordinate to the figures, and if space runs short the detail studies give way, not the figures. One face only across all views: the right zone copies the left-zone portrait.
+```
+
+### 声音
+
+- **音色**：沙哑的大嗓门男声，喉音重，震得对讲机滋啦
+- **音高**：中低，请示时尾音上扬
+- **语速**：语速快，风风火火，一句压一句
+- **口音**：标准普通话带北方腔的硬朗（推断）
+- **情绪**：急着办事的焦灼，请示业主时又放软
+- **类比**：像在小区门口喊了十年车别停消防通道的队长
+
+**音色提示词 · 喂 TTS 引擎用这条**
+
+```text
+Chinese male around 55, husky loud baritone, heavy throaty rasp built from years of shouting, low-to-mid pitch, wide dynamic range. Big commanding volume that softens into an upward-tilted, deferential cadence when addressing superiors. Fast urgent pace, clipped phrases. Standard Mandarin with a hard-edged northern flavor. Default emotion: brisk urgency, ready to move.
+```
+

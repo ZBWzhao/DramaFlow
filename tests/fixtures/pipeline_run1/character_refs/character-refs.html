@@ -1,0 +1,60 @@
+<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>角色参考图</title><style>
+:root{--bg:#f2f2ef;--ink:#1c1f22;--ink2:#5f666c;--rule:#d4d6d1;--card:#fff;--ok:#2f6b47;--bad:#a3342a;--warn:#9a6a12}
+@media (prefers-color-scheme:dark){:root:not([data-theme=light]){--bg:#16181a;--ink:#e7e8e6;--ink2:#9ba2a8;--rule:#34383c;--card:#1f2225;--ok:#6fbf8f;--bad:#e7867c;--warn:#e0b25a}}
+:root[data-theme=dark]{--bg:#16181a;--ink:#e7e8e6;--ink2:#9ba2a8;--rule:#34383c;--card:#1f2225;--ok:#6fbf8f;--bad:#e7867c;--warn:#e0b25a}
+body{margin:0;background:var(--bg);color:var(--ink);font:14px/1.6 system-ui,-apple-system,"PingFang SC","Hiragino Sans","Hiragino Sans GB","Microsoft YaHei","Noto Sans CJK SC",sans-serif}
+main{max-width:1400px;margin:0 auto;padding:24px 16px 56px}
+h1{font-size:20px;margin:0 0 4px}.lead{color:var(--ink2);margin:0 0 16px}
+.seg{display:inline-flex;border:1px solid var(--rule);border-radius:4px;overflow:hidden;margin:0 0 24px}
+.seg button{font:inherit;font-size:13px;padding:6px 14px;border:0;background:var(--card);color:var(--ink2);cursor:pointer}
+.seg button.on{background:var(--ink);color:var(--bg)}.seg button:focus-visible{outline:2px solid var(--ok);outline-offset:-2px}
+.set{margin:0 0 44px}.set h2{font-size:16px;margin:0 0 10px;display:flex;gap:12px;align-items:baseline;flex-wrap:wrap}.set h2 span{font-size:12px;font-weight:400;color:var(--ink2)}
+.warn{color:var(--warn);font-size:12px;margin:-4px 0 8px}.note{color:var(--ink2);font-size:12px;margin:-4px 0 8px}
+.sheet{aspect-ratio:16/9;display:grid;grid-template-columns:34% 1fr;background:#fff;border:1px solid #cfd1cc}
+body:not(.with) .sheet{aspect-ratio:16/5.94}body:not(.with) .right{grid-template-rows:100%}body:not(.with) .turn{border-bottom:0}body:not(.with) .details{display:none}
+.bust{border-right:1px solid #cfd1cc;overflow:hidden}.bust .img{width:100%;height:100%;object-fit:cover;object-position:top center;display:block}
+.right{display:grid;grid-template-rows:66% 34%;min-height:0}
+.turn{display:grid;grid-template-columns:repeat(3,1fr);border-bottom:1px solid #cfd1cc;min-height:0;padding:2% 2% 0}
+.full,.cell{position:relative;min-height:0;display:flex;align-items:flex-end;justify-content:center;overflow:hidden}
+.full .img{max-width:100%;max-height:100%;object-fit:contain;display:block}
+.details{display:grid;grid-template-columns:repeat(var(--n),1fr);gap:1.2%;padding:1.2%;min-height:0}
+.cell .img{width:100%;height:100%;object-fit:cover;display:block;border-radius:2px}
+.full em,.cell em{position:absolute;top:3px;left:6px;font:500 11px/1 system-ui,"PingFang SC",sans-serif;font-style:normal;color:#6f767b;background:#fffd;padding:2px 4px;border-radius:2px}
+.miss{display:flex;align-items:center;justify-content:center;color:#8f969a;font-size:12px;width:100%;height:100%;min-height:80px;background:#f6f6f4;border:1px dashed #d9dbd6;border-radius:2px}
+.stale{outline:3px solid var(--bad);outline-offset:-3px}
+.legend{display:flex;gap:8px;align-items:center;color:var(--bad);font-size:12px;margin:-6px 0 16px}.legend i{flex:none;width:22px;height:14px;background:#fff;outline:3px solid var(--bad);outline-offset:-3px}
+.card1{display:grid;grid-template-columns:minmax(0,320px) 1fr;gap:20px;background:var(--card);border:1px solid var(--rule);border-radius:4px;padding:14px}
+@media(max-width:700px){.card1{grid-template-columns:1fr}}
+.card1 .img{width:100%;display:block;background:#fff;border-radius:2px}.card1-info b{font-size:14px}.card1-info p{color:var(--ink2);margin:4px 0 10px}
+.desc,.views{margin-top:10px;background:var(--card);border:1px solid var(--rule);border-radius:4px;padding:8px 12px}
+.desc summary,.views summary{cursor:pointer;font-size:13px;color:var(--ink2)}
+dl{display:grid;grid-template-columns:max-content 1fr;gap:4px 14px;margin:10px 0 4px}dt{color:var(--ink2)}dd{margin:0}
+.src{margin-left:8px;font-size:11px;padding:0 5px;border:1px solid var(--warn);color:var(--warn);border-radius:2px}
+table{border-collapse:collapse;width:100%;font-size:12px;margin-top:8px}th,td{text-align:left;padding:4px 8px;border-bottom:1px solid var(--rule);vertical-align:top}
+.mono{font-family:ui-monospace,Menlo,monospace}.ok{color:var(--ok)}.bad{color:var(--bad)}.dim{color:var(--ink2)}
+.vbody{display:flex;gap:16px;align-items:flex-start}.tbl{flex:1;min-width:0;overflow-x:auto}
+.extra{flex:none;margin-top:8px;display:flex;flex-direction:column;gap:4px;align-items:center;max-width:230px;font-size:12px;color:var(--ink2);text-align:center}
+.extra .img{height:180px;max-width:100%;object-fit:contain;border:1px solid var(--rule);border-radius:2px;background:#fff}
+@media(max-width:700px){.vbody{flex-direction:column}.extra{align-self:center}}
+img.img{cursor:zoom-in}.lb{position:fixed;inset:0;background:#000c;display:none;align-items:center;justify-content:center}.lb.on{display:flex}.lb img{max-width:94vw;max-height:94vh}
+</style></head><body><main>
+<h1>角色参考图</h1>
+<p class="lead">一张确认过的正面全身照（锚点）为根，其余每张都只参考它。</p>
+
+<div class="seg" role="group" aria-label="版面"><button data-l="without" class="on">无细节图</button><button data-l="with">有细节图</button></div>
+<section class="set"><h2>程野 · 常态 · 代驾制服<span>第 0 档 · 还没有锚点 · 画风：写实照片</span></h2>
+<div class="card1"><div class="img miss">未生成 · 第 1 档</div><div class="card1-info"><b>第一档 · 只有锚点</b><p>还没有锚点</p><details class="desc"><summary>角色描述（确认表）</summary><dl><dt>身份</dt><dd>约二十九岁的夜班代驾司机，当代中国都市（29 岁 · 男）</dd><dt>脸型五官</dt><dd>颧骨略凹，常年夜骑肤色偏深，眉骨略高，眼窝稍深，眼神安静克制，嘴抿成平直线，下颌收紧<span class="src">推断</span></dd><dt>发型</dt><dd>黑色短寸头，发际线干净</dd><dt>身形</dt><dd>常年扶车把肩膀微微前倾，腰身精瘦，站姿利落但不张扬<span class="src">推断</span></dd><dt>上装</dt><dd>藏蓝立领代驾制服夹克带细反光滚条，内搭麻灰圆领T恤，胸前挂塑封工牌，胸袋露出磨白蛇纹壳旧手机一角</dd><dt>下装</dt><dd>深色直筒工装裤，鞋头磨白的黑色运动鞋</dd><dt>皮肤</dt><dd>夜骑晒出的健康深肤色，右掌一层薄茧，素颜<span class="src">推断</span></dd><dt>背面</dt><dd>从后面看到的发型、上衣与下装的背面、脚跟<span class="src">默认</span></dd><dt>细节 · phone-pocket</dt><dd>胸袋里磨白蛇纹壳的旧手机一角<span class="src">未实测</span></dd><dt>细节 · 领口</dt><dd>藏蓝立领与反光滚条，敞开露出麻灰T恤领口<span class="src">推断</span></dd><dt>细节 · 袖口</dt><dd>带细反光条的藏蓝制服袖口，平直耐旧<span class="src">推断</span></dd><dt>细节 · 鞋</dt><dd>鞋头磨白的黑色运动鞋<span class="src">推断</span></dd></dl></details></div></div>
+<details class="views"><summary>全部视图</summary><div class="vbody"><div class="tbl"><table><thead><tr><th>视图</th><th>档</th><th>版本</th><th>模型</th><th>种子</th><th>标识</th><th>状态</th></tr></thead><tbody><tr><td>正面全身（锚点）</td><td>1</td><td></td><td></td><td></td><td class="mono"></td><td><span class="dim">未生成</span></td></tr><tr><td>正脸大头照</td><td>2</td><td></td><td></td><td></td><td class="mono"></td><td><span class="dim">未生成</span></td></tr><tr><td>侧面 90°（面朝右）</td><td>2</td><td></td><td></td><td></td><td class="mono"></td><td><span class="dim">未生成</span></td></tr><tr><td>背面</td><td>2</td><td></td><td></td><td></td><td class="mono"></td><td><span class="dim">未生成</span></td></tr><tr><td>45° 大头照（面朝左）</td><td>4</td><td></td><td></td><td></td><td class="mono"></td><td><span class="dim">未生成</span></td></tr><tr><td>胸袋里磨白蛇纹壳的旧手机一角 <span class="src">未实测</span></td><td>3</td><td></td><td></td><td></td><td class="mono"></td><td><span class="dim">未生成</span></td></tr><tr><td>领口</td><td>3</td><td></td><td></td><td></td><td class="mono"></td><td><span class="dim">未生成</span></td></tr><tr><td>袖口</td><td>3</td><td></td><td></td><td></td><td class="mono"></td><td><span class="dim">未生成</span></td></tr><tr><td>鞋</td><td>3</td><td></td><td></td><td></td><td class="mono"></td><td><span class="dim">未生成</span></td></tr></tbody></table></div></div></details></section>
+<section class="set"><h2>周晓桐 · 常态 · 物业制服<span>第 0 档 · 还没有锚点 · 画风：写实照片</span></h2>
+<div class="card1"><div class="img miss">未生成 · 第 1 档</div><div class="card1-info"><b>第一档 · 只有锚点</b><p>还没有锚点</p><details class="desc"><summary>角色描述（确认表）</summary><dl><dt>身份</dt><dd>约三十二岁的物业夜班大堂经理，当代中国都市（32 岁 · 女）</dd><dt>脸型五官</dt><dd>下颌线干净，眉平而稳，一双不慌不忙的眼睛，妆极淡<span class="src">推断</span></dd><dt>发型</dt><dd>黑发挽成利落的低发髻，侧边碎发别到耳后</dd><dt>身形</dt><dd>站姿利落，方肩直背，身量高挑，站得稳<span class="src">推断</span></dd><dt>上装</dt><dd>深藏青物业制服外套带肩袢，内搭挺括白衬衫，左胸别对讲机，门襟别圆珠笔</dd><dt>下装</dt><dd>同色制服裤与干净的平跟皮鞋</dd><dt>皮肤</dt><dd>皮肤收拾得干净，妆极淡，无明显瑕疵<span class="src">推断</span></dd><dt>背面</dt><dd>从后面看到的发型、上衣与下装的背面、脚跟<span class="src">默认</span></dd><dt>细节 · radio-clip</dt><dd>别在左胸的对讲机，天线短而整齐<span class="src">未实测</span></dd><dt>细节 · 领口</dt><dd>白衬衫领口，外套领敞开<span class="src">推断</span></dd><dt>细节 · 袖口</dt><dd>挺括压平的藏青制服袖口<span class="src">推断</span></dd><dt>细节 · 鞋</dt><dd>干净的深色平跟制服皮鞋<span class="src">推断</span></dd></dl></details></div></div>
+<details class="views"><summary>全部视图</summary><div class="vbody"><div class="tbl"><table><thead><tr><th>视图</th><th>档</th><th>版本</th><th>模型</th><th>种子</th><th>标识</th><th>状态</th></tr></thead><tbody><tr><td>正面全身（锚点）</td><td>1</td><td></td><td></td><td></td><td class="mono"></td><td><span class="dim">未生成</span></td></tr><tr><td>正脸大头照</td><td>2</td><td></td><td></td><td></td><td class="mono"></td><td><span class="dim">未生成</span></td></tr><tr><td>侧面 90°（面朝右）</td><td>2</td><td></td><td></td><td></td><td class="mono"></td><td><span class="dim">未生成</span></td></tr><tr><td>背面</td><td>2</td><td></td><td></td><td></td><td class="mono"></td><td><span class="dim">未生成</span></td></tr><tr><td>45° 大头照（面朝左）</td><td>4</td><td></td><td></td><td></td><td class="mono"></td><td><span class="dim">未生成</span></td></tr><tr><td>别在左胸的对讲机，天线短而整齐 <span class="src">未实测</span></td><td>3</td><td></td><td></td><td></td><td class="mono"></td><td><span class="dim">未生成</span></td></tr><tr><td>领口</td><td>3</td><td></td><td></td><td></td><td class="mono"></td><td><span class="dim">未生成</span></td></tr><tr><td>袖口</td><td>3</td><td></td><td></td><td></td><td class="mono"></td><td><span class="dim">未生成</span></td></tr><tr><td>鞋</td><td>3</td><td></td><td></td><td></td><td class="mono"></td><td><span class="dim">未生成</span></td></tr></tbody></table></div></div></details></section>
+</main><div class="lb" id="lb"><img alt=""></div>
+<script>
+const K='characterRefsLayout';
+function setL(l){document.body.classList.toggle('with',l==='with');document.querySelectorAll('.seg button').forEach(b=>b.classList.toggle('on',b.dataset.l===l));try{localStorage.setItem(K,l)}catch(e){}}
+let s=null;try{s=localStorage.getItem(K)}catch(e){}setL(s||'without');
+document.querySelectorAll('.seg button').forEach(b=>b.addEventListener('click',()=>setL(b.dataset.l)));
+const lb=document.getElementById('lb');document.addEventListener('click',e=>{const i=e.target.closest('img.img');if(i){lb.querySelector('img').src=i.src;lb.classList.add('on')}else if(e.target.closest('#lb'))lb.classList.remove('on')});
+document.addEventListener('keydown',e=>{if(e.key==='Escape')lb.classList.remove('on')});
+</script></body></html>

@@ -1,0 +1,92 @@
+{
+  "name": "周晓桐",
+  "source": "最后一单 · run1",
+  "lang": "zh",
+  "layers": {
+    "identity": {
+      "age": 32,
+      "gender": "female",
+      "en": "A tall Chinese woman of about thirty-two, present-day urban China, the night-duty lobby manager of a commercial property",
+      "text": "约三十二岁的物业夜班大堂经理，当代中国都市",
+      "source": "stated"
+    },
+    "face": {
+      "en": "A clean jawline, level calm brows, clear unhurried eyes that read documents and people with the same flat attention, very light makeup",
+      "text": "下颌线干净，眉平而稳，一双不慌不忙的眼睛，妆极淡",
+      "source": "inferred"
+    },
+    "hair": {
+      "en": "Black hair pinned into a low practical bun with the side strands tucked behind the ears",
+      "text": "黑发挽成利落的低发髻，侧边碎发别到耳后",
+      "source": "stated"
+    },
+    "build": {
+      "en": "Straight capable posture with square set shoulders, tall and steady on her feet",
+      "text": "站姿利落，方肩直背，身量高挑，站得稳",
+      "source": "inferred"
+    },
+    "skin": {
+      "en": "Neat, well-kept skin with very light makeup and no visible blemish",
+      "text": "皮肤收拾得干净，妆极淡，无明显瑕疵",
+      "source": "inferred"
+    }
+  },
+  "outfits": {
+    "default": {
+      "label": "常态 · 物业制服",
+      "top": {
+        "en": "a dark navy property-management uniform jacket with neat shoulder tabs over a crisp white shirt, a walkie-talkie clipped at the left chest, and a ballpoint pen clipped inside the jacket placket",
+        "text": "深藏青物业制服外套带肩袢，内搭挺括白衬衫，左胸别对讲机，门襟别圆珠笔",
+        "source": "stated"
+      },
+      "bottom": {
+        "en": "matching dark navy uniform trousers and clean low-heeled shoes",
+        "text": "同色制服裤与干净的平跟皮鞋",
+        "source": "stated"
+      },
+      "details": [
+        {
+          "slot": "custom",
+          "id": "radio-clip",
+          "part": "body",
+          "en": "a walkie-talkie clipped at the left chest of a navy uniform jacket, antenna short and neat",
+          "text": "别在左胸的对讲机，天线短而整齐",
+          "source": "stated"
+        },
+        {
+          "slot": "neck",
+          "en": "the crisp white shirt collar under an open navy uniform jacket collar",
+          "text": "白衬衫领口，外套领敞开",
+          "source": "inferred"
+        },
+        {
+          "slot": "sleeve",
+          "en": "the dark navy uniform cuff, pressed flat and neat at the wrist",
+          "text": "挺括压平的藏青制服袖口",
+          "source": "inferred"
+        },
+        {
+          "slot": "feet",
+          "en": "clean low-heeled dark uniform shoes, toes polished from the night shift",
+          "text": "干净的深色平跟制服皮鞋",
+          "source": "inferred"
+        }
+      ],
+      "overrides": {},
+      "look": {
+        "id": "realistic-photo",
+        "label": {
+          "zh": "写实照片",
+          "en": "Realistic photo",
+          "ja": "写実写真"
+        },
+        "medium": "photo",
+        "style": "A real photograph, not a render: shot on a full-frame digital camera with an 85mm portrait lens at f/5.6, natural true-to-life colors and white balance. Natural skin texture with the pores and fine lines the person's age calls for, a no-makeup look, no retouching, no beauty filter. Real fabric with natural creases. Subtle film grain.",
+        "clean": "White seamless paper backdrop lit to pure white. A soft directional key light from the front-left with a weaker fill, so the face and clothes have gentle natural shadows and volume. Exactly one person, empty hands, no props, no text, no watermark.",
+        "neg": "CGI, 3D render, digital painting, illustration, anime, airbrushed skin, smooth plastic skin, waxy skin, doll face, beauty filter, overly symmetrical face, oversharpened, HDR, glossy, over-saturated, flat lighting, porcelain skin, big anime eyes"
+      },
+      "views": {},
+      "upgrades": []
+    }
+  }
+}

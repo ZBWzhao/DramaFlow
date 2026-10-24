@@ -30,3 +30,6 @@ output/
 # 本地会话、画布和生成素材不入库，只保留工作区说明
 workspace/*
 !workspace/README.md
+
+# superpowers SDD scratch workspaces
+.superpowers/
