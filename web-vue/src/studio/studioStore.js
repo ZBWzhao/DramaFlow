@@ -5,7 +5,7 @@
  * 算好返回（core/studio_rules.py），前端只负责展示和把人的操作发回去。
  * 这样规则只有一份，改规则不用同时改前后端。
  */
-import { reactive } from "vue";
+import { computed, reactive } from "vue";
 import { getJSON, postJSON } from "../api.js";
 
 const JOB_POLL_MS = 700;
@@ -304,7 +304,11 @@ async function putJSON(path, body) {
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body ?? {}),
   });
-  if (!res.ok) throw new Error((await res.json().catch(() => ({}))).detail || res.statusText);
+  if (!res.ok) {
+    const payload = await res.json().catch(() => ({}));
+    // detail（FastAPI 校验）优先；管线 422 是 {message, findings} 形状，取 message
+    throw new Error(payload.detail || payload.message || res.statusText);
+  }
   return res.json();
 }
 
@@ -587,7 +591,30 @@ export async function loadPipeline() {
     if (studio.pipeline.artifacts.outline) {
       studio.pipeline.detail.outline = await getJSON(`${base}/outline`);
     }
+    // Task 5：script 产物存在 → 详情也一并取。响应自带逐集正文视图
+    // episodes[]（text = edited_text 优先，否则后端按 flow 节拍派生）。
+    if (studio.pipeline.artifacts.script) {
+      studio.pipeline.detail.script = await getJSON(`${base}/script`);
+    }
   } catch (err) {
     console.error("管线产物读取失败（不影响剧本页）", err);
   }
+}
+
+/* ── 管线剧本（阶段 1 Task 5）：script 产物 → 剧本页集列表/正文的数据源 ─────
+ * 画布老项目没有 script 产物 → hasPipelineScript 恒 false，剧本页零变化。
+ */
+
+/** script 产物详情是否在手；配合「详情里有集列表」一起判断才走管线路径。 */
+export const hasPipelineScript = computed(() => Boolean(studio.pipeline?.detail?.script));
+
+/** 集级编辑落库：只保存当前集（PUT edited_text），不再"整本重新分集"。
+ * 响应是刷新后的 script 详情（含逐集 text），直接整体替换本地缓存。 */
+export async function savePipelineEpisode(no, text) {
+  const data = await putJSON(
+    `/api/pipeline/projects/${encodeURIComponent(studio.canvas)}/artifacts/script/episodes/${no}`,
+    { text },
+  );
+  studio.pipeline.detail.script = data;
+  return data;
 }

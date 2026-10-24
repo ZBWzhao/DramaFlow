@@ -59,6 +59,7 @@
   - `episodes[]`：`ep`、`targetSeconds`（目标秒数，seed 按 minutesPerEpisode×60 算）、`hook`/`cliff`（开场钩子/结尾悬念说明，必填）、`beatsClaimed[]`（认领的大纲爽点 type，字段必须在、可为空数组）、`hookBeat`（`[场, 拍]` 钩子具象认领位置，须落在全集前 hookWindow 拍内）、`scenes[]`
   - `episodes[].scenes[]`：`sceneId`(S01，对账 art.json)、`lighting`（可选，对账 art.json 光照状态）、`characters[]`（C 编号，空镜空数组）、`props[]`（可选，P 编号）、`flow[]`（节拍流，动作与台词交替）
   - `flow[]` 节拍二选一：动作节拍 `{action}`（叙述体，禁引号台词）；台词节拍 `{speaker, line, delivery}`（speaker 是本场角色 id 或 `VO`，line 单句 ≤ 35 字，delivery 可省）；一拍不能两者都有，也不能都没有
+  - 显示正文与集级编辑（阶段 1 Task 5 定案）：契约集对象无纯文本正文字段——剧本页正文由导入端按 `flow[]` 节拍确定性推导（场次行/动作行/台词行，仅详情响应视图、不落库）；集级编辑把 `{"text"}` 落为该集对象的 `edited_text`（缺省 = 未改稿），上游重导入批次内的集整对象替换、本地改稿随之被覆盖，批次外的集保留
 
 ## characters（角色设定卡，cast.json）
 

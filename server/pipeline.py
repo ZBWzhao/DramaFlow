@@ -3,8 +3,10 @@
 路由契约（阶段 1 Task 3 dispatch 定稿，Task 4-8 依赖）：
 - POST /projects/{canvas}/artifacts/{artifact_type}  导入：prepare 合并整形后落库
 - GET  /projects/{canvas}/artifacts                  列表（不含 content）
-- GET  /projects/{canvas}/artifacts/{type}           单条（含 content / source_run_id）
+- GET  /projects/{canvas}/artifacts/{type}           单条（含 content / source_run_id；
+                                                     script 另附逐集正文视图 episodes[]）
 - GET  /projects/{canvas}/artifacts/{type}/export    附件导出（文件名 = 注册表 filename）
+- PUT  /projects/{canvas}/artifacts/script/episodes/{no}  集级编辑落库（edited_text）
 
 schema_version 的唯一写者在本路由：请求体显式给出（非空串）优先，否则从产出技能
 pipeline_skills/<skill>/SKILL.md frontmatter 的 `version:` 行推导（进程内缓存）；
@@ -24,7 +26,12 @@ from pydantic import BaseModel
 
 from core import pipeline_artifacts, pipeline_import, pipeline_repository
 from core.pipeline_artifacts import ArtifactType
-from core.pipeline_import import PipelineImportError
+from core.pipeline_import import (
+    SCRIPT_EPISODE_FIELD,
+    SCRIPT_EPISODES_FIELD,
+    PipelineImportError,
+    derive_episode_text,
+)
 
 router = APIRouter(prefix="/api/pipeline", tags=["pipeline"])
 
@@ -190,13 +197,97 @@ async def read_artifact(canvas: str, artifact_type: str):
     row = _find_row(await pipeline_repository.list_all(db, canvas), artifact_type)
     if row is None:
         return _missing(artifact_type)
-    return {
+    body = {
         "artifact_type": artifact_type,
         "schema_version": row["schema_version"],
         "content": row["content"],
         "source_run_id": row["source_run_id"],
         "updated_at": row["updated_at"],
     }
+    if artifact_type == "script":
+        # Task 5：剧本详情附带逐集正文视图。text 只是响应字段，不落库——
+        # content 保持契约原样（集对象上允许出现的唯一附加键是集级编辑的 edited_text）。
+        body["episodes"] = _script_episode_views(row["content"])
+    return body
+
+
+def _script_episode_views(content: Any) -> list[dict]:
+    """剧本详情响应的逐集正文视图：[{ep, hook, chars, edited, text}]。
+
+    text = edited_text（集级编辑落库的本地改稿）优先，否则按 flow 节拍确定性推导
+    （pipeline_import.derive_episode_text）；edited 标记是否处于本地改稿状态。
+    content 不是可识别的剧本形状时返回空表（详情主体照常下发，前端按空视图回退）。
+    """
+    episodes = content.get(SCRIPT_EPISODES_FIELD) if isinstance(content, dict) else None
+    if not isinstance(episodes, list):
+        return []
+    views: list[dict] = []
+    for episode in episodes:
+        if not isinstance(episode, dict):
+            continue
+        edited = episode.get("edited_text")
+        has_edit = isinstance(edited, str) and bool(edited)
+        text = edited if has_edit else derive_episode_text(episode)
+        views.append(
+            {
+                SCRIPT_EPISODE_FIELD: episode.get(SCRIPT_EPISODE_FIELD),
+                "hook": episode.get("hook") or "",
+                "chars": len(text),
+                "edited": has_edit,
+                "text": text,
+            }
+        )
+    return views
+
+
+class EpisodeTextBody(BaseModel):
+    text: str
+
+
+@router.put("/projects/{canvas}/artifacts/script/episodes/{no}")
+async def save_episode_text(canvas: str, no: int, body: EpisodeTextBody):
+    """集级编辑落库（Task 5）：body {"text"} 写入该集对象的 edited_text 后整行复检保存。
+
+    上游重导入覆盖本地编辑：edited_text 挂在集对象上，该集被上游批次重导入时
+    被整对象替换（fresh upstream content），edited_text 随之消失；批次外的集
+    原样保留（本地编辑还在）——合并语义全在 pipeline_import.prepare，本路由不改。
+    """
+    db = await _db_or_none()
+    if db is None:
+        return _no_db()
+    row = _find_row(await pipeline_repository.list_all(db, canvas), "script")
+    if row is None:
+        return _missing("script")
+    content = row["content"]  # list_all 每次现查现解码，就地改不污染任何缓存
+    episodes = content.get(SCRIPT_EPISODES_FIELD) if isinstance(content, dict) else None
+    if not isinstance(episodes, list):
+        message = "script: 库内产物无法识别集数组，无法按集保存"
+        return JSONResponse(status_code=422, content={"message": message, "findings": [message]})
+    target = next(
+        (
+            e for e in episodes
+            if isinstance(e, dict) and e.get(SCRIPT_EPISODE_FIELD) == no
+        ),
+        None,
+    )
+    if target is None:
+        return JSONResponse(status_code=404, content={"message": f"集不存在：{no}"})
+    target["edited_text"] = body.text
+    try:
+        # prepare 复检：与导入同一整形入口，保证落库行始终是可落库的契约形状
+        merged, _findings = pipeline_import.prepare(
+            pipeline_artifacts.get("script"), content, None
+        )
+    except PipelineImportError as exc:
+        rejected = exc.to_dict()
+        if not rejected["findings"]:  # 同导入路由：422 的 findings 保证非空
+            rejected["findings"] = [rejected["message"]]
+        return JSONResponse(status_code=422, content=rejected)
+    await pipeline_repository.save(
+        db, canvas, "script", merged,
+        source_run_id=row["source_run_id"], schema_version=row["schema_version"],
+    )
+    return await read_artifact(canvas, "script")
 
 
 @router.get("/projects/{canvas}/artifacts/{artifact_type}/export")

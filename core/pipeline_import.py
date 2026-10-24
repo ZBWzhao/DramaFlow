@@ -141,6 +141,43 @@ def _episode_number_of(item: Any) -> int | None:
     return None
 
 
+def derive_episode_text(episode: dict) -> str:
+    """从契约 flow 节拍流确定性推导单集显示正文（纯函数，不落库）。
+
+    契约 script 节的集对象没有纯文本正文字段（正文是 scenes[].flow[] 结构节拍），
+    而剧本页需要可编辑的文本形状。这里把节拍渲染成与画布路径一致的行格式——
+    场次行 `第N场｜sceneId · lighting`、动作行 `*action*`、台词行
+    `**speaker**：line（delivery）`——三行都能被 ScriptView 的正文行解析器直接消费。
+    """
+    if not isinstance(episode, dict):
+        return ""
+    lines: list[str] = []
+    scenes = [s for s in (episode.get("scenes") or []) if isinstance(s, dict)]
+    for index, scene in enumerate(scenes, start=1):
+        head = f"第{index}场｜{scene.get('sceneId') or ''}"
+        if scene.get("lighting"):
+            head += f" · {scene['lighting']}"
+        lines.append(head)
+        for beat in scene.get("flow") or []:
+            if not isinstance(beat, dict):
+                continue
+            action = beat.get("action")
+            if isinstance(action, str) and action.strip():
+                lines.append(f"*{action.strip()}*")
+                continue
+            speaker, line = beat.get("speaker"), beat.get("line")
+            if (
+                isinstance(speaker, str) and speaker.strip()
+                and isinstance(line, str) and line.strip()
+            ):
+                spoken = line.strip()
+                delivery = beat.get("delivery")
+                if isinstance(delivery, str) and delivery.strip():
+                    spoken += f"（{delivery.strip()}）"
+                lines.append(f"**{speaker.strip()}**：{spoken}")
+    return "\n".join(lines)
+
+
 # ---------------------------------------------------------------- characters / character_refs
 
 def _prepare_character_set(art: ArtifactType, payload: dict, existing: dict | None, findings: list[str]) -> dict:

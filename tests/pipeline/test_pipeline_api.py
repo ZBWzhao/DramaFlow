@@ -130,9 +130,11 @@ def test_import_all_seven_fixtures_then_query_and_export(api_client):
         got = client.get(f"{BASE}/{art_type}")
         assert got.status_code == 200, got.text
         row = got.json()
-        assert set(row) == {
-            "artifact_type", "schema_version", "content", "source_run_id", "updated_at"
-        }
+        expected_keys = {"artifact_type", "schema_version", "content", "source_run_id", "updated_at"}
+        if art_type == "script":
+            # Task 5：剧本详情响应附加逐集正文视图（display-only，不落库 content）
+            expected_keys.add("episodes")
+        assert set(row) == expected_keys
         assert row["content"] == expected  # 单条查询：content 与落库形状保形
         assert row["source_run_id"] == "run-1"
 
@@ -291,3 +293,92 @@ def test_no_database_returns_503(api_client_no_db):
 
 def test_app_health_smoke(api_client):
     assert api_client.client.get("/api/health").status_code == 200
+
+
+# ---------------------------------------------------------------------------
+# Task 5：分集剧本·派生正文（GET 逐集 text）+ 集级编辑落库（PUT edited_text）
+# ---------------------------------------------------------------------------
+
+
+def test_script_detail_episodes_derive_text_from_flow(api_client):
+    client = api_client.client
+    script = _fixture("script.json")
+    assert client.post(f"{BASE}/script", json={"content": script}).status_code == 200
+
+    row = client.get(f"{BASE}/script").json()
+    by_ep = {e["ep"]: e for e in row["episodes"]}
+    assert set(by_ep) == {1, 2, 3}
+    for ep, view in by_ep.items():
+        assert view["text"].strip(), f"第 {ep} 集派生正文为空"
+        assert view["edited"] is False
+        assert view["chars"] == len(view["text"])
+        assert view["hook"] == script["episodes"][ep - 1]["hook"]
+
+    # 真实 fixture 断言：场次行 / 动作行 / 台词行（含 delivery）逐字在派生正文里，
+    # 与剧本页正文行解析器（ScriptView paragraphs）同构。
+    assert "第1场｜S02 · 夜路路灯流动" in by_ep[1]["text"]
+    assert "冷开场：车流光影里，程野把旧手机卡上支架，按下录像，镜头转正对后排。" in by_ep[1]["text"]
+    assert "**C02**：年轻人，开稳点，这车比你命贵。（瘫在后座，敲着椅背）" in by_ep[1]["text"]
+    assert "**VO**：那只手收回去的方向，不是包。（程野的心声，很轻）" in by_ep[2]["text"]
+
+    # 派生正文只是响应视图：落库 content 保持契约原样（episode 无 text 键）
+    assert all("text" not in e for e in row["content"]["episodes"])
+
+
+def test_put_episode_text_updates_only_that_episode(api_client):
+    client = api_client.client
+    script = _fixture("script.json")
+    client.post(f"{BASE}/script", json={"content": script})
+
+    put = client.put(f"{BASE}/script/episodes/2", json={"text": "新正文"})
+    assert put.status_code == 200, put.text
+    by_ep = {e["ep"]: e for e in put.json()["episodes"]}
+    assert by_ep[2]["text"] == "新正文"
+    assert by_ep[2]["edited"] is True
+    assert "年轻人，开稳点，这车比你命贵" in by_ep[1]["text"]  # 其他集仍是派生正文
+    assert by_ep[1]["edited"] is False
+
+    # 落库形状：edited_text 挂在该集对象上，未编辑集无此键
+    content = client.get(f"{BASE}/script").json()["content"]
+    by_ep_stored = {e["ep"]: e for e in content["episodes"]}
+    assert by_ep_stored[2]["edited_text"] == "新正文"
+    assert "edited_text" not in by_ep_stored[1]
+
+    # 再查两次：结果稳定
+    for _ in range(2):
+        again = {e["ep"]: e for e in client.get(f"{BASE}/script").json()["episodes"]}
+        assert again[2]["text"] == "新正文"
+        assert again[2]["edited"] is True
+        assert again[1]["edited"] is False
+
+
+def test_put_episode_errors(api_client):
+    client = api_client.client
+    # 无 script 产物 → 404
+    assert client.put(f"{BASE}/script/episodes/1", json={"text": "x"}).status_code == 404
+    client.post(f"{BASE}/script", json={"content": _fixture("script.json")})
+    # 集号不存在 → 404；缺 text 字段 → 422
+    assert client.put(f"{BASE}/script/episodes/99", json={"text": "x"}).status_code == 404
+    assert client.put(f"{BASE}/script/episodes/1", json={}).status_code == 422
+
+
+def test_reimport_batch_replaces_local_edit_of_imported_episode(api_client):
+    """上游重导入覆盖本地编辑：批次内的集整对象替换（edited_text 消失），
+    批次外的集原样保留（本地编辑还在）。"""
+    client = api_client.client
+    script = _fixture("script.json")
+    client.post(f"{BASE}/script", json={"content": script})
+    assert client.put(f"{BASE}/script/episodes/1", json={"text": "本地改稿一"}).status_code == 200
+    assert client.put(f"{BASE}/script/episodes/2", json={"text": "本地改稿二"}).status_code == 200
+
+    mutated = copy.deepcopy(script["episodes"][0])
+    mutated["scenes"][0]["flow"][0]["action"] = "上游批次改写：新的冷开场动作。"
+    reimport = client.post(f"{BASE}/script", json={"content": {"episodes": [mutated]}})
+    assert reimport.status_code == 200, reimport.text
+
+    by_ep = {e["ep"]: e for e in client.get(f"{BASE}/script").json()["episodes"]}
+    assert by_ep[1]["edited"] is False  # 上游重导入覆盖本地编辑
+    assert "本地改稿一" not in by_ep[1]["text"]
+    assert "上游批次改写：新的冷开场动作。" in by_ep[1]["text"]  # fresh upstream content
+    assert by_ep[2]["text"] == "本地改稿二"  # 批次外的集：本地编辑保留
+    assert by_ep[2]["edited"] is True

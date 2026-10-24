@@ -4,13 +4,15 @@
  * 数据：studioStore.loadAll（project/script/segments 一次到位），集切换只重拉
  * script + segments（都按 ?episode 收窄）。编辑保存走 importScript（重新分集
  * 即保存语义，服务端会告警异常集）；「开始制作」复用 produceEpisode。
+ * 管线剧本（阶段 1 Task 5）：script 导入产物在手时，集列表/正文/保存整体切到
+ * 产物路径（正文取产物逐集 text、保存逐集落库），画布路径保留为 fallback。
  */
 import { computed, onBeforeUnmount, onMounted, ref } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import { ElMessageBox } from "element-plus";
 import AiPanel from "../ai/AiPanel.vue";
 import { errorText, getJSON } from "../api.js";
-import { importScript, loadAll, loadPipeline, loadProject, loadScript, loadSegments, pollProduceJob, startProduce, studio } from "../studio/studioStore.js";
+import { hasPipelineScript, importScript, loadAll, loadPipeline, loadProject, loadScript, loadSegments, pollProduceJob, startProduce, studio } from "../studio/studioStore.js";
 import StoryAnalysisCards from "./script/StoryAnalysisCards.vue";
 import AssetTablesPanel from "./script/AssetTablesPanel.vue";
 import PipelineOutlinePanel from "./script/PipelineOutlinePanel.vue";
@@ -33,8 +35,33 @@ const produceInstruction = ref("");
 const aiPanel = ref(null); // 制作跟单：attachProduce 挂到右栏 AI 助手
 
 const script = computed(() => studio.script);
-const episodes = computed(() => script.value?.episodes || []);
-const currentEp = computed(() => Number(studio.project?.episode || episodes.value[0]?.no || 1));
+/* 管线剧本数据源（Task 5）：产物详情在手且认得出集列表才走管线，否则画布 fallback */
+const pipelineDetail = computed(() => studio.pipeline?.detail?.script || null);
+const pipelineEpisodes = computed(() => {
+  const list = pipelineDetail.value?.episodes;
+  return Array.isArray(list) ? list : [];
+});
+const usePipelineScript = computed(() => hasPipelineScript.value && pipelineEpisodes.value.length > 0);
+const localEp = ref(null); // 管线路径的当前集号：不写画布 project，切集纯前端
+const episodes = computed(() => {
+  if (usePipelineScript.value) {
+    // 左栏行沿用画布路径形状（no/title/chars）；hook 挂条目上做悬浮提示
+    return pipelineEpisodes.value.map((e) => ({
+      no: e.ep,
+      title: `第${e.ep}集`,
+      chars: e.chars || 0,
+      hook: e.hook || "",
+    }));
+  }
+  return script.value?.episodes || [];
+});
+const currentEp = computed(() => {
+  if (usePipelineScript.value) return localEp.value || pipelineEpisodes.value[0]?.ep || 1;
+  return Number(studio.project?.episode || episodes.value[0]?.no || 1);
+});
+const currentPipelineEp = computed(() =>
+  usePipelineScript.value ? pipelineEpisodes.value.find((e) => e.ep === currentEp.value) || null : null,
+);
 const segTotal = computed(() => studio.segments.length);
 const segDone = computed(() => studio.segments.filter((s) => s.status === "done").length);
 const assetsAll = computed(() => {
@@ -51,11 +78,24 @@ const producePct = computed(() => {
   return producing.value && p?.total ? p.percent : null;
 });
 
+/* 正文文本：管线路径取当前集产物 text（后端已按 flow 派生 / 带本地改稿），
+ * 画布路径取画布剧本全文——行格式一致，下面的行解析器两路共用 */
+const scriptText = computed(() => {
+  if (currentPipelineEp.value) return currentPipelineEp.value.text || "";
+  return script.value?.script || "";
+});
+
+/* 标题栏统计：画布路径 全文字数/段数/对白数；管线路径只有当前集正文字数 */
+const headMeta = computed(() => {
+  if (usePipelineScript.value) return `${currentPipelineEp.value?.chars || 0} 字 · 管线产物`;
+  return `${script.value?.chars || 0} 字 · ${segTotal.value} 段 · ${script.value?.dialogue_count || 0} 句对白`;
+});
+
 /* 正文渲染：五类行——场景 / 引导块 / 分隔线 / 动作行 / 对白。
  * AI 剧本里常见的 markdown 痕迹（*强调*、> 引用、--- 分隔）不再裸奔；
  * 对白行说话人加粗、台词鎏金，动作行弱化——这页最有价值的视觉资产。 */
 const paragraphs = computed(() =>
-  String(script.value?.script || "")
+  String(scriptText.value || "")
     .split(/\n+/)
     .map((raw) => raw.trim())
     .filter(Boolean)
@@ -163,6 +203,15 @@ onBeforeUnmount(() => {
 
 function pickEpisode(no) {
   if (Number(no) === currentEp.value) return;
+  if (usePipelineScript.value) {
+    // 管线路径：产物详情已在手，切集纯前端换正文（复位与画布路径切集后一致）
+    localEp.value = Number(no);
+    notice.value = "";
+    editing.value = false;
+    if (scrollEl.value) scrollEl.value.scrollTop = 0;
+    activeScene.value = -1;
+    return;
+  }
   studio.project.episode = Number(no);
   busy.value = true;
   Promise.all([loadScript(), loadSegments()])
@@ -177,12 +226,12 @@ function pickEpisode(no) {
 }
 
 function startEdit() {
-  editText.value = script.value?.script || "";
+  editText.value = scriptText.value || "";
   editing.value = true;
 }
 
 /* 编辑安全：改过没保存就不许静默丢弃 */
-const editDirty = computed(() => editing.value && editText.value !== (script.value?.script || ""));
+const editDirty = computed(() => editing.value && editText.value !== (scriptText.value || ""));
 async function cancelEdit() {
   if (editDirty.value) {
     try {
@@ -206,12 +255,28 @@ function onEditKey(e) {
 
 async function saveViaResplit() {
   if (!editText.value.trim()) return;
+  if (usePipelineScript.value) return savePipelineEpisodeText();
   busy.value = true;
   notice.value = "";
   try {
     const data = await importScript(editText.value, true);
     const warnings = (data.warnings || episodes.value.map((e) => e.warning).filter(Boolean)) || [];
     notice.value = warnings.length ? `已重新分集：${warnings.join("；")}` : "已保存并重新分集";
+    editing.value = false;
+  } catch (err) {
+    notice.value = errorText(err);
+  } finally {
+    busy.value = false;
+  }
+}
+
+/* 管线路径保存：只落当前集（PUT edited_text），不再"整本重新分集" */
+async function savePipelineEpisodeText() {
+  busy.value = true;
+  notice.value = "";
+  try {
+    await savePipelineEpisode(currentEp.value, editText.value);
+    notice.value = `第 ${currentEp.value} 集已保存（管线剧本）`;
     editing.value = false;
   } catch (err) {
     notice.value = errorText(err);
@@ -285,6 +350,7 @@ onMounted(refresh);
           :key="e.no"
           class="ep-item"
           :class="{ cur: Number(e.no) === currentEp }"
+          :title="e.hook || ''"
           @click="pickEpisode(e.no)"
         >
           <span class="no">{{ e.title || `第${e.no}集` }}</span>
@@ -295,7 +361,7 @@ onMounted(refresh);
       </div>
       <div class="flow">
         <div class="cap" style="padding-bottom: 8px">制作准备</div>
-        <div class="it" :class="script?.script ? 'done' : 'todo'"><span class="n">{{ script?.script ? "✓" : "1" }}</span>导入剧本 · 自动分集</div>
+        <div class="it" :class="(script?.script || usePipelineScript) ? 'done' : 'todo'"><span class="n">{{ (script?.script || usePipelineScript) ? "✓" : "1" }}</span>导入剧本 · 自动分集</div>
         <div class="it" :class="segTotal ? 'done' : 'todo'"><span class="n">{{ segTotal ? "✓" : "2" }}</span>Agent 制作 · 分镜与提示词</div>
         <div class="it" :class="segTotal ? 'done' : 'todo'"><span class="n">{{ segTotal ? "✓" : "3" }}</span>资产就绪 {{ assetsAll }} 项</div>
         <div class="it todo" style="cursor: pointer" @click="router.push(`/project/${route.params.name}/production`)">
@@ -325,7 +391,7 @@ onMounted(refresh);
         <template v-if="tab === 'script'">
           <h2>{{ episodes.find((e) => Number(e.no) === currentEp)?.title || `第 ${currentEp} 集` }}</h2>
           <div class="grow"></div>
-          <span class="vm num">{{ script?.chars || 0 }} 字 · {{ segTotal }} 段 · {{ script?.dialogue_count || 0 }} 句对白</span>
+          <span class="vm num">{{ headMeta }}</span>
         </template>
       </div>
 
@@ -356,7 +422,7 @@ onMounted(refresh);
               <textarea v-model="editText" class="edit-area" spellcheck="false" @keydown="onEditKey"></textarea>
               <div class="edit-tip">
                 <span :class="{ warn: editDirty }">{{ editText.length }} 字</span>
-                · Ctrl+S 保存 = 按新全文重新分集（单集异常会告警）
+                · {{ usePipelineScript ? "Ctrl+S 保存 = 只保存当前集（管线剧本）" : "Ctrl+S 保存 = 按新全文重新分集（单集异常会告警）" }}
               </div>
             </div>
             <article v-else class="script-doc">
@@ -380,7 +446,7 @@ onMounted(refresh);
       <div v-if="tab === 'script'" class="script-foot">
         <template v-if="editing">
           <button class="btn sm" :disabled="busy" @click="cancelEdit">取消</button>
-          <button class="btn primary sm" :disabled="busy" @click="saveViaResplit">保存并重新分集</button>
+          <button class="btn primary sm" :disabled="busy" @click="saveViaResplit">{{ usePipelineScript ? "保存本集" : "保存并重新分集" }}</button>
           <span v-if="editDirty" class="dirty-hint">有未保存的修改</span>
         </template>
         <template v-else>
