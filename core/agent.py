@@ -132,13 +132,18 @@ class Agent:
         return len(values)
 
     # ------------------------------------------------------------------
-    async def run(self, user_input: str) -> str:
+    async def run(self, user_input: str, display_text: str = "") -> str:
         self.last_finish_reason = None
         self.last_status = "running"
         self.last_checkpoint = None
         self.accepting_followups = True
         self._emit("agent_start", agent=self.name)
-        user_entry_id = self.session.append({"role": "user", "content": user_input})
+        entry: dict[str, Any] = {"role": "user", "content": user_input}
+        if display_text:
+            # 会话里给人看的短文案（如「开始制作」）；模型上下文仍拿完整 user_input
+            #（request_messages 会剥掉 display_text，不会把它发给 provider）。
+            entry["display_text"] = display_text
+        user_entry_id = self.session.append(entry)
         self._emit("user_message_committed", entry_id=user_entry_id)
         final = ""
         tool_calls = 0

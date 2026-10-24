@@ -480,7 +480,8 @@ async def _execute_agent_run(live: Any, req: ChatRequest, run_id: str) -> None:
     status, error = "running", None
     try:
         await live.bus.publish("session", session_id=live.id, runs=live.runs, run_id=run_id)
-        await live.agent.run(req.prompt)
+        # display_text：可选的「给人看」短文案（produce 注入的任务指令很长，界面只显示短句）
+        await live.agent.run(req.prompt, display_text=str(getattr(req, "display_text", "") or ""))
         status = live.agent.last_status
         if status == "error":
             error = live.agent.last_finish_reason or "agent_error"

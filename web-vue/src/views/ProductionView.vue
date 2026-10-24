@@ -7,12 +7,14 @@
  *   · 硬校验拦截显式展示（lint.blocking），强制生成必须带明确时长（人工确认语义）；
  *   · 分镜表为只读（分镜编辑在后端无写入端点，改动走重新制作/画布）。
  */
-import { computed, inject, onMounted, ref, watch } from "vue";
+import { computed, inject, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import { applyField } from "../ai/diff.js";
 import { errorText } from "../api.js";
 import { assetUrl as mediaUrl } from "../utils.js";
 import {
+  cancelJob,
+  generateBatch,
   generateKeyframe,
   generateSegment,
   loadAll,
@@ -45,10 +47,12 @@ const segDone = computed(() => segments.value.filter((s) => s.status === "done")
 
 const STATUS_MAP = {
   done: { cls: "ok", text: "完成" },
+  generating: { cls: "warn", text: "生成中" },
   stale: { cls: "warn", text: "过期" },
   partial: { cls: "warn", text: "部分" },
 };
 function segStatus(s) {
+  if (s.status === "generating") return STATUS_MAP.generating;
   if (s.keyframe_stale || s.video_stale) return STATUS_MAP.stale;
   return STATUS_MAP[s.status] || { cls: "mute", text: s.has_video ? "完成" : "未完成" };
 }
@@ -127,27 +131,84 @@ async function generate(force = false) {
   }
 }
 
+/* ---------- 批量出片：服务端 job 排队，进度/取消在任务中心与队列列都有 ---------- */
+const batchJob = computed(() => {
+  const id = Object.keys(studio.jobs).find((k) => studio.jobs[k]?.kind === "batch_generate");
+  return id ? studio.jobs[id] : null;
+});
+const batchActive = computed(() => !!batchJob.value && ["queued", "running"].includes(batchJob.value.status));
+const batchFailedNote = computed(() => {
+  const job = batchJob.value;
+  if (!job || ["queued", "running"].includes(job.status)) return "";
+  const bad = (job.items || []).filter((i) => i.status === "failed");
+  if (!bad.length) return "";
+  const head = bad.slice(0, 2).map((i) => `${i.segment_no}段 ${String(i.error || "失败").slice(0, 30)}`).join("；");
+  return bad.length > 2 ? `${head} 等 ${bad.length} 段未过` : head;
+});
+
 async function batchGenerate() {
-  const todo = segments.value.filter((s) => !s.has_video);
+  if (batchActive.value) return;
+  const todo = segments.value.filter((s) => !s.has_video && !studio.generating[s.node_id]);
   if (!todo.length) return;
   busy.value = true;
-  let ok = 0;
-  const failed = [];
   try {
-    for (const s of todo) {
-      try {
-        const job = await generateSegment(s.node_id, {});
-        if (job.status === "succeeded") ok += 1;
-        else failed.push(`${s.segment_no}(${job.status})`);
-      } catch (err) {
-        failed.push(`${s.segment_no}(${errorText(err).slice(0, 24)})`);
-      }
-    }
-    toast(`批量出片：成功 ${ok}/${todo.length}${failed.length ? `；未过：${failed.join("、")}` : ""}`);
+    const job = await generateBatch(todo.map((s) => s.node_id));
+    const p = job?.progress || {};
+    if (job?.status === "cancelled") toast(`批量出片已取消 · 完成 ${p.done ?? 0}/${p.total ?? todo.length}`);
+    else if (job?.status === "failed") toast(`批量出片失败：${job.error || "全部片段未过"}`);
+    else if (p.failed) toast(`批量出片：成功 ${p.ok ?? 0}/${p.total ?? todo.length} · 失败 ${p.failed} 段`);
+    else toast(`批量出片完成 · ${p.ok ?? todo.length}/${p.total ?? todo.length} 段成功`);
+  } catch (err) {
+    toast(errorText(err));
   } finally {
     busy.value = false;
   }
 }
+
+function cancelBatch() {
+  const job = batchJob.value;
+  if (job) cancelJob(job.job_id).catch((err) => toast(errorText(err)));
+}
+
+/* ---------- 连播本集：已出片片段按段号连着放，像观众看到的那样 ---------- */
+const screening = ref(false);
+const screenIdx = ref(0);
+const playlist = computed(() => segments.value.filter((s) => s.video_path));
+const screenSeg = computed(() => playlist.value[screenIdx.value] || null);
+
+function startScreening() {
+  if (!playlist.value.length) {
+    toast("这一集还没有出片的片段，先批量生成");
+    return;
+  }
+  const at = playlist.value.findIndex((s) => s.node_id === studio.activeSegmentId);
+  screenIdx.value = at >= 0 ? at : 0;
+  screening.value = true;
+}
+function screenNext() {
+  if (screenIdx.value < playlist.value.length - 1) screenIdx.value += 1;
+  else screening.value = false; // 播完收摊
+}
+function screenPrev() {
+  if (screenIdx.value > 0) screenIdx.value -= 1;
+}
+function jumpToSeg(s) {
+  const at = playlist.value.findIndex((x) => x.node_id === s.node_id);
+  if (at >= 0) {
+    screenIdx.value = at;
+    pick(s); // 提示词列跟着跳，退出连播后停在那一帧的上下文里
+  }
+}
+function onScreenKey(e) {
+  if (e.key === "Escape") screening.value = false;
+  else if (e.key === "ArrowRight") screenNext();
+  else if (e.key === "ArrowLeft") screenPrev();
+}
+watch(screening, (on) => {
+  if (on) window.addEventListener("keydown", onScreenKey);
+  else window.removeEventListener("keydown", onScreenKey);
+});
+onBeforeUnmount(() => window.removeEventListener("keydown", onScreenKey));
 
 /* ---------- 版本 / 标记 / 首帧 ---------- */
 const takes = computed(() => (detail.value?.takes || []).slice().reverse());
@@ -250,9 +311,20 @@ onMounted(async () => {
             :class="{ cur: s.node_id === studio.activeSegmentId }"
             @click="pick(s)"
           >
-            <span class="no num">{{ s.segment_no }}</span>
-            <span class="st" :class="segStatus(s).cls"><i></i>{{ segStatus(s).text }}</span>
-            <span v-if="s.duration_s" class="dur num">{{ s.duration_s }}s</span>
+            <span class="thumb">
+              <img v-if="s.thumbnail || s.keyframe_path" :src="mediaUrl(s.thumbnail || s.keyframe_path)" alt="" loading="lazy" />
+              <span v-else class="ph num">{{ s.segment_no }}</span>
+            </span>
+            <span class="seg-txt">
+              <span class="l1">
+                <span class="no num">{{ s.segment_no }}</span>
+                <span class="st" :class="segStatus(s).cls"><i></i>{{ segStatus(s).text }}</span>
+                <span class="gap"></span>
+                <span v-if="s.take_count > 1" class="tk num">{{ s.take_count }}版</span>
+                <span v-if="s.duration_s" class="dur num">{{ s.duration_s }}s</span>
+              </span>
+              <span class="dl" :title="s.dialogue_hint">{{ s.dialogue_hint || "（无台词）" }}</span>
+            </span>
           </div>
           <div v-if="!segments.length" class="ui-empty seg-empty">
             <span class="ico">🎬</span>
@@ -264,10 +336,20 @@ onMounted(async () => {
           </div>
         </div>
         <div class="side-acts">
-          <button class="side-act" type="button" @click="router.push(`/project/${route.params.name}/wall`)">首帧墙 · 整集质检</button>
-          <button class="side-act primary" type="button" :disabled="busy || !segments.some((s) => !s.has_video)" @click="batchGenerate">
-            批量生成未出片 ({{ segments.filter((s) => !s.has_video).length }})
+          <button class="side-act" type="button" :disabled="!playlist.length" @click="startScreening">
+            ▶ 连播本集 ({{ playlist.length }})
           </button>
+          <button class="side-act" type="button" @click="router.push(`/project/${route.params.name}/wall`)">首帧墙 · 整集质检</button>
+          <button class="side-act primary" type="button" :disabled="busy || batchActive || !segments.some((s) => !s.has_video)" @click="batchGenerate">
+            {{ batchActive ? "批量出片中…" : "批量生成未出片" + ` (${segments.filter((s) => !s.has_video).length})` }}
+          </button>
+          <div v-if="batchJob && batchActive" class="batch-line">
+            <span class="num">出片中 {{ batchJob.progress?.done ?? 0 }}/{{ batchJob.progress?.total ?? "—" }} · {{ batchJob.progress?.ok ?? 0 }}✓ {{ batchJob.progress?.failed ?? 0 }}✗</span>
+            <button class="cx" type="button" @click="cancelBatch">取消</button>
+          </div>
+          <div v-else-if="batchFailedNote" class="batch-line" :title="batchFailedNote">
+            <span class="num warn-t">{{ batchFailedNote }}</span>
+          </div>
         </div>
       </div>
 
@@ -418,6 +500,37 @@ onMounted(async () => {
         </div>
       </div>
     </div>
+
+    <!-- 连播本集：按段号顺序自动连播已出片的采用版；Esc/点背景退出，← → 切段 -->
+    <div v-if="screening && screenSeg" class="screen" @click.self="screening = false">
+      <div class="screen-head">
+        <span class="num">第 {{ screenSeg.segment_no }} 段 · {{ screenIdx + 1 }}/{{ playlist.length }}</span>
+        <span class="dl" :title="screenSeg.dialogue_hint">{{ screenSeg.dialogue_hint || screenSeg.title || "" }}</span>
+        <button class="btn sm" type="button" @click="screening = false">退出连播 (Esc)</button>
+      </div>
+      <video
+        :key="screenSeg.node_id"
+        class="screen-video"
+        :src="mediaUrl(screenSeg.video_path)"
+        autoplay
+        controls
+        playsinline
+        @ended="screenNext"
+      ></video>
+      <div class="screen-strip">
+        <button
+          v-for="s in segments"
+          :key="s.node_id"
+          class="chip num"
+          :class="{ cur: s.node_id === screenSeg.node_id, ok: s.has_video && s.node_id !== screenSeg.node_id }"
+          type="button"
+          :disabled="!s.has_video"
+          @click="jumpToSeg(s)"
+        >
+          {{ s.segment_no }}
+        </button>
+      </div>
+    </div>
   </div>
 </template>
 
@@ -456,13 +569,26 @@ onMounted(async () => {
 .st.warn { color: var(--warn); } .st.warn i { background: var(--warn); }
 .st.mute { color: var(--text-3); } .st.mute i { background: var(--text-3); }
 
-/* 队列 */
+/* 队列：缩略图 + 状态/版本 + 台词首行，扫一眼就能决定先修哪段 */
 .seg-scroll { flex: 1; overflow-y: auto; }
-.seg-item { display: flex; align-items: baseline; gap: 10px; padding: 10px var(--sp-4); cursor: pointer; border-left: 1px solid transparent; color: var(--text-3); font-size: var(--fs-13); }
+.seg-item { display: flex; align-items: center; gap: 10px; padding: 9px var(--sp-3); cursor: pointer; border-left: 1px solid transparent; color: var(--text-3); font-size: var(--fs-13); }
 .seg-item:hover { background: var(--card); color: var(--text-2); }
 .seg-item.cur { background: var(--card); border-left-color: var(--accent); color: var(--text); }
-.seg-item .no { font-family: var(--mono); font-size: var(--fs-11); width: 32px; flex: none; }
-.seg-item .dur { margin-left: auto; font-family: var(--mono); font-size: var(--fs-11); color: var(--text-3); }
+.seg-item .thumb { width: 34px; aspect-ratio: 9/16; flex: none; border-radius: 4px; overflow: hidden; border: 1px solid var(--line); background: linear-gradient(165deg, #23201B, #14110E); display: grid; place-items: center; }
+.seg-item .thumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.seg-item .thumb .ph { font-family: var(--mono); font-size: var(--fs-11); color: var(--text-3); }
+.seg-txt { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 3px; }
+.seg-txt .l1 { display: flex; align-items: baseline; gap: 8px; }
+.seg-txt .no { font-family: var(--mono); font-size: var(--fs-11); color: var(--text-2); }
+.seg-txt .gap { flex: 1; }
+.seg-txt .tk { font-family: var(--mono); font-size: 10px; color: var(--gold); opacity: .85; }
+.seg-txt .dur { font-family: var(--mono); font-size: var(--fs-11); color: var(--text-3); }
+.seg-txt .dl { font-size: var(--fs-11); color: var(--text-3); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.batch-line { display: flex; align-items: center; gap: 8px; padding: 2px 4px; font-size: var(--fs-11); color: var(--text-3); }
+.batch-line .num { font-size: var(--fs-11); }
+.batch-line .warn-t { color: var(--warn); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.batch-line .cx { flex: none; color: var(--warn); background: none; border: 1px solid var(--line-2); border-radius: var(--r-1); padding: 2px 10px; font-size: var(--fs-11); cursor: pointer; }
+.batch-line .cx:hover { border-color: var(--warn); }
 .empty { padding: var(--sp-4); color: var(--text-3); font-size: var(--fs-12); line-height: 1.8; }
 .side-acts { padding: var(--sp-2) var(--sp-3) var(--sp-3); display: flex; flex-direction: column; gap: var(--sp-1); }
 .side-act { text-align: left; padding: 11px 12px; border-radius: var(--r-1); font-size: var(--fs-13); color: var(--text-2); border: 1px solid var(--line); background: none; cursor: pointer; }
@@ -554,6 +680,17 @@ onMounted(async () => {
 .btn.primary:hover { background: var(--accent-hi); }
 .btn.sm { padding: 6px 14px; font-size: var(--fs-13); }
 .btn:disabled { opacity: .5; pointer-events: none; }
+
+/* 连播 overlay */
+.screen { position: fixed; inset: 0; z-index: 80; background: rgba(8, 6, 4, .93); display: flex; flex-direction: column; align-items: center; justify-content: center; gap: var(--sp-3); padding: var(--sp-5); }
+.screen-head { display: flex; align-items: center; gap: var(--sp-4); width: min(480px, 92vw); color: var(--text-2); font-size: var(--fs-13); }
+.screen-head .dl { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-3); }
+.screen-video { width: min(480px, 92vw); aspect-ratio: 9/16; max-height: 72vh; background: #000; border-radius: var(--r-2); outline: none; }
+.screen-strip { display: flex; flex-wrap: wrap; gap: 6px; width: min(720px, 92vw); justify-content: center; }
+.screen-strip .chip { padding: 4px 10px; border-radius: 999px; border: 1px solid var(--line-2); background: none; color: var(--text-3); font-size: var(--fs-11); cursor: pointer; }
+.screen-strip .chip.ok { color: var(--ok); border-color: rgba(111, 162, 132, .5); }
+.screen-strip .chip.cur { background: var(--accent); border-color: var(--accent); color: #FFF7F0; }
+.screen-strip .chip:disabled { opacity: .35; cursor: default; }
 
 /* 断点降级（必须在基础规则之后：同特异性时靠源码顺序取胜）：
  * ≤1200 撤概要列（信息顶栏/项目信息弹窗都有），≤940 单列纵向滚动。 */

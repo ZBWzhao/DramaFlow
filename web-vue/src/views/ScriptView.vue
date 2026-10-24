@@ -9,8 +9,8 @@ import { computed, onBeforeUnmount, onMounted, ref } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import { ElMessageBox } from "element-plus";
 import AiPanel from "../ai/AiPanel.vue";
-import { errorText } from "../api.js";
-import { importScript, loadAll, loadProject, loadScript, loadSegments, produceEpisode, studio } from "../studio/studioStore.js";
+import { errorText, getJSON } from "../api.js";
+import { importScript, loadAll, loadProject, loadScript, loadSegments, pollProduceJob, startProduce, studio } from "../studio/studioStore.js";
 import StoryAnalysisCards from "./script/StoryAnalysisCards.vue";
 import AssetTablesPanel from "./script/AssetTablesPanel.vue";
 
@@ -29,6 +29,7 @@ const busy = ref(false);
 const notice = ref("");
 const produceOpen = ref(false);
 const produceInstruction = ref("");
+const aiPanel = ref(null); // 制作跟单：attachProduce 挂到右栏 AI 助手
 
 const script = computed(() => studio.script);
 const episodes = computed(() => script.value?.episodes || []);
@@ -41,6 +42,10 @@ const assetsAll = computed(() => {
 });
 
 const producing = computed(() => ["queued", "running"].includes(studio.produceJob?.status));
+const producePct = computed(() => {
+  const p = studio.produceJob?.progress;
+  return producing.value && p?.total ? p.percent : null;
+});
 
 /* 正文渲染：五类行——场景 / 引导块 / 分隔线 / 动作行 / 对白。
  * AI 剧本里常见的 markdown 痕迹（*强调*、> 引用、--- 分隔）不再裸奔；
@@ -216,8 +221,28 @@ async function doProduce() {
   busy.value = true;
   notice.value = "";
   try {
-    const job = await produceEpisode(currentEp.value, produceInstruction.value.trim());
-    notice.value = job.status === "succeeded" ? `第 ${currentEp.value} 集制作完成，共 ${segTotal.value} 段` : `制作未完成：${job.status}`;
+    const job = await startProduce(currentEp.value, produceInstruction.value.trim());
+    // run_id 在后台任务里异步登记：短轮询拿到后让 AI 助手跟单（事件流从头补放，不丢过程）
+    let run = null;
+    for (let i = 0; i < 24 && !run; i++) {
+      await new Promise((r) => setTimeout(r, 500));
+      try {
+        const j = await getJSON(`/api/studio/jobs/${job.job_id}`);
+        if (j.run_id && j.session_id) run = j;
+        else if (!["queued", "running"].includes(j.status)) break; // 已经终态就没得跟了
+      } catch { /* 任务中心尚未登记，下一轮再试 */ }
+    }
+    if (run?.session_id && run?.run_id) {
+      aiPanel.value?.attachProduce(run.session_id, run.run_id);
+    }
+    const final = await pollProduceJob(job.job_id);
+    if (final.status === "succeeded") {
+      notice.value = `第 ${currentEp.value} 集制作完成，共 ${segTotal.value} 段`;
+    } else if (final.status === "limited") {
+      notice.value = `第 ${currentEp.value} 集制作暂停：已完成的片段已保留，可再次「开始制作」继续`;
+    } else {
+      notice.value = `制作失败：${final.error || final.status}`;
+    }
     produceInstruction.value = "";
   } catch (err) {
     notice.value = errorText(err);
@@ -354,7 +379,7 @@ onMounted(refresh);
         <template v-else>
           <button class="btn sm" @click="startEdit">编辑剧本</button>
           <button class="btn sm" :disabled="busy || producing || !script?.script" @click="produceOpen = true">
-            {{ producing ? "Agent 制作中…" : "开始制作" }}
+            {{ producing ? (producePct == null ? "Agent 制作中…" : `Agent 制作中… ${producePct}%`) : "开始制作" }}
           </button>
           <span v-if="notice" class="notice">{{ notice }}</span>
           <span style="flex: 1"></span>
@@ -368,6 +393,7 @@ onMounted(refresh);
 
     <!-- ── 右：停靠 AI ── -->
     <AiPanel
+      ref="aiPanel"
       class="dock"
       mode="dock"
       :canvas="String(route.params.name)"

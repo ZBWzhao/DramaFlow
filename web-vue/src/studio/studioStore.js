@@ -327,7 +327,10 @@ export function exportLookPromptUrl(nodeId, lookId) {
  * 这是唯一允许 Agent 在制片台里主动写节点的入口。
  * 拆分镜本身不花钱，费用发生在之后逐段生成，所以这里不需要审批卡。
  */
-export async function produceEpisode(episode, instruction = "") {
+/** 发起制作，立即返回初始 job（job_id）——不等跑完。
+ * ScriptView 用它先拿到 job，再轮询出 run_id 让 AI 助手跟单，最后才 pollProduceJob 等终态。
+ */
+export async function startProduce(episode, instruction = "") {
   studio.produceJob = { status: "queued", episode };
   const data = await postJSON(`/api/studio/produce`, {
     canvas: studio.canvas,
@@ -335,10 +338,15 @@ export async function produceEpisode(episode, instruction = "") {
     instruction,
   });
   studio.produceJob = data.job || { status: "running" };
-  return pollProduceJob(data.job.job_id);
+  return data.job;
 }
 
-export async function pollProduceJob(jobId, { interval = 2000, maxMs = 15 * 60 * 1000 } = {}) {
+export async function produceEpisode(episode, instruction = "") {
+  const job = await startProduce(episode, instruction);
+  return pollProduceJob(job.job_id);
+}
+
+export async function pollProduceJob(jobId, { interval = 2000, maxMs = 45 * 60 * 1000 } = {}) {
   const started = Date.now();
   for (;;) {
     await new Promise((r) => setTimeout(r, interval));
@@ -353,7 +361,8 @@ export async function pollProduceJob(jobId, { interval = 2000, maxMs = 15 * 60 *
     }
     studio.produceJob = { ...job, elapsed: Math.round((Date.now() - started) / 1000) };
     if (job.status !== "queued" && job.status !== "running") {
-      if (job.status === "succeeded") {
+      // limited 也是「有半成品」的终态：刷新片段/资产，让用户看到已产出的部分
+      if (job.status === "succeeded" || job.status === "limited") {
         await loadAll();
         if (!studio.activeSegmentId) {
           const first = (studio.segments || [])[0];
@@ -474,6 +483,18 @@ export async function generateSegment(nodeId, { duration = 0, shotNo = 0, force 
   } finally {
     flag("generating", nodeId, false);
   }
+}
+
+/** 批量出片：一个服务端 job 排队生成 N 段，进度/取消走任务中心；单项失败不影响其余。 */
+export async function generateBatch(nodeIds, { force = false } = {}) {
+  if (!nodeIds.length) return null;
+  const data = await postJSON(`/api/studio/segments/batch-generate${qs()}`, { node_ids: nodeIds, force });
+  const jobId = data.job.job_id;
+  studio.jobs[jobId] = data.job;
+  const job = await pollJob(jobId);
+  await Promise.all([loadSegments(), loadPreview()]);
+  if (studio.activeSegmentId) await loadDetail(studio.activeSegmentId).catch(() => {});
+  return job;
 }
 
 /** 生成「这一镜的第一帧」。之后出片会以它为准走首帧模式，构图与人物位置就归我们控制。 */

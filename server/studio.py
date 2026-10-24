@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 import re
 from urllib.parse import quote
 import time
@@ -124,6 +125,13 @@ class GenerateRequest(BaseModel):
     # 显式「忽略校验问题，强制生成」。以前靠「传个 duration 就能绕过硬校验」的
     # 旁路——语义错位且容易误触；现在绕过必须显式声明。
     force: bool = False
+
+
+class BatchGenerateRequest(BaseModel):
+    """批量出片：把要生成的片段 node_id 一次性交给服务端排队（进度/取消/单项失败隔离）。"""
+
+    node_ids: list[str] = Field(default_factory=list)
+    force: bool = False  # 与单段生成同义：显式跳过硬校验
 
 
 class KeyframeRequest(BaseModel):
@@ -472,6 +480,7 @@ def _segment_view(canvas: Canvas, node: Any, *, fallback_no: int = 0, with_detai
         "status": _segment_status(gen_node, video, takes, current_take_id),
         "duration_s": duration,
         "duration_source": duration_source,
+        "dialogue_hint": _dialogue_hint(shots),
         "has_video": bool(video.get("path")),
         "video_path": video.get("path") or "",
         "thumbnail": str(gen_node.data.get("thumbnail") or "") if gen_node is not None else "",
@@ -1685,6 +1694,16 @@ def _dialogue_text(shot: dict[str, Any]) -> str:
     return f"台词（同期声，原文一字不改）：{words}{tail}"
 
 
+def _dialogue_hint(shots: list[dict[str, Any]]) -> str:
+    """片段队列里的台词摘要：第一条非空台词原文。逐句台词是详情页的事。"""
+    for shot in shots or []:
+        dialogue = shot.get("dialogue") if isinstance(shot.get("dialogue"), dict) else {}
+        words = str(dialogue.get("text") or "").strip()
+        if words:
+            return words
+    return ""
+
+
 def _forbidden_text(shot: dict[str, Any]) -> str:
     forbidden = shot.get("forbidden")
     if not isinstance(forbidden, list):
@@ -1937,6 +1956,11 @@ async def _run_generation(job_id: str, canvas_name: str, node_id: str, request: 
             gen.status = "done"
             await _save(graph)
         job.update(status="succeeded", finished_at=time.time(), result=take, take=take)
+    except asyncio.CancelledError:
+        # 批量出片取消时连带取消的单段任务，状态也要落到 cancelled——
+        # 不然任务中心会永远把它显示成「运行中」。
+        job.update(status="cancelled", finished_at=time.time())
+        raise
     except Exception as exc:  # noqa: BLE001 - 生成失败要原样回给前端
         job.update(status="failed", finished_at=time.time(), error=f"{type(exc).__name__}: {exc}")
         try:
@@ -2078,6 +2102,151 @@ async def generate_segment(node_id: str, canvas: str, body: GenerateRequest) -> 
     return {"ok": True, "job": _jobs[job_id]}
 
 
+def _batch_progress(job: dict[str, Any]) -> dict[str, Any]:
+    """批量 job 的进度快照：done 统计四个终态，percent 给任务中心的进度条。"""
+    items = job.get("items") or []
+    done = [i for i in items if i.get("status") in ("succeeded", "failed", "cancelled", "skipped")]
+    return {
+        "total": len(items),
+        "done": len(done),
+        "ok": sum(1 for i in items if i.get("status") == "succeeded"),
+        "failed": sum(1 for i in items if i.get("status") == "failed"),
+        "percent": int(len(done) * 100 / len(items)) if items else 100,
+    }
+
+
+def _http_detail_text(detail: Any) -> str:
+    """HTTPException.detail 可能是 str，也可能是 {message, findings} 结构；统一变人话。"""
+    if isinstance(detail, dict):
+        parts = [str(detail.get("message") or "").strip()]
+        findings = detail.get("findings")
+        if isinstance(findings, list):
+            msgs = [str(f.get("message") or "") for f in findings if isinstance(f, dict)]
+            parts += [m for m in msgs if m][:2]
+        return "；".join(p for p in parts if p) or "请求被拒绝"
+    return str(detail or "请求被拒绝")
+
+
+@router.post("/segments/batch-generate")
+async def batch_generate_segments(canvas: str, body: BatchGenerateRequest) -> dict[str, Any]:
+    """把一批片段交给一个批量 job 串行生成：有进度、可取消、单项失败不拖垮整批。
+
+    每一项都复用单段生成的完整路径（lint → 首帧/参考图模式 → take 记录），
+    这里只负责排队与记账，不再抄第二份生成逻辑。
+    """
+    _require_configured()
+    if not body.node_ids:
+        raise HTTPException(status_code=422, detail="没有要生成的片段")
+    async with _lock_for(canvas):
+        graph = await _load(canvas)
+        items: list[dict[str, Any]] = []
+        for node_id in body.node_ids:
+            node = graph.nodes.get(node_id)
+            if node is None or node.type != "prompt":
+                raise HTTPException(status_code=404, detail=f"片段不存在：{node_id}")
+            gen = _generation_node(graph, node)
+            busy_id = str(gen.data.get("active_job_id") or "") if gen is not None else ""
+            item: dict[str, Any] = {
+                "node_id": node_id,
+                "segment_no": _segment_no(node, 0),
+                "title": node.label,
+                "status": "queued",
+                "error": "",
+                "job_id": "",
+            }
+            if busy_id and _jobs.get(busy_id, {}).get("status") in ("queued", "running"):
+                item["status"] = "skipped"
+                item["error"] = "已有生成任务在跑"
+            items.append(item)
+        batch_id = f"batch_{uuid.uuid4().hex[:12]}"
+        _jobs[batch_id] = {
+            "job_id": batch_id,
+            "kind": "batch_generate",
+            "canvas": canvas,
+            "status": "queued",
+            "items": items,
+            "progress": _batch_progress({"items": items}),
+            "created_at": time.time(),
+            "error": "",
+        }
+    _tasks[batch_id] = asyncio.create_task(_run_batch_generation(batch_id, canvas, body.force))
+    return {"ok": True, "job": _jobs[batch_id]}
+
+
+async def _run_batch_generation(batch_id: str, canvas_name: str, force: bool) -> None:
+    job = _jobs[batch_id]
+    job.update(status="running", started_at=time.time())
+    current = ""  # 正在跑的单段 job id；批量被取消时要连带收尾
+    try:
+        for item in job["items"]:
+            if job.get("cancel_requested"):
+                item["status"] = "skipped"
+                job["progress"] = _batch_progress(job)
+                continue
+            item["status"] = "running"
+            try:
+                resp = await generate_segment(item["node_id"], canvas_name, GenerateRequest(force=force))
+            except HTTPException as exc:
+                item["status"] = "failed"
+                item["error"] = _http_detail_text(exc.detail)
+                job["progress"] = _batch_progress(job)
+                continue
+            inner_id = resp["job"]["job_id"]
+            item["job_id"] = inner_id
+            current = inner_id
+            # 子任务挂到批量名下：任务中心按 parent 归并，不逐条刷屏
+            _jobs[inner_id]["parent"] = batch_id
+            task = _tasks.get(inner_id)
+            try:
+                if task is not None:
+                    await task
+            except asyncio.CancelledError:
+                if job.get("cancel_requested"):
+                    raise  # 批量被取消：去统一收尾
+                # 只是这一单被单独取消：按子任务实际状态记账，继续下一项
+            inner = _jobs.get(inner_id, {})
+            item["status"] = str(inner.get("status") or "failed")
+            item["error"] = str(inner.get("error") or "")
+            current = ""
+            job["progress"] = _batch_progress(job)
+        job.update(finished_at=time.time(), progress=_batch_progress(job))
+        items = job["items"]
+        if job.get("cancel_requested"):
+            job["status"] = "cancelled"
+        elif all(item["status"] == "succeeded" for item in items):
+            job["status"] = "succeeded"
+        elif items and all(item["status"] == "failed" for item in items):
+            first = next((item for item in items if item.get("error")), None)
+            job["status"] = "failed"
+            job["error"] = f"{len(items)} 段全部失败：{(first.get('error') or '')[:120] if first else '无失败详情'}"
+        else:
+            # 部分成功也算整批成功；失败明细在 items 里，前端汇总展示
+            job["status"] = "succeeded"
+    except asyncio.CancelledError:
+        # cancel_job 端点先写 cancel_requested 再 cancel()，这里做收尾：
+        # 停掉正在跑的单段任务，没开跑的标跳过，整批落成 cancelled。
+        job["cancel_requested"] = True
+        if current:
+            task = _tasks.get(current)
+            if task is not None and not task.done():
+                task.cancel()
+            try:
+                if task is not None:
+                    await task
+            except asyncio.CancelledError:
+                pass
+            inner = _jobs.get(current)
+            if inner is not None and inner.get("status") in ("queued", "running"):
+                inner.update(status="cancelled", finished_at=time.time())
+        for item in job["items"]:
+            if item["status"] in ("queued", "running"):
+                item["status"] = "cancelled" if item["status"] == "running" else "skipped"
+        job.update(status="cancelled", finished_at=time.time(), progress=_batch_progress(job))
+        # 吞掉 CancelledError 安静结束：终态已落库，再 raise 只会让 uvicorn 记一条无害的异常栈
+    finally:
+        _tasks.pop(batch_id, None)
+
+
 @router.post("/segments/{node_id}/keyframe")
 async def generate_keyframe(node_id: str, canvas: str, body: KeyframeRequest) -> dict[str, Any]:
     """先出一张「这一镜的第一帧」，再用它驱动视频。
@@ -2180,6 +2349,8 @@ async def cancel_job(job_id: str) -> dict[str, Any]:
     job = _jobs.get(job_id)
     if job is None:
         raise HTTPException(status_code=404, detail=f"任务不存在：{job_id}")
+    # 先立标记再 cancel：批量出片的协程靠它区分「整批被取消」和「某一单被单独取消」
+    job["cancel_requested"] = True
     task = _tasks.get(job_id)
     if task is not None and not task.done():
         task.cancel()
@@ -3049,6 +3220,19 @@ _PRODUCE_INSTRUCTION = """把第{no}集做成可以进入「制作」的状态�
 不要调用任何媒体生成工具，也不要创建 timeline 节点。做完后用一句话说明：拆了几个镜头、提了哪些资产。"""
 
 
+# 治标：produce 会话单腿轮次上限独立于全局 AGENT_MAX_TURNS（40 不够拆一整集）。
+PRODUCE_MAX_TURNS = max(40, int(os.environ.get("PRODUCE_MAX_TURNS", "100")))
+# 治本：撞上限自动续跑的总腿数（首发 + N-1 次续跑）。续跑用同一会话，
+# Agent 看得见自己上一轮的上下文和画布现状，指令只要求补缺，不重做。
+PRODUCE_MAX_LEGS = max(1, int(os.environ.get("PRODUCE_MAX_LEGS", "4")))
+
+_PRODUCE_RESUME_INSTRUCTION = """继续第{no}集制片：上一轮达到单次轮次上限被暂停，画布里已有的节点是有效进度。
+先 get_canvas 核对现状，**不要重建已存在的节点，也不要重复读取已经读过的文件**，只补齐缺失的部分：
+还缺的 storyboard / prompt / video_gen 节点按原流程补全；缺的连线（storyboard→prompt，shots→ctx；
+prompt→video_gen，prompt→prompt）补连；已有片段字段不完整就原位更新。
+完成后用一句话汇报：拆了几个镜头、提了哪些资产。"""
+
+
 class ProduceRequest(BaseModel):
     canvas: str
     episode: int = 1
@@ -3132,26 +3316,102 @@ async def _run_produce(job_id: str, canvas_name: str, prompt: str, session_id: s
             + "\n<media-approval>\n用户选择了自动准备：信息足够时直接完成全部生产包和生成节点。"
             + "\n这次任务明确要求不生成任何媒体，也不要声称已经生成了媒体。\n</media-approval>"
         )
-        start_event_id = await _registry.event_store.latest_id(live.id) or "0-0"
-        run_id = await _registry.begin_persisted_run(live, "agent", start_event_id)
-        live.runs += 1
-        request = type("StudioProduceRequest", (), {"prompt": prompt, "use_sub_agent": True, "media_policy": "auto_review"})()
-        # 不订阅 bus：事件本来就由 EventStore 持久化，前端通过 /api/events/stream 补看。
-        await _agent_runner(live, request, run_id)
-
+        # 拆一整集（≈30 段 × storyboard/prompt/video_gen/连线）远超默认
+        # AGENT_MAX_TURNS=40：produce 会话专属放宽单腿轮次，撞上限后由下面的
+        # 续跑循环接力。曾经两次实跑都停在 limited 而 job 仍标 succeeded，
+        # 制作页片段队列只剩种子节点——静默半途而废比失败更糟。
+        live.agent.max_turns = PRODUCE_MAX_TURNS
+        leg_prompt = prompt
+        agent_status = ""
         graph = await _load(canvas_name)
-        changed = _repair_links(graph)
-        # 幂等收尾：同集重跑 produce 后按（集, 段号）归并重复片段，多出的标 orphaned
-        reconcile = _reconcile_produce(graph, episode)
-        if reconcile["orphaned"]:
-            changed = True
-        if changed:
-            await _save(graph)
+
+        async def _sample_progress() -> None:
+            """把画布上的制作进度周期性写进 job，前端任务中心据此画进度条。"""
+            while True:
+                await asyncio.sleep(2)
+                try:
+                    job.update(progress=_produce_progress(await _load(canvas_name), int(episode)))
+                except asyncio.CancelledError:
+                    raise
+                except Exception:  # noqa: BLE001 - 采样失败只影响进度条，不影响制作
+                    pass
+
+        sampler = asyncio.create_task(_sample_progress())
+        try:
+            legs = 0
+            for leg in range(1, PRODUCE_MAX_LEGS + 1):
+                legs = leg
+                start_event_id = await _registry.event_store.latest_id(live.id) or "0-0"
+                run_id = await _registry.begin_persisted_run(live, "agent", start_event_id)
+                # 前端 AI 助手据此订阅 /api/events/stream 跟单，实时看到拆镜过程
+                job.update(run_id=run_id, session_id=live.id)
+                live.runs += 1
+                # display_text：会话里显示短句，Agent 拿到的仍是完整任务指令
+                request = type("StudioProduceRequest", (), {
+                    "prompt": leg_prompt,
+                    "use_sub_agent": True,
+                    "media_policy": "auto_review",
+                    "display_text": "开始制作" if leg == 1 else "继续制作",
+                })()
+                # 不订阅 bus：事件本来就由 EventStore 持久化，前端通过 /api/events/stream 补看。
+                await _agent_runner(live, request, run_id)
+                agent_status = getattr(live.agent, "last_status", "")
+                # 每条腿结束都收尾一次：续跑中途再挂，画布里的半成品也保持
+                # 连线齐全、片段齐备、可读可继续。
+                graph = await _load(canvas_name)
+                changed = _ensure_prompt_nodes(graph, int(episode))
+                changed += _repair_links(graph)
+                reconcile = _reconcile_produce(graph, episode)
+                if reconcile["orphaned"]:
+                    changed = True
+                if changed:
+                    await _save(graph)
+                if agent_status != "limited":
+                    break
+                if leg < PRODUCE_MAX_LEGS:
+                    job.update(resume_attempt=leg, activity=f"第 {leg} 次续跑：补齐未完成的片段")
+                    leg_prompt = _PRODUCE_RESUME_INSTRUCTION.format(no=int(episode))
+        finally:
+            sampler.cancel()
+            await asyncio.gather(sampler, return_exceptions=True)
+        progress = _produce_progress(graph, int(episode))
+        if agent_status == "limited":
+            job.update(
+                status="limited",
+                finished_at=time.time(),
+                agent_status=agent_status,
+                resume_attempts=legs - 1,
+                progress=progress,
+                error=(
+                    f"连续 {legs} 次运行都达到单次轮次上限，第 {episode} 集拆分镜仍未完成；"
+                    "已完成的片段已保留，可再次「开始制作」继续，不会重做已有片段。"
+                ),
+            )
+            return
+        if agent_status != "completed":
+            # 真实错误在 run 状态里（如 DeepSeek 402 余额不足）——透传给 job，
+            # 不能只给「Agent 异常结束」这种让用户无路可下的提示。
+            real_error = ""
+            try:
+                run_state = await _registry.run_states.get(run_id)
+                real_error = str(getattr(run_state, "error", "") or "").strip()
+            except Exception:  # noqa: BLE001 - 拿不到就退回通用文案
+                real_error = ""
+            job.update(
+                status="failed",
+                finished_at=time.time(),
+                agent_status=agent_status,
+                progress=progress,
+                error=real_error or f"Agent 异常结束（{agent_status or 'unknown'}），已完成的节点保留在画布上，可重试。",
+            )
+            return
         after = _produce_counts(graph)
         job.update(
             status="succeeded",
             finished_at=time.time(),
-            agent_status=getattr(live.agent, "last_status", ""),
+            agent_status=agent_status,
+            resume_attempts=legs - 1,
+            progress=progress,
             before=before,
             after=after,
             added={
@@ -3191,6 +3451,102 @@ def _sync_rendered_prompts(graph: Canvas) -> int:
         node.data["rendered_by"] = "server"
         written += 1
     return written
+
+
+def _ensure_prompt_nodes(graph: Canvas, episode_no: int) -> int:
+    """分镜已落盘时，片段/生成槽由服务端补齐——这步是机械活，不该再花模型轮次。
+
+    多轮实跑的教训：Agent 在「原位更新已有分镜」上耗尽轮次（40 轮只够
+    set_storyboard 几十次），指令第 4/5 步（建 prompt / video_gen）从未执行，
+    制作页片段队列就一直是空的。正文由 _sync_rendered_prompts 按 shots 渲染，
+    模型本来就不需要写它；连线又由 _repair_links 兜底——所以这里只管把
+    「每个带段号的分镜 ↔ 一个片段 ↔ 一个视频生成槽」的不变量补成。
+    """
+    order = {nid: index for index, nid in enumerate(graph.nodes)}
+    prompts_by_seg: dict[tuple[int, int], Any] = {}
+    for node in graph.nodes.values():
+        if node.type != "prompt":
+            continue
+        key = (_episode_no(node), int(node.data.get("segment_no") or 0))
+        prev = prompts_by_seg.get(key)
+        if prev is None or order.get(node.id, 0) > order.get(prev.id, 0):
+            prompts_by_seg[key] = node
+    created = 0
+    storyboards = sorted(
+        (
+            node
+            for node in graph.nodes.values()
+            if node.type == "storyboard"
+            and not node.data.get("orphaned")
+            and _episode_no(node) == int(episode_no)
+            and node.data.get("segment_no") not in (None, "")
+        ),
+        key=lambda node: order.get(node.id, 0),
+    )
+    for sb in storyboards:
+        seg = int(sb.data.get("segment_no") or 0)
+        key = (int(episode_no), seg)
+        prompt = prompts_by_seg.get(key)
+        if prompt is not None and any(
+            edge.source == prompt.id
+            and (graph.nodes.get(edge.target) or type("x", (), {"type": ""})).type == "video_gen"
+            for edge in graph.outgoing(prompt.id)
+        ):
+            continue
+        if prompt is None:
+            shots = sb.data.get("shots") if isinstance(sb.data.get("shots"), list) else []
+            first = shots[0] if shots and isinstance(shots[0], dict) else {}
+            try:
+                duration = round(float(first.get("duration_s")), 2) if first.get("duration_s") is not None else None
+            except (TypeError, ValueError):
+                duration = None
+            subject = str(first.get("subject") or "").strip()
+            label = f"分镜{seg:02d}·{subject}" if subject else f"分镜{seg:02d}"
+            prompt = graph.add_node(
+                "prompt",
+                label[:40],
+                data={
+                    "episode_no": int(episode_no),
+                    "segment_no": seg,
+                    **({"duration_s": duration} if duration else {}),
+                    "rendered_by": "server",
+                },
+            )
+            prompts_by_seg[key] = prompt
+            created += 1
+        gen = graph.add_node(
+            "video_gen",
+            f"视频生成·分镜{seg:02d}",
+            data={"episode_no": int(episode_no), "segment_no": seg},
+        )
+        graph.connect(sb.id, "shots", prompt.id, "ctx")
+        graph.connect(prompt.id, "prompt", gen.id, "prompt")
+        created += 1
+    return created
+
+
+def _produce_progress(graph: Canvas, episode_no: int) -> dict[str, int]:
+    """制作进度快照：分母=该集带段号的在册分镜，分子=其中已有片段(prompt)的。"""
+    storyboards = sum(
+        1
+        for node in graph.nodes.values()
+        if node.type == "storyboard"
+        and not node.data.get("orphaned")
+        and _episode_no(node) == int(episode_no)
+        and node.data.get("segment_no") not in (None, "")
+    )
+    prompts = sum(
+        1
+        for node in graph.nodes.values()
+        if node.type == "prompt" and not node.data.get("orphaned") and _episode_no(node) == int(episode_no)
+    )
+    percent = min(int(prompts * 100 / storyboards), 100) if storyboards else 0
+    return {
+        "storyboards": storyboards,
+        "prompts": min(prompts, storyboards),
+        "total": storyboards,
+        "percent": percent,
+    }
 
 
 def _repair_links(graph: Canvas) -> int:

@@ -357,8 +357,10 @@ class Session:
 
     def request_messages(self) -> list[dict]:
         head = [{"role": "system", "content": self.system_prompt}] if self.system_prompt else []
+        # display_text 是给人看的短文案（如「开始制作」）；模型上下文里只要原始完整指令
+        msgs = [{k: v for k, v in m.items() if k != "display_text"} for m in self.messages]
         # 清洗放在最后一道：历史文件不改，但发给模型的必须配对合法。
-        return head + sanitize_tool_pairs(self.messages)
+        return head + sanitize_tool_pairs(msgs)
 
     def size_chars(self) -> int:
         return len(json.dumps(self.request_messages(), ensure_ascii=False))

@@ -11,7 +11,7 @@
  * 答题走 POST /api/sessions/{sid}/questions/{qid}/answer（后端 QuestionBroker）。
  */
 import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref } from "vue";
-import { getJSON, postJSON, streamNDJSON } from "../api.js";
+import { getJSON, postJSON, streamEvents, streamNDJSON } from "../api.js";
 import { parseDiffs } from "./diff.js";
 import MarkdownText from "../components/MarkdownText.vue";
 
@@ -109,7 +109,7 @@ function renderEntries(entries) {
   for (const entry of entries || []) {
     const content = entry?.content;
     if (typeof content !== "string" || !content.trim() || content === "[之前的对话摘要]") continue;
-    if (entry.role === "user") out.push(blankUser(content));
+    if (entry.role === "user") out.push(blankUser(entry.display_text || content));
     else if (entry.role === "assistant" && !(entry.tool_calls || []).length) {
       // 思考过程在 to_history_item 里已随 assistant 条目落盘（reasoning_content），
       // 这里恢复成可折叠的思考块 —— 不恢复的话重开页面就只剩正文，DeepSeek 是能重看的。
@@ -270,59 +270,7 @@ async function reply(prompt) {
     await streamNDJSON(
       "/api/agent",
       { prompt, session_id: sessionId.value || null, canvas: props.canvas, media_policy: "plan_only", llm_model: aiModel.value || "" },
-      (ev) => {
-        if (ev.type === "message_update") {
-          if (bot.think && !bot.think.pinned) bot.think.expanded = false;
-          bot.text += ev.delta || "";
-          scrollEnd();
-        } else if (ev.type === "thinking_update") {
-          if (!bot.think.streaming) {
-            bot.think.streaming = true;
-            bot.think.startedAt = Date.now();
-          }
-          bot.think.expanded = true;
-          bot.think.text += ev.delta || "";
-          scrollEnd();
-        } else if (ev.type === "thinking_end") {
-          bot.think.streaming = false;
-          bot.think.seconds = bot.think.startedAt ? (Date.now() - bot.think.startedAt) / 1000 : 0;
-          if (bot.think.pinned !== true) bot.think.expanded = false;
-        } else if (ev.type === "tool_execution_start") {
-          bot.tools.push({ id: ev.tool_call_id, name: ev.tool, args: ev.args, status: "run", ms: 0, result: "", open: false });
-          if (bot.think && !bot.think.pinned) bot.think.expanded = true;
-          scrollEnd();
-        } else if (ev.type === "tool_execution_end") {
-          const card = bot.tools.find((t) => t.id === ev.tool_call_id) || bot.tools[bot.tools.length - 1];
-          if (card) {
-            card.status = ev.isError ? "err" : "done";
-            card.ms = ev.duration_ms || 0;
-            card.result = String(ev.result || "").slice(0, 260);
-          }
-          emit("canvas-changed");
-          scrollEnd();
-        } else if (ev.type === "input_required") {
-          // agent 暂停等用户：问题卡片挂到当前消息，光标停转（showCursor 判定）
-          bot.question = reactive({
-            id: ev.question_id, title: ev.title || "需要你的选择", question: ev.question || "",
-            options: ev.options || [], allow_custom: ev.allow_custom !== false,
-            status: "pending", custom: "", answer: "",
-          });
-          scrollEnd();
-        } else if (ev.type === "input_resolved") {
-          for (const m of messages) {
-            if (m.role === "bot" && m.question?.id === ev.question_id) {
-              m.question.status = "answered";
-              m.question.answer = ev.answer || "";
-            }
-          }
-          messages.push(blankUser(ev.answer || ""));
-          scrollEnd();
-        } else if (ev.type === "input_cancelled") {
-          for (const m of messages) {
-            if (m.role === "bot" && m.question?.id === ev.question_id) m.question.status = "cancelled";
-          }
-        }
-      },
+      (ev) => handleAgentEvent(ev, bot),
       (err) => {
         bot.error = err?.message || String(err);
       },
@@ -348,6 +296,91 @@ async function reply(prompt) {
   }
 }
 
+/* agent 运行事件的统一入口：正常聊天（/api/agent）与制作跟单（/api/events/stream）
+ * 的事件形状一致，共用同一套渲染逻辑。 */
+function handleAgentEvent(ev, bot) {
+  if (ev.type === "message_update") {
+    if (bot.think && !bot.think.pinned) bot.think.expanded = false;
+    bot.text += ev.delta || "";
+    scrollEnd();
+  } else if (ev.type === "thinking_update") {
+    if (!bot.think.streaming) {
+      bot.think.streaming = true;
+      bot.think.startedAt = Date.now();
+    }
+    bot.think.expanded = true;
+    bot.think.text += ev.delta || "";
+    scrollEnd();
+  } else if (ev.type === "thinking_end") {
+    bot.think.streaming = false;
+    bot.think.seconds = bot.think.startedAt ? (Date.now() - bot.think.startedAt) / 1000 : 0;
+    if (bot.think.pinned !== true) bot.think.expanded = false;
+  } else if (ev.type === "tool_execution_start") {
+    bot.tools.push({ id: ev.tool_call_id, name: ev.tool, args: ev.args, status: "run", ms: 0, result: "", open: false });
+    if (bot.think && !bot.think.pinned) bot.think.expanded = true;
+    scrollEnd();
+  } else if (ev.type === "tool_execution_end") {
+    const card = bot.tools.find((t) => t.id === ev.tool_call_id) || bot.tools[bot.tools.length - 1];
+    if (card) {
+      card.status = ev.isError ? "err" : "done";
+      card.ms = ev.duration_ms || 0;
+      card.result = String(ev.result || "").slice(0, 260);
+    }
+    emit("canvas-changed");
+    scrollEnd();
+  } else if (ev.type === "input_required") {
+    // agent 暂停等用户：问题卡片挂到当前消息，光标停转（showCursor 判定）
+    bot.question = reactive({
+      id: ev.question_id, title: ev.title || "需要你的选择", question: ev.question || "",
+      options: ev.options || [], allow_custom: ev.allow_custom !== false,
+      status: "pending", custom: "", answer: "",
+    });
+    scrollEnd();
+  } else if (ev.type === "input_resolved") {
+    for (const m of messages) {
+      if (m.role === "bot" && m.question?.id === ev.question_id) {
+        m.question.status = "answered";
+        m.question.answer = ev.answer || "";
+      }
+    }
+    messages.push(blankUser(ev.answer || ""));
+    scrollEnd();
+  } else if (ev.type === "input_cancelled") {
+    for (const m of messages) {
+      if (m.role === "bot" && m.question?.id === ev.question_id) m.question.status = "cancelled";
+    }
+  } else if (ev.type === "error") {
+    // 运行失败：把真实错误挂在当前消息上（跟单流里没有 message_update 兜底）
+    bot.error = ev.message || "生成过程出错";
+    scrollEnd();
+  }
+}
+
+/* ── 制作跟单：订阅 produce 运行的持久化事件流，在助手面板里实时看 Agent 拆镜 ──
+ * ScriptView 在拿到 job 的 run_id 后调用；事件流从头补放（晚挂不丢过程），
+ * done 事件收尾。期间面板处于 running 态，不再接收新消息。 */
+async function attachProduce(sid, runId, label = "开始制作") {
+  if (!sid || !runId || running.value) return;
+  sessionId.value = sid;
+  messages.push(blankUser(label));
+  const bot = blankBot();
+  messages.push(bot);
+  running.value = true;
+  controller = new AbortController();
+  try {
+    await streamEvents(sid, runId, (ev) => handleAgentEvent(ev, bot), controller.signal);
+  } catch (err) {
+    bot.error = err?.message || String(err);
+  } finally {
+    const { plain, diffs } = parseDiffs(bot.text);
+    bot.text = plain;
+    bot.diffs = diffs;
+    bot.streaming = false;
+    running.value = false;
+    controller = null;
+    scrollEnd();
+  }
+}
 async function cancel() {
   controller?.abort();
   if (sessionId.value) postJSON("/api/agent/cancel", { session_id: sessionId.value }).catch(() => {});
@@ -398,7 +431,7 @@ function onThinkToggle(bot) {
 }
 const showCursor = (m) => m.streaming && !(m.question && m.question.status === "pending");
 
-defineExpose({ send });
+defineExpose({ send, attachProduce });
 </script>
 
 <template>

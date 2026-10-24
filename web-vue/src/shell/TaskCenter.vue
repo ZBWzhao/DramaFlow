@@ -6,37 +6,48 @@
  * 兜底补查一次（只查已在跑的 id，不发起新任务），其余只做聚合展示：运行中在上，已结束置灰在下。
  */
 import { computed, onBeforeUnmount, onMounted, ref } from "vue";
-import { studio, sweepJobs } from "../studio/studioStore.js";
+import { cancelJob, studio, sweepJobs, toast } from "../studio/studioStore.js";
 
 const open = ref(false);
 const rootEl = ref(null);
 
-const KIND_LABEL = { video: "视频生成", image: "图片生成", keyframe: "首帧生成", audio: "音频生成" };
+const KIND_LABEL = { video: "视频生成", image: "图片生成", keyframe: "首帧生成", audio: "音频生成", batch_generate: "批量出片" };
 const ACTIVE = new Set(["queued", "running"]);
 
 const jobs = computed(() =>
   Object.entries(studio.jobs)
+    // 批量出片的子任务（sjob_）已归并在批量行里，单独显示只会刷屏
+    .filter(([, job]) => job && !job.parent)
     .map(([id, job]) => ({
       id,
       label: KIND_LABEL[job?.kind] || job?.kind || "任务",
       status: job?.status || "unknown",
       active: ACTIVE.has(job?.status),
       progress: typeof job?.progress === "number" ? Math.round(job.progress <= 1 ? job.progress * 100 : job.progress) : null,
+      // 批量出片的进度是对象（done/ok/failed/percent），走专用的行内展示
+      batch: job?.kind === "batch_generate" && job?.progress && typeof job.progress === "object" ? job.progress : null,
       detail: job?.error || (job?.result?.warnings?.length ? `${job.result.warnings.length} 条告警` : ""),
     }))
     .sort((a, b) => Number(b.active) - Number(a.active)),
 );
 
+function stopBatch(id) {
+  cancelJob(id).catch((err) => toast(err?.message || String(err)));
+}
+
 /* Agent 制作是一等任务：单独成行，带耗时 */
+const PRODUCE_STATUS_LABEL = { succeeded: "✓", limited: "⏸ 未完成", failed: "✗ 失败", cancelled: "已取消", timeout: "超时" };
 const produce = computed(() => {
   const p = studio.produceJob;
   if (!p) return null;
   return {
     label: `Agent 制作 · 第 ${p.episode ?? "?"} 集`,
     status: p.status,
+    statusLabel: PRODUCE_STATUS_LABEL[p.status] || p.status,
     active: ACTIVE.has(p.status),
     elapsed: p.elapsed ? `${p.elapsed}s` : "",
     detail: p.error || "",
+    progress: p.progress || null,
   };
 });
 
@@ -73,7 +84,14 @@ onBeforeUnmount(() => {
         <div class="r1">
           <span class="nm">{{ produce.label }}</span>
           <span v-if="produce.active" class="pc num">{{ produce.elapsed }}</span>
-          <span v-else class="pc">{{ produce.status === "succeeded" ? "✓" : produce.status }}</span>
+          <span v-else class="pc">{{ produce.statusLabel }}</span>
+        </div>
+        <div v-if="produce.progress" class="r1 dim-row">
+          <span class="pc num">片段 {{ produce.progress.prompts }}/{{ produce.progress.total }}</span>
+          <span v-if="produce.active" class="pc num">{{ produce.progress.percent }}%</span>
+        </div>
+        <div v-if="produce.active && produce.progress?.total" class="bar">
+          <i :style="{ width: `${produce.progress.percent}%` }"></i>
         </div>
         <div v-if="produce.detail" class="d">{{ produce.detail }}</div>
       </div>
@@ -84,7 +102,15 @@ onBeforeUnmount(() => {
           <span v-if="j.active" class="pc num">{{ j.progress != null ? `${j.progress}%` : j.status }}</span>
           <span v-else class="pc">{{ j.status === "succeeded" ? "✓" : j.status }}</span>
         </div>
-        <div v-if="j.progress != null && j.active" class="bar"><i :style="{ width: `${j.progress}%` }"></i></div>
+        <template v-if="j.batch">
+          <div class="r1 dim-row">
+            <span class="pc num">片段 {{ j.batch.ok }}✓ {{ j.batch.failed }}✗ · {{ j.batch.done }}/{{ j.batch.total }}</span>
+            <span class="grow"></span>
+            <button v-if="j.active" class="cx" type="button" @click="stopBatch(j.id)">取消</button>
+          </div>
+          <div v-if="j.active" class="bar"><i :style="{ width: `${j.batch.percent}%` }"></i></div>
+        </template>
+        <div v-else-if="j.progress != null && j.active" class="bar"><i :style="{ width: `${j.progress}%` }"></i></div>
         <div v-if="j.detail" class="d">{{ j.detail }}</div>
       </div>
 
@@ -117,5 +143,11 @@ onBeforeUnmount(() => {
 .tj .bar { margin-top: 7px; height: 2px; background: var(--card-3); }
 .tj .bar i { display: block; height: 100%; background: var(--ok); }
 .tj.done .nm { color: var(--text-3); }
+.tj .dim-row { margin-top: 4px; }
+.tj .bar { margin-top: 7px; height: 2px; background: var(--card-3); }
+.tj .bar i { display: block; height: 100%; background: var(--ok); transition: width .6s ease; }
+.tj .grow { flex: 1; }
+.tj .cx { color: var(--warn); background: none; border: 1px solid var(--line-2); border-radius: var(--r-1); padding: 2px 10px; font-size: var(--fs-11); cursor: pointer; }
+.tj .cx:hover { border-color: var(--warn); }
 .empty { padding: 14px 0 4px; color: var(--text-3); font-size: var(--fs-12); }
 </style>

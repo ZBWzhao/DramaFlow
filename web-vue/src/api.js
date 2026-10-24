@@ -153,6 +153,41 @@ export async function streamNDJSON(path, body, onEvent, onError, signal, options
   }
 }
 
+/** 订阅一次已持久化的运行事件流（GET /api/events/stream）。
+ * 服务端先补发该 run 的历史事件再无缝切到实时队列；收到 done/team_done 或连接结束即返回。
+ * AI 助手的「制作跟单」用它看 produce 的拆镜过程——事件形状与 /api/agent 完全一致。
+ */
+export async function streamEvents(sessionId, runId, onEvent, signal) {
+  const path = `/api/events/stream?${new URLSearchParams({
+    session_id: sessionId || "",
+    run_id: runId || "",
+    last_event_id: "0-0", // 从头补放：attach 晚了也不会丢前面的过程
+  })}`;
+  const res = await fetch(BASE + path, { signal });
+  if (!res.ok) throw await toError(res);
+  const reader = res.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+  const accept = (line) => {
+    if (!line.trim()) return;
+    try {
+      onEvent(JSON.parse(line));
+    } catch {
+      console.warn("坏事件（已跳过）", line.slice(0, 120));
+    }
+  };
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+    const lines = buffer.split("\n");
+    buffer = lines.pop() ?? "";
+    for (const line of lines) accept(line);
+  }
+  buffer += decoder.decode();
+  if (buffer.trim()) accept(buffer);
+}
+
 /** 上传原始文件；文件名/类型放在查询与 Content-Type，避免额外 multipart 依赖。 */
 export async function postFile(path, file) {
   const res = await fetch(BASE + path, {
