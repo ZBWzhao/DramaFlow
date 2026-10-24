@@ -1,0 +1,151 @@
+{
+  "source": "最后一单",
+  "dynasty": "当代",
+  "scenes": [
+    {
+      "id": "S01",
+      "name": "翠湖一号地下车库",
+      "primary": true,
+      "summary": "设计意图：一个把阔绰压进灯光明暗里的高端地库——顶灯惨白、车位线笔直，是富人秩序的客厅；柱影里的折叠电动车像这个秩序外的一枚钉子。围堵、翻车厢、搜出腕表三次反转都在这里发生，空间要冷、要空、要让人无处可躲。",
+      "anchors": [
+        { "name": "柱面凸面镜", "desc": "坡道转角立柱上的一面圆形凸面镜，镜面蒙尘，映出下行坡道与闸机" },
+        { "name": "长条荧光灯带", "desc": "天花板两排长条荧光灯管顺行车方向排列，其中一支接触不良、光带发暗" },
+        { "name": "绿色安全出口灯牌", "desc": "进出口墙面上的绿色安全出口灯牌与道闸横杆，是全场唯一的饱和色光源" },
+        { "name": "车位编号柱", "desc": "米灰色立柱上喷涂的三位数车位编号，黄色车位线与导引箭头有轮胎磨痕" }
+      ],
+      "lighting": [
+        { "state": "顶灯惨白", "prompt": "underground residential parking garage at night lit by two long rows of white fluorescent ceiling tubes, cold even light on glossy epoxy floor with reflected light strips, one dying tube flickering dim, hard short shadows under parked cars, empty ramp receding toward the barrier gate" },
+        { "state": "警灯扫光", "prompt": "underground residential parking garage at night, cold fluorescent base light washed by slow sweeping pulses of red and blue police light rolling across concrete pillars and the glossy epoxy floor, alternating color wash, deep contrast, long shadows swinging with each sweep" }
+      ],
+      "image": {
+        "prompt": "Empty scene, no people: an underground parking garage of an upscale Chinese residential compound at night, viewed from the entry ramp looking in. Two long rows of white fluorescent ceiling tubes recede toward the barrier gate and a green emergency-exit lightbox; a round convex traffic mirror dusted with grime is bolted to the corner pillar; beige-grey concrete pillars carry sprayed three-digit parking numbers, yellow parking-space lines and directional arrows worn dull by tyres; one fluorescent tube glows dim and failing. Well-kept, actively maintained materials: sound lacquer with an even sheen, swept concrete, polished metal fittings, tight joinery, no peeling paint and no water staining; wear confined to the traffic a space like this really takes — the ramp threshold, pillar corners at bumper height, the arrow markings. Atmospheric depth with haze or volumetric light where the space allows. Contemporary present-day China, cold blue-grey palette with one saturated green exit glow.",
+        "negativePrompt": "people, human figures, characters, crowds, silhouettes of people, vehicles in motion, oversaturated colours, sterile showroom cleanliness, warped perspective, melted geometry, floating objects, text, watermark, signature",
+        "sheet": "Environment model sheet on ONE 16:9 landscape canvas divided by thin hairline rules into an L-shaped layout: a MASTER VIEW in the upper-left region occupying about 72% of the canvas width and 70% of its height, plus a right column of two detail panels and a bottom row of three detail panels. The master view is the standard camera position of this underground parking garage at night under cold white fluorescent light: long receding tube rows, the dusty convex mirror on the corner pillar, the green emergency-exit lightbox and barrier gate, numbered pillars and worn yellow parking lines. Every detail panel is a close-up crop enlarged from that master view — the convex mirror, the failing tube, the green exit lightbox with the barrier, the pillar number and tyre-worn line — nothing invented that is not present in the master view. THE SPACE MUST BE IDENTICAL ACROSS ALL PANELS. Absolutely no people anywhere in any panel. Well-kept, actively maintained materials: sound lacquer with an even sheen, swept concrete, polished metal fittings, tight joinery, no peeling paint and no water staining; wear confined to the traffic a space like this really takes — the ramp threshold, pillar corners at bumper height, the arrow markings. Atmospheric depth with haze or volumetric light where the space allows. Contemporary present-day China.",
+        "tags": ["environment sheet", "underground parking garage", "contemporary china", "fluorescent night light", "cold blue-grey palette", "well-kept materials", "cinematic"]
+      },
+      "usage": { "episodes": [1, 3], "beats": ["立规矩", "打脸"] }
+    },
+    {
+      "id": "S02",
+      "name": "唐启山轿车车厢",
+      "primary": true,
+      "summary": "设计意图：一台缓慢移动的密闭包厢——后排是醉酒富商的临时王座，前排在后视镜里交换眼神。空间窄小逼人，把三个人的距离压到躲不开；炫耀、施压与偷表的伏笔都发生在这几步宽里。",
+      "anchors": [
+        { "name": "菱格缝线座椅", "desc": "后排深棕菱格缝线真皮座椅，中央扶手翻下，缝线在路灯下有高光" },
+        { "name": "平安符挂穗", "desc": "车内后视镜下悬一枚红色编织平安符，随车身摆动" },
+        { "name": "冷蓝氛围灯带", "desc": "仪表台下方一条冷蓝色氛围灯带，把前排脚照出冷光" },
+        { "name": "椅背大衣", "desc": "副驾驶椅背上搭着一件搭到椅背的大衣，袖子垂进后排（推断为常搭之物）" }
+      ],
+      "lighting": [
+        { "state": "夜路路灯流动", "prompt": "luxury sedan interior at night seen from the dashboard toward the back seat, warm pools of streetlight sweeping across dark diamond-stitched leather seats every few seconds, deep shadow between the sweeps, a cold blue ambient light strip glowing under the dashboard, a small red woven charm swaying from the rearview mirror" }
+      ],
+      "image": {
+        "prompt": "Empty scene, no people: interior of a modern luxury sedan at night, shot from the dashboard toward the rear bench. Dark brown diamond-stitched leather rear seats with the centre armrest folded down, a charcoal overcoat laid across the front passenger headrest with one sleeve hanging back, a small red woven charm dangling under the interior mirror, a cold blue ambient light strip glowing along the dashboard base. Well-kept, actively maintained materials: sound lacquer with an even sheen, tight joinery, polished metal fittings, no peeling trim; wear confined to the traffic a car like this really takes — the door-pull, the seat edge, the belt buckle. Atmospheric depth with haze or volumetric light where the space allows. Contemporary present-day China, warm streetlight sweeps over a cool leather-and-shadow palette.",
+        "negativePrompt": "people, human figures, characters, crowds, silhouettes of people, oversaturated colours, sterile showroom cleanliness, warped perspective, melted geometry, floating objects, text, watermark, signature",
+        "sheet": "Environment model sheet on ONE 16:9 landscape canvas divided by thin hairline rules into an L-shaped layout: a MASTER VIEW in the upper-left region occupying about 72% of the canvas width and 70% of its height, plus a right column of two detail panels and a bottom row of three detail panels. The master view is the standard camera position inside this luxury sedan at night: diamond-stitched rear bench with the armrest down, the overcoat on the passenger headrest, the red woven charm under the mirror, the blue ambient strip. Every detail panel is a close-up crop enlarged from that master view — the diamond stitching, the charm and mirror, the coat sleeve, the ambient strip and dashboard base — nothing invented that is not present in the master view. THE SPACE MUST BE IDENTICAL ACROSS ALL PANELS. Absolutely no people anywhere in any panel. Well-kept, actively maintained materials: sound lacquer with an even sheen, tight joinery, polished metal fittings, no peeling trim; wear confined to the traffic a car like this really takes — the door-pull, the seat edge, the belt buckle. Atmospheric depth with haze or volumetric light where the space allows. Contemporary present-day China.",
+        "tags": ["environment sheet", "luxury car interior", "contemporary china", "passing streetlight", "warm-cool contrast", "cinematic"]
+      },
+      "usage": { "episodes": [1], "beats": ["立规矩"] }
+    },
+    {
+      "id": "S03",
+      "name": "物业监控室",
+      "primary": false,
+      "summary": "设计意图：一间被屏幕照蓝的小屋，物业秩序的心脏。机柜指示灯规律地闪，满墙画面一半黑着；桌上的登记簿和暖光台灯是屋里唯一的人味。这里的戏全是面对面，冷光把每个人的脸都照成证据。",
+      "anchors": [
+        { "name": "监视器墙", "desc": "一面 3×3 监视器墙，多数画面黑屏，两三格亮着车库与大堂画面" },
+        { "name": "机柜指示灯", "desc": "靠墙金属机柜上一排绿色指示灯规律闪烁，线缆扎带垂在侧面" },
+        { "name": "登记簿与台灯", "desc": "桌面摊开一本翻毛边的登记簿压着一支笔，旁边一盏暖光小台灯是屋里唯一暖色" },
+        { "name": "制度公示牌", "desc": "门后挂一块白底制度公示牌，右下角翘起一个角" }
+      ],
+      "lighting": [
+        { "state": "屏幕蓝光", "prompt": "small property monitoring room at night lit only by the monitor wall, cold blue screen light washing a desk and metal equipment racks, green indicator LEDs blinking in ranks, one warm desk lamp as the single warm accent over an open ledger, deep blue shadows in the corners" },
+        { "state": "日光灯全亮", "prompt": "small property monitoring room with ceiling fluorescent tubes fully switched on, flat even white light, the monitor wall dimmed to grey-blue, every surface of desk, ledger and racks plainly readable, no shadow drama" }
+      ],
+      "image": {
+        "prompt": "Empty scene, no people: a small property-management monitoring room at night. A three-by-three monitor wall with most screens dark and two or three cells showing a parking garage and a lobby feed; a metal equipment rack with ranks of green indicator LEDs and dangling cable ties; a desk with an open dog-eared registration ledger, a pen on top and one small warm desk lamp; a white notice board with printed rules hangs behind the door, one corner peeling. Weathered, lived-in materials: chipped paint, water stains, patina on metal, worn wood grain, dust in corners and light shafts; fabric and paper props show creases and age; nothing looks factory-new. Atmospheric depth with haze or volumetric light where the space allows. Contemporary present-day China, cold blue palette with one warm lamp accent.",
+        "negativePrompt": "people, human figures, characters, crowds, silhouettes of people, oversaturated colours, sterile showroom cleanliness, warped perspective, melted geometry, floating objects, text, watermark, signature",
+        "sheet": "Environment model sheet on ONE 16:9 landscape canvas divided by thin hairline rules into an L-shaped layout: a MASTER VIEW in the upper-left region occupying about 72% of the canvas width and 70% of its height, plus a right column of two detail panels and a bottom row of three detail panels. The master view is the standard camera position of this monitoring room at night under blue screen light: the three-by-three monitor wall, the LED rack, the desk with ledger and warm lamp, the notice board behind the door. Every detail panel is a close-up crop enlarged from that master view — the lit monitor cells, the green LED rank and cable ties, the ledger and lamp, the peeling notice board corner — nothing invented that is not present in the master view. THE SPACE MUST BE IDENTICAL ACROSS ALL PANELS. Absolutely no people anywhere in any panel. Weathered, lived-in materials: chipped paint, water stains, patina on metal, worn wood grain, dust in corners and light shafts; fabric and paper props show creases and age; nothing looks factory-new. Atmospheric depth with haze or volumetric light where the space allows. Contemporary present-day China.",
+        "tags": ["environment sheet", "monitoring room", "contemporary china", "screen glow", "cold blue palette", "cinematic"]
+      },
+      "usage": { "episodes": [2, 3], "beats": ["反转", "打脸"] }
+    }
+  ],
+  "props": [
+    {
+      "id": "P01",
+      "name": "限量款机械腕表",
+      "scale": "手持级",
+      "summary": "戏剧功能：全案物证核心——它的每一次位移都推动一次反转：手腕上的炫耀、车库里的失踪、缠着长发出现在别人的车把上。",
+      "anchors": [
+        { "name": "放射纹表盘", "desc": "蓝黑色放射太阳纹表盘，棒形时标，六点位小秒针盘" },
+        { "name": "钢链佩戴亮痕", "desc": "钢链表节边缘细密划痕与贴腕面的佩戴亮痕" },
+        { "name": "浮雕字表扣", "desc": "表扣外侧一副无名厂式的浮雕字样，磨得发乌" },
+        { "name": "防滑齿表冠", "desc": "表侧三点位旋入式表冠，防滑齿纹里嵌着灰" }
+      ],
+      "states": [
+        { "state": "表盘朝上静置", "prompt": "a luxury mechanical wristwatch with a blue-black sunburst dial, baton indices and a small seconds subdial at six, steel bracelet laid open and flat with fine hairline scratches and worn bright edges on the link faces, handheld scale, single object isolated on a pure white background, studio product light, no people, no hands" },
+        { "state": "缠发状态", "prompt": "a luxury mechanical wristwatch with a blue-black sunburst dial, its steel bracelet rolled tight and knotted around a few strands of long black hair, handheld scale, single object isolated on a pure white background, studio product light, no people, no hands" }
+      ],
+      "relatedScenes": ["S02", "S01", "S03"],
+      "carriedBy": "唐启山佩戴；失踪后藏进后备箱折叠电动车的缠把布条",
+      "image": {
+        "prompt": "A luxury mechanical wristwatch at handheld scale, three-quarter hero angle: blue-black sunburst dial with baton indices and a small seconds subdial at six o'clock, polished steel case, bracelet with fine hairline scratches and worn bright link edges, a nameless embossed logo on the clough worn dark, knurled screw-down crown at three with grey dust in the flutes, handheld scale reference kept true to a real wristwatch. Isolated on a pure white background, cut-out ready, studio product lighting with one soft key, no people, no hands, nothing else in frame. Well-kept, actively maintained materials: sound lacquer with an even sheen, polished metal fittings, tight joinery, no peeling and no staining; wear confined to the traffic an object like this really takes — the clasp, the bracelet edges, the crown flutes.",
+        "negativePrompt": "people, human figures, characters, crowds, silhouettes of people, hands, fingers, wrists, oversized or furniture-sized exaggeration, oversaturated colours, warped perspective, melted geometry, floating objects, text, watermark, signature",
+        "sheet": "Prop model sheet on ONE 16:9 landscape canvas at handheld scale, every panel on a pure white background, cut-out ready, divided by thin hairline rules into an L-shaped layout: a MASTER VIEW in the upper-left region occupying about 72% of the canvas width and 70% of its height showing the watch three-quarter hero angle (blue-black sunburst dial, steel bracelet with worn bright edges, knurled crown), plus a right column of two detail panels — the embossed clasp, the crown flutes with grey dust — and a bottom row of three panels: the dial face-on, the bracelet folded state knotted with strands of long black hair, and a flat side orthographic view of the case profile. Nothing invented that is not present in the master view. PROPORTIONS ARE CRITICAL: true handheld scale of a real wristwatch, never enlarged toward furniture size. Absolutely no people and no hands anywhere in any panel. Well-kept, actively maintained materials: sound lacquer with an even sheen, polished metal fittings, tight joinery, no peeling and no staining; wear confined to the clasp, the bracelet edges and the crown flutes.",
+        "tags": ["prop sheet", "luxury mechanical watch", "steel bracelet", "sunburst dial", "white background", "product lighting"]
+      },
+      "usage": { "episodes": [1, 2, 3], "beats": ["反转", "打脸"] }
+    },
+    {
+      "id": "P02",
+      "name": "程野的支架旧手机",
+      "scale": "手持级",
+      "summary": "戏剧功能：男主自保习惯的化身——从接单按下录像到当众放片段，它是唯一全程在场的证人，也是立规矩与翻案两场戏的支点。",
+      "anchors": [
+        { "name": "旧裂纹屏", "desc": "屏幕右上角一道旧裂纹，裂痕上压着一个贴膜气泡" },
+        { "name": "蛇纹磨白壳", "desc": "浅色蛇纹保护壳，四角磨白露出底壳颜色" },
+        { "name": "残胶圆痕", "desc": "背面左下角一枚撕掉贴纸后的圆形残胶" },
+        { "name": "老化支架夹", "desc": "壳背的弹簧车载支架夹口，橡胶垫老化开裂翘边" }
+      ],
+      "states": [
+        { "state": "录像中", "prompt": "an old smartphone in a worn pale snakeskin-texture case, screen cracked at the top right corner under a bubbled protector, screen lit showing a plain camera recording interface with a red dot and a running timer, a sprung car-mount clamp with cracked ageing rubber on the back, handheld scale, single object isolated on a pure white background, no people, no hands" },
+        { "state": "熄屏静置", "prompt": "an old smartphone in a worn pale snakeskin-texture case lying face down, back showing a round adhesive ghost where a sticker was peeled off, corners worn to the pale base colour, a sprung car-mount clamp with cracked rubber on the back, handheld scale, single object isolated on a pure white background, no people, no hands" }
+      ],
+      "relatedScenes": ["S02", "S01", "S03"],
+      "carriedBy": "程野随身或卡在方向盘后的支架上",
+      "image": {
+        "prompt": "An old smartphone at handheld scale, three-quarter hero angle standing in its sprung car-mount clamp: pale snakeskin-texture case worn white at the corners, screen with an old crack at the top right under a bubbled protector, a round adhesive ghost on the back where a sticker was peeled, the clamp's rubber pads cracked with age, handheld scale reference kept true to a real phone. Isolated on a pure white background, cut-out ready, studio product lighting with one soft key, no people, no hands, nothing else in frame. Weathered, lived-in materials: chipped and scuffed finish, patina on the clamp metal, worn texture grain, dust in the seam lines; nothing looks factory-new.",
+        "negativePrompt": "people, human figures, characters, crowds, silhouettes of people, hands, fingers, wrists, oversized or furniture-sized exaggeration, oversaturated colours, warped perspective, melted geometry, floating objects, text, watermark, signature",
+        "sheet": "Prop model sheet on ONE 16:9 landscape canvas at handheld scale, every panel on a pure white background, cut-out ready, divided by thin hairline rules into an L-shaped layout: a MASTER VIEW in the upper-left region occupying about 72% of the canvas width and 70% of its height showing the phone three-quarter hero angle in its car-mount clamp with the lit recording screen, plus a right column of two detail panels — the cracked screen corner with its bubbled protector, the snakeskin case corner worn pale — and a bottom row of three panels: the back with the round adhesive ghost, the sprung clamp with cracked rubber pads, and a flat side orthographic view of the phone profile. Nothing invented that is not present in the master view. PROPORTIONS ARE CRITICAL: true handheld scale of a real phone, never enlarged toward furniture size. Absolutely no people and no hands anywhere in any panel. Weathered, lived-in materials: chipped and scuffed finish, patina on the clamp metal, worn texture grain, dust in the seam lines; nothing looks factory-new.",
+        "tags": ["prop sheet", "old smartphone", "worn phone case", "car mount clamp", "white background", "product lighting"]
+      },
+      "usage": { "episodes": [1, 2, 3], "beats": ["立规矩", "反转", "打脸"] }
+    },
+    {
+      "id": "P03",
+      "name": "白恬的行李箱",
+      "scale": "手持级",
+      "summary": "戏剧功能：压垮白恬的第二件物证——登记簿上放行李的谎言与偷表后连夜出走的决意都压在它身上，后备箱搜查与崩溃戏的实物焦点。",
+      "anchors": [
+        { "name": "三位密码锁", "desc": "侧边三位密码锁，其中一个转轮停在 7，锁面有指甲刮痕" },
+        { "name": "磨亮拉杆把手", "desc": "拉杆把手的黑色胶套被手心磨出一圈亮面" },
+        { "name": "托运贴纸残角", "desc": "箱面一角残留半张撕掉的长条托运贴纸，胶边发黄" },
+        { "name": "磨偏静音轮", "desc": "双排静音轮中一只轮面磨偏发亮，其余三只还新" }
+      ],
+      "states": [
+        { "state": "直立拔杆", "prompt": "a charcoal hard-shell rolling suitcase standing upright with the telescopic handle extended, side three-digit combination lock with one dial resting on seven and fingernail scratches on the lock face, half a torn long shipping sticker left on the top face with yellowed glue edges, handheld scale, single object isolated on a pure white background, studio product light, no people, no hands" },
+        { "state": "平放合盖", "prompt": "a charcoal hard-shell rolling suitcase lying flat and closed, one of its twin quiet wheels worn lopsided and shiny while the other three stay new, the telescopic handle retracted, a scuffed corner guard, handheld scale, single object isolated on a pure white background, studio product light, no people, no hands" }
+      ],
+      "relatedScenes": ["S01"],
+      "carriedBy": "白恬",
+      "image": {
+        "prompt": "A charcoal hard-shell rolling suitcase at handheld scale, three-quarter hero angle standing upright with the telescopic handle extended: side three-digit combination lock with one dial resting on seven and fingernail scratches on its face, half a torn long shipping sticker with yellowed glue edges on the top face, one twin wheel worn lopsided and shiny, corner guards scuffed pale, handheld scale reference kept true to a real carry-on case. Isolated on a pure white background, cut-out ready, studio product lighting with one soft key, no people, no hands, nothing else in frame. Weathered, lived-in materials: scuffed shell, dulled zipper teeth, patina on the lock metal, worn texture at the handle; nothing looks factory-new.",
+        "negativePrompt": "people, human figures, characters, crowds, silhouettes of people, hands, fingers, wrists, oversized or furniture-sized exaggeration, oversaturated colours, warped perspective, melted geometry, floating objects, text, watermark, signature",
+        "sheet": "Prop model sheet on ONE 16:9 landscape canvas at handheld scale, every panel on a pure white background, cut-out ready, divided by thin hairline rules into an L-shaped layout: a MASTER VIEW in the upper-left region occupying about 72% of the canvas width and 70% of its height showing the suitcase three-quarter hero angle upright with the handle extended, plus a right column of two detail panels — the three-digit lock with one dial on seven, the torn shipping sticker with yellowed glue — and a bottom row of three panels: the lopsided shiny wheel against its new twin, the worn bright handle grip, and a flat side orthographic view of the case profile. Nothing invented that is not present in the master view. PROPORTIONS ARE CRITICAL: true handheld scale of a real carry-on case, never enlarged toward furniture size. Absolutely no people and no hands anywhere in any panel. Weathered, lived-in materials: scuffed shell, dulled zipper teeth, patina on the lock metal, worn texture at the handle; nothing looks factory-new.",
+        "tags": ["prop sheet", "rolling suitcase", "combination lock", "worn wheels", "white background", "product lighting"]
+      },
+      "usage": { "episodes": [3], "beats": ["打脸"] }
+    }
+  ]
+}

@@ -1,0 +1,2124 @@
+{
+  "source": "最后一单",
+  "aspectRatio": "9:16",
+  "promptLang": "en",
+  "params": {
+    "maxSegmentSeconds": 15,
+    "minCutSeconds": 2,
+    "maxCutSeconds": 5,
+    "maxOnScreen": 3,
+    "tolerance": 0.15
+  },
+  "episodes": [
+    {
+      "ep": 1,
+      "segments": [
+        {
+          "id": "E01-01",
+          "sceneIndex": 1,
+          "cuts": [
+            {
+              "beats": [
+                1,
+                1
+              ],
+              "seconds": 2.2,
+              "size": "medium",
+              "camera": "Tracking Shot",
+              "characters": [
+                "C01"
+              ],
+              "frame": "中景，夜路行驶的轿车车厢，程野坐在驾驶座把旧手机卡上方向盘后的支架，拇指按下录像键，屏幕亮起，暖黄路灯一道道扫过他的侧脸",
+              "shot": "镜头从副驾一侧平稳跟随，年轻代驾司机把一部旧手机卡进方向盘后的车载支架，抬起拇指按下录像键，屏幕亮起红点，他扶正手机角度，目光回到前方路面",
+              "lens": "35mm 广角，中景深",
+              "cameraPosition": "代驾司机 + 前侧 45 度平视",
+              "composition": "三分法",
+              "eyeline": "前方路面",
+              "focus": "锁定司机的手与亮起的手机屏",
+              "stability": "slight-shake",
+              "props": [
+                "P02"
+              ]
+            },
+            {
+              "beats": [
+                2,
+                2
+              ],
+              "seconds": 3.4,
+              "size": "close",
+              "camera": "Static Shot",
+              "characters": [
+                "C02"
+              ],
+              "frame": "特写，后排座位上唐启山瘫坐着敲椅背，领带松垮，酒气熏天的脸上满是不耐烦，窗外暖黄路灯在他脸上流动",
+              "shot": "固定镜头近看后排，一身皱西装的醉汉抬手拍打椅背，下颌松弛，眼皮半垂，说话间头往后一靠",
+              "lens": "85mm 长焦，浅景深",
+              "cameraPosition": "醉酒富商 + 平视正面",
+              "composition": "三分法",
+              "eyeline": "对方面部",
+              "focus": "锁定醉汉面部",
+              "stability": "stable"
+            },
+            {
+              "beats": [
+                3,
+                4
+              ],
+              "seconds": 2.1,
+              "size": "medium",
+              "camera": "Push In",
+              "characters": [
+                "C01",
+                "C02"
+              ],
+              "frame": "中景，车内后视镜里映出程野平静的眼睛和后排唐启山晃动的身影，他伸手扶正支架，指节很稳",
+              "shot": "镜头缓推向车内后视镜，镜中年轻司机目光平静地扫了一眼后排，伸手扶正支架角度，随即看回前方路面",
+              "lens": "50mm 标准，浅景深",
+              "cameraPosition": "司机 + 过肩平视",
+              "composition": "中心构图",
+              "eyeline": "后视镜中的后排",
+              "focus": "锁定后视镜镜面",
+              "stability": "stable"
+            }
+          ],
+          "h3Prompt": "How the reference pictures align with the target video — Picture 1 (from Shot 1) aligns with the 0.00-second mark of the target video; Picture 2 (from Shot 2) aligns with the 2.20-second mark of the target video; Picture 3 (from Shot 3) aligns with the 5.60-second mark of the target video.\n\nintegrated_multimodal_description:\n[Shot 1] The cold open rides with <Picture 1>: inside a moving sedan at night, the young night-shift driver slots a battered phone into the mount behind the wheel and taps the record button, its screen glowing as warm streetlight sweeps his face; a low tracking shot glides along from the passenger side.\n[Shot 2] At 00:02.200, The camera holds a static shot on <Picture 2>: slumped against the rear seat, the heavyset drunken rich man in his fifties raps the seatback with a flat hand, jowls loose and eyelids heavy, letting his head fall back as warm streetlight rolls across his face; he mutters through a thick, slurred baritone (S1): <d>[Chinese] 年轻人，开稳点，这车比你命贵。</d>\n[Shot 3] At 00:05.600, A slow push in moves toward <Picture 3>: framed in the rearview mirror, the driver's calm eyes flick once at the swaying figure behind, he steadies the phone mount with one hand, then answers evenly, his voice level and unbothered (S2): <d>[Chinese] 唐总，系好安全带。</d>\n\noverall_soundscape: Engine idling low, tires rolling over pavement seams, warm streetlights sweeping through the windows one by one, a drunk hiccup and the rustle of fabric folded into the wind noise.\n\nnon_diegetic_music: A very quiet electronic drone tucked beneath the wind noise.",
+          "blocking": "竖屏前低后高：程野在画面下方驾驶座，唐启山在画面上方后排正中，白恬在右侧副驾；后视镜是前后排的视线连线，车程约两个路灯路段。",
+          "soundscape": "车厢里发动机低鸣，轮胎碾过路面接缝，暖黄路灯一盏一盏扫进车窗又滑走，酒嗝与布料摩擦的窸窣混在风噪里",
+          "music": "极低音量的电子低音持续音，藏在风噪之下"
+        },
+        {
+          "id": "E01-02",
+          "sceneIndex": 1,
+          "cuts": [
+            {
+              "beats": [
+                5,
+                5
+              ],
+              "seconds": 2.2,
+              "size": "close",
+              "camera": "Push In",
+              "characters": [
+                "C02"
+              ],
+              "frame": "特写，唐启山抬起手腕，蓝黑表盘的机械腕表在流动路灯下一亮一亮，他朝前排凑近，表链晃出细碎反光",
+              "shot": "镜头缓推向那只抬起的手腕，蓝黑放射纹表盘随路灯一亮一亮，醉汉朝前排探身，表链晃出细碎反光",
+              "lens": "85mm 长焦，极浅景深",
+              "cameraPosition": "腕表 + 平视微俯",
+              "composition": "中心构图",
+              "eyeline": "前排方向",
+              "focus": "锁定腕表表盘",
+              "stability": "stable",
+              "props": [
+                "P01"
+              ]
+            },
+            {
+              "beats": [
+                6,
+                6
+              ],
+              "seconds": 4.5,
+              "size": "medium",
+              "camera": "Static Shot",
+              "characters": [
+                "C02"
+              ],
+              "frame": "中景，唐启山半睁着眼冲前排晃手腕炫耀，表盘高光划过车顶，身后车窗夜色流动",
+              "shot": "固定镜头，醉汉把腕表举到前排视线里晃了晃，下巴一扬，嘴角的得意压不住，晃完把手腕收回膝上",
+              "lens": "35mm 广角，中景深",
+              "cameraPosition": "醉酒富商 + 平视正面",
+              "composition": "三分法",
+              "eyeline": "前排乘客",
+              "focus": "锁定醉汉与腕表",
+              "stability": "stable",
+              "props": [
+                "P01"
+              ]
+            },
+            {
+              "beats": [
+                7,
+                7
+              ],
+              "seconds": 2.5,
+              "size": "close",
+              "camera": "Static Shot",
+              "characters": [
+                "C03"
+              ],
+              "frame": "特写，副驾上白恬侧过半张脸，眼睛盯着前方，妆很淡，路灯暖光掠过她的下颌线",
+              "shot": "固定镜头近看副驾，年轻女助理头也不回，肩线绷得笔直，声音又轻又稳",
+              "lens": "85mm 长焦，浅景深",
+              "cameraPosition": "女助理 + 侧正面平视",
+              "composition": "三分法",
+              "eyeline": "前方路面",
+              "focus": "锁定女助理侧脸",
+              "stability": "stable"
+            },
+            {
+              "beats": [
+                8,
+                8
+              ],
+              "seconds": 2.2,
+              "size": "medium",
+              "camera": "Static Shot",
+              "characters": [
+                "C02"
+              ],
+              "frame": "中景，唐启山忽然冷笑，一掌拍在椅背上，车身随之轻晃，后排灯影抖了一下",
+              "shot": "固定镜头，醉汉忽然冷笑出声，扬手一掌拍在椅背上，车身轻轻一晃，灯影跟着一抖",
+              "lens": "35mm 广角，中景深",
+              "cameraPosition": "醉酒富商 + 侧面平视",
+              "composition": "三分法",
+              "eyeline": "前排椅背",
+              "focus": "锁定醉汉上半身",
+              "stability": "stable"
+            }
+          ],
+          "h3Prompt": "How the reference pictures align with the target video — Picture 1 (from Shot 1) aligns with the 0.00-second mark of the target video; Picture 2 (from Shot 2) aligns with the 2.20-second mark of the target video; Picture 3 (from Shot 3) aligns with the 6.70-second mark of the target video; Picture 4 (from Shot 4) aligns with the 9.20-second mark of the target video.\n\nintegrated_multimodal_description:\n[Shot 1] A slow push in closes on <Picture 1>: the drunk man raises his wrist so the sunburst watch dial flashes with each passing streetlight as he leans toward the front seats.\n[Shot 2] At 00:02.200, The camera holds a static shot on <Picture 2>: the drunk man dangles his wrist before the front seats so the watch face catches the light, chin lifted, satisfaction he cannot hide, then lets the arm drop back to his knee; he brags in a drawling, self-satisfied baritone (S1): <d>[Chinese] 看见没有，限量款。有钱也买不着，得排队。</d>\n[Shot 3] At 00:06.700, The camera holds a static shot on <Picture 3>: the composed young woman assistant keeps her eyes on the road without turning, shoulders held straight, her voice light and steady (S2): <d>[Chinese] 唐总，您喝多了，靠好。</d>\n[Shot 4] At 00:09.200, The camera holds a static shot on <Picture 4>: the drunk man breaks into a sudden cold laugh and slaps the seatback with his palm, rocking the car slightly.\n\noverall_soundscape: Engine idling, the faint clink of a watch bracelet, one dull slap of a palm on a leather seatback, night wind rising and falling against the bodywork.\n\nnon_diegetic_music: A very quiet electronic drone tucked beneath the wind noise.",
+          "blocking": "唐启山占据后排中央举腕炫耀，白恬在副驾背对镜头，程野的视线通过后视镜落在两人身上；前后排的对峙压在一条对角线上。",
+          "soundscape": "发动机低鸣持续，腕表表链轻响，手掌拍上皮椅背一声闷响，窗外夜风掠过车身的呼声忽近忽远",
+          "music": "极低音量的电子低音持续音，藏在风噪之下"
+        },
+        {
+          "id": "E01-03",
+          "sceneIndex": 1,
+          "cuts": [
+            {
+              "beats": [
+                9,
+                9
+              ],
+              "seconds": 4.5,
+              "size": "medium",
+              "camera": "Static Shot",
+              "characters": [
+                "C02",
+                "C03"
+              ],
+              "frame": "中景，唐启山靠在后排歪着头宣布决定，白恬的侧影在副驾座背缝隙里绷直，车厢空气僵住",
+              "shot": "固定镜头，醉汉歪着头慢悠悠开口，字句随意得像在说天气，副驾座背缝隙里女助理的侧影纹丝不动",
+              "lens": "35mm 广角，中景深",
+              "cameraPosition": "前后排双人 + 平视",
+              "composition": "三分法",
+              "eyeline": "副驾座背缝隙",
+              "focus": "锁定后排醉汉",
+              "stability": "stable"
+            },
+            {
+              "beats": [
+                10,
+                10
+              ],
+              "seconds": 2.2,
+              "size": "close",
+              "camera": "Push In",
+              "characters": [
+                "C03"
+              ],
+              "frame": "特写，白恬握着车门扶手的手指收紧，指节泛白，肩膀绷直又缓缓松开，窗外光带扫过她的手背",
+              "shot": "镜头缓推向副驾的手，年轻女人握着扶手的指节一点点收紧，肩膀绷直，又缓缓松下来",
+              "lens": "85mm 长焦，极浅景深",
+              "cameraPosition": "女助理的手 + 俯视 45 度",
+              "composition": "对角线",
+              "eyeline": "握紧的扶手",
+              "focus": "锁定扶手上的手",
+              "stability": "stable"
+            },
+            {
+              "beats": [
+                11,
+                11
+              ],
+              "seconds": 2.2,
+              "size": "wide",
+              "camera": "Pull Out",
+              "characters": [],
+              "frame": "全景，车驶入地库坡道，惨白顶灯一道道扫过车厢，挡风玻璃上光带明灭，画面缓缓拉远",
+              "shot": "镜头从车厢缓缓拉远，车滑下地库坡道，惨白灯带一道道扫过挡风玻璃和车厢",
+              "lens": "24mm 广角，深景深",
+              "cameraPosition": "车头方向 + 平视拉远",
+              "composition": "对称",
+              "eyeline": "坡道深处",
+              "focus": "锁定挡风玻璃光带",
+              "stability": "stable"
+            }
+          ],
+          "h3Prompt": "How the reference pictures align with the target video — Picture 1 (from Shot 1) aligns with the 0.00-second mark of the target video; Picture 2 (from Shot 2) aligns with the 4.50-second mark of the target video; Picture 3 (from Shot 3) aligns with the 6.70-second mark of the target video.\n\nintegrated_multimodal_description:\n[Shot 1] The camera holds a static shot on <Picture 1>: slumped sideways, the drunk man announces it like small talk while through the gap of the passenger headrest the assistant's silhouette stays perfectly still; he drawls with tipsy carelessness (S1): <d>[Chinese] 白恬，明天人事部找你谈话。公司不养闲人。</d>\n[Shot 2] At 00:04.500, A slow push in moves toward <Picture 2>: the assistant's fingers tighten around the door handle until the knuckles blanch, her shoulders go rigid, then ease down by degrees.\n[Shot 3] At 00:06.700, A slow pull out drifts back from <Picture 3>: the sedan glides down the garage ramp while bands of cold ceiling light sweep across the windshield and through the cabin.\n\noverall_soundscape: Engine note easing down, tires bumping the garage ramp seams, the electric hum of cold-white tubes seeping into the cabin.\n\nnon_diegetic_music: N/A",
+          "blocking": "唐启山在后排宣布，白恬的侧影卡在副驾座背缝隙里；最后一拍镜头脱离人物，只剩灯带扫过车厢，把僵住的空气留在车内。",
+          "soundscape": "发动机低鸣渐低，轮胎碾上地库坡道减速带的颠簸声，惨白灯管的电流声隐隐渗进车厢",
+          "music": null
+        },
+        {
+          "id": "E01-04",
+          "sceneIndex": 2,
+          "cuts": [
+            {
+              "beats": [
+                1,
+                1
+              ],
+              "seconds": 2.2,
+              "size": "wide",
+              "camera": "Tracking Shot",
+              "characters": [
+                "C01"
+              ],
+              "frame": "全景，惨白顶灯的地下车库，程野从轿车后备箱拖出折叠电动车，弯腰撑开立稳，车身反着冷光",
+              "shot": "镜头平稳跟随，年轻代驾司机从后备箱拖出折叠电动车，弯腰撑开立稳，抬手拍了拍车座",
+              "lens": "24mm 广角，深景深",
+              "cameraPosition": "代驾司机 + 侧面平视跟随",
+              "composition": "对角线",
+              "eyeline": "车尾后备箱",
+              "focus": "锁定司机与电动车",
+              "stability": "slight-shake",
+              "props": [
+                "P02"
+              ]
+            },
+            {
+              "beats": [
+                2,
+                2
+              ],
+              "seconds": 2.2,
+              "size": "medium",
+              "camera": "Static Shot",
+              "characters": [
+                "C03"
+              ],
+              "frame": "中景，白恬绕到车尾把一只行李箱放进后备箱，退开两步低头拨通电话，侧脸没入顶灯阴影",
+              "shot": "固定镜头，年轻女助理把行李箱推进后备箱，退开两步背对车身，低头拨通电话，声音压得很低",
+              "lens": "35mm 广角，中景深",
+              "cameraPosition": "女助理 + 平视正面",
+              "composition": "三分法",
+              "eyeline": "手中电话",
+              "focus": "锁定女助理上半身",
+              "stability": "stable",
+              "props": [
+                "P03"
+              ]
+            },
+            {
+              "beats": [
+                3,
+                3
+              ],
+              "seconds": 3.4,
+              "size": "close",
+              "camera": "Push In",
+              "characters": [
+                "C03"
+              ],
+              "frame": "特写，白恬背对车身打电话，眼睛望着车库深处，语气放软，睫毛在顶灯下投出小片阴影",
+              "shot": "镜头缓推近年轻女助理的侧脸，她背着车身打电话，语气放软，眼眶微微发红",
+              "lens": "85mm 长焦，极浅景深",
+              "cameraPosition": "女助理 + 侧面平视",
+              "composition": "三分法",
+              "eyeline": "车库深处",
+              "focus": "锁定女助理面部",
+              "stability": "stable"
+            }
+          ],
+          "h3Prompt": "How the reference pictures align with the target video — Picture 1 (from Shot 1) aligns with the 0.00-second mark of the target video; Picture 2 (from Shot 2) aligns with the 2.20-second mark of the target video; Picture 3 (from Shot 3) aligns with the 4.40-second mark of the target video.\n\nintegrated_multimodal_description:\n[Shot 1] A tracking shot follows <Picture 1>: under cold fluorescent tubes the driver drags a folded e-bike out of the trunk, bends to snap it upright, and pats the saddle steady.\n[Shot 2] At 00:02.200, The camera holds a static shot on <Picture 2>: the assistant slides a hard-shell suitcase into the trunk, steps back from the car, and lowers her head to make a hushed call.\n[Shot 3] At 00:04.400, A slow push in closes on <Picture 3>: pressing the phone to her ear with her eyes fixed on the far end of the garage, her voice softens into something between apology and fatigue; she murmurs, weary and hushed (S1): <d>[Chinese] 妈，钱明天一定到，你先别催了。</d>\n\noverall_soundscape: The click of an e-bike stand snapping open, suitcase wheels scraping epoxy floor, footsteps echoing faintly in the empty garage, a distant elevator chime muffled by distance.\n\nnon_diegetic_music: N/A",
+          "blocking": "轿车停在画面中央车位：程野与电动车在车尾左后侧，白恬在车尾正后放行李，唐启山还在驾驶座一侧车门里；三人各占一角互不对视。",
+          "soundscape": "电动车支架撑开的咔哒声，行李箱轮子蹭过环氧地坪，鞋底声在空旷车库里有轻微回声，远处电梯到达的提示音隔着一层",
+          "music": null
+        },
+        {
+          "id": "E01-05",
+          "sceneIndex": 2,
+          "cuts": [
+            {
+              "beats": [
+                4,
+                4
+              ],
+              "seconds": 2.2,
+              "size": "medium",
+              "camera": "Static Shot",
+              "characters": [
+                "C02"
+              ],
+              "frame": "中景，唐启山扶着车门干呕，直起腰抬腕看时间，手腕上空空如也，惨白顶灯照着他愣住的脸",
+              "shot": "固定镜头，醉汉扶着车门干呕两声，直起腰习惯性抬腕看时间，动作僵在半空，手腕上什么都没有",
+              "lens": "50mm 标准，中浅景深",
+              "cameraPosition": "醉酒富商 + 平视正面",
+              "composition": "三分法",
+              "eyeline": "自己空着的手腕",
+              "focus": "锁定醉汉上半身",
+              "stability": "stable"
+            },
+            {
+              "beats": [
+                5,
+                5
+              ],
+              "seconds": 2.0,
+              "size": "close",
+              "camera": "Push In",
+              "characters": [
+                "C02"
+              ],
+              "frame": "特写，唐启山盯着空空的手腕，眼睛一点点瞪大，酒意瞬间退了一半",
+              "shot": "镜头缓推，醉汉盯着空手腕，眼睛一点点瞪大，酒意瞬间退了一半",
+              "lens": "85mm 长焦，极浅景深",
+              "cameraPosition": "醉酒富商 + 平视特写",
+              "composition": "中心构图",
+              "eyeline": "空手腕",
+              "focus": "锁定醉汉面部",
+              "stability": "stable"
+            },
+            {
+              "beats": [
+                6,
+                6
+              ],
+              "seconds": 2.2,
+              "size": "medium",
+              "camera": "Shake Slightly",
+              "characters": [
+                "C01",
+                "C02",
+                "C03"
+              ],
+              "frame": "中景，三个人围着打开的车厢翻找，掀脚垫、抠座椅缝、拉开储物格，顶灯惨白，动作越来越急",
+              "shot": "镜头轻微晃动地扫过翻找的三人，醉汉掀脚垫，女助理抠座椅缝，司机拉开储物格，一无所获",
+              "lens": "35mm 广角，中景深",
+              "cameraPosition": "车厢 + 环绕平视",
+              "composition": "对角线",
+              "eyeline": "翻找的手",
+              "focus": "锁定车厢内翻找动作",
+              "stability": "slight-shake"
+            },
+            {
+              "beats": [
+                7,
+                7
+              ],
+              "seconds": 4.5,
+              "size": "medium",
+              "camera": "Static Shot",
+              "characters": [
+                "C02"
+              ],
+              "frame": "中景，唐启山直起身眼睛发红，抬手直指车厢方向一口咬定，胸口起伏，白恬的半张脸在他身后虚化",
+              "shot": "固定镜头，眼睛发红的醉汉直起身，抬手直指车厢方向，一字一句咬定，胸口起伏",
+              "lens": "50mm 标准，浅景深",
+              "cameraPosition": "醉酒富商 + 微仰平视",
+              "composition": "三分法",
+              "eyeline": "车厢方向",
+              "focus": "锁定醉汉面部",
+              "stability": "stable"
+            }
+          ],
+          "h3Prompt": "How the reference pictures align with the target video — Picture 1 (from Shot 1) aligns with the 0.00-second mark of the target video; Picture 2 (from Shot 2) aligns with the 2.20-second mark of the target video; Picture 3 (from Shot 3) aligns with the 4.20-second mark of the target video; Picture 4 (from Shot 4) aligns with the 6.40-second mark of the target video.\n\nintegrated_multimodal_description:\n[Shot 1] The camera holds a static shot on <Picture 1>: the drunk man retches against the car door, straightens, and lifts his wrist out of habit — the gesture freezing midair over a bare wrist.\n[Shot 2] At 00:02.200, A slow push in tightens on <Picture 2>: the drunk man stares at his bare wrist, eyes widening as half the drunkenness drains from his face; he blurts, voice cracking upward (S1): <d>[Chinese] 我的表呢？</d>\n[Shot 3] At 00:04.200, A handheld take applies shake slightly as it sweeps across <Picture 3>: the driver, the assistant and the drunk man tear the cabin apart — mats lifted, seat seams prised, the storage box yanked open — and come up with nothing.\n[Shot 4] At 00:06.400, The camera holds a static shot on <Picture 4>: red-eyed, the drunk man straightens up and jabs a finger toward the cabin, chest heaving as he snaps the accusation through gritted teeth (S1): <d>[Chinese] 上车前我还在大堂看表！就你们两个碰过我！</d>\n\noverall_soundscape: Retching, hurried rummaging, a floor mat slapping the ground, fluorescent hum pressing under it all, leather shoes grinding two steps on the epoxy floor.\n\nnon_diegetic_music: Low strings landing one heavy note per bar, closing in.",
+          "blocking": "车尾是 conflict 中心：唐启山在车门一侧由吐到僵，翻车厢的三人围在车尾，程野始终站在电动车那侧没有挪步。",
+          "soundscape": "干呕声、急促的翻找窸窣、脚垫摔在地面的一声，惨白灯管的电流声压着所有动静，皮鞋跟在环氧地坪上碾了两步",
+          "music": "低音弦乐一小节一个重音，越压越近"
+        },
+        {
+          "id": "E01-06",
+          "sceneIndex": 2,
+          "cuts": [
+            {
+              "beats": [
+                8,
+                8
+              ],
+              "seconds": 3.7,
+              "size": "medium",
+              "camera": "Static Shot",
+              "characters": [
+                "C03"
+              ],
+              "frame": "中景，白恬抱着手臂站在车侧，下巴微抬，语气平稳地开口作证，顶灯在她肩上留下一圈白边",
+              "shot": "固定镜头，年轻女助理抱着手臂，下巴微抬，语气又轻又稳地开口，目光平静",
+              "lens": "50mm 标准，浅景深",
+              "cameraPosition": "女助理 + 平视正面",
+              "composition": "中心构图",
+              "eyeline": "对面的醉汉",
+              "focus": "锁定女助理上半身",
+              "stability": "stable"
+            },
+            {
+              "beats": [
+                9,
+                9
+              ],
+              "seconds": 2.2,
+              "size": "close",
+              "camera": "Static Shot",
+              "characters": [
+                "C03"
+              ],
+              "frame": "特写，白恬朝程野的方向抬起下巴示意，眼神冷了下来，嘴角的平静纹丝不动",
+              "shot": "固定镜头近看，女助理朝一侧抬起下巴示意，眼神冷了下来",
+              "lens": "85mm 长焦，极浅景深",
+              "cameraPosition": "女助理 + 平视特写",
+              "composition": "三分法",
+              "eyeline": "身旁的司机",
+              "focus": "锁定女助理面部",
+              "stability": "stable"
+            },
+            {
+              "beats": [
+                10,
+                10
+              ],
+              "seconds": 4.5,
+              "size": "close",
+              "camera": "Push In",
+              "characters": [
+                "C03",
+                "C01"
+              ],
+              "frame": "特写，白恬看向身旁的程野一字一句地指认，程野的肩背在前景虚化，顶灯惨白",
+              "shot": "镜头缓推，年轻女助理看着身旁沉默的司机，一字一句把嫌疑递过去，语速不快，字字清楚",
+              "lens": "85mm 长焦，浅景深",
+              "cameraPosition": "双人 + 过肩平视",
+              "composition": "三分法",
+              "eyeline": "身旁司机",
+              "focus": "锁定女助理面部",
+              "stability": "stable"
+            }
+          ],
+          "h3Prompt": "How the reference pictures align with the target video — Picture 1 (from Shot 1) aligns with the 0.00-second mark of the target video; Picture 2 (from Shot 2) aligns with the 3.70-second mark of the target video; Picture 3 (from Shot 3) aligns with the 5.90-second mark of the target video.\n\nintegrated_multimodal_description:\n[Shot 1] The camera holds a static shot on <Picture 1>: arms folded and chin slightly raised, the assistant gives her testimony in a voice light and unshaken (S1): <d>[Chinese] 我全程在打电话，车库监控可以查。</d>\n[Shot 2] At 00:03.700, The camera holds a static shot framed close on <Picture 2>: the assistant tips her chin toward the driver, the last of the warmth draining from her eyes.\n[Shot 3] At 00:05.900, A slow push in tightens on <Picture 3>: turning to the silent driver beside her, the assistant delivers the accusation word by measured word (S1): <d>[Chinese] 倒是他，搀人的时候手在您袖口里待了很久。</d>\n\noverall_soundscape: The rummaging stops; only tube hum and a far elevator-shaft draft remain, and a light, steady voice sits at the center of the room.\n\nnon_diegetic_music: Low strings holding on an unresolved long note.",
+          "blocking": "白恬与被指认的程野构成前景虚化加特写的关系，醉汉在画面外听；白恬的每句话都比上一句更稳。",
+          "soundscape": "翻找声停了，只剩灯管电流声与远处电梯井的风声，女助理的声音又轻又稳压在场中央",
+          "music": "低音弦乐停在长音上，不解决"
+        },
+        {
+          "id": "E01-07",
+          "sceneIndex": 2,
+          "cuts": [
+            {
+              "beats": [
+                11,
+                11
+              ],
+              "seconds": 2.2,
+              "size": "wide",
+              "camera": "Tracking Shot",
+              "characters": [
+                "C05"
+              ],
+              "frame": "全景，保安队长老葛带着两名保安从车库深处快步围过来，反光背心晃眼，对讲机举在嘴边",
+              "shot": "镜头平稳跟随，壮实的保安队长领着两名保安快步围拢，反光背心在惨白灯下晃眼，对讲机贴在嘴边",
+              "lens": "24mm 广角，深景深",
+              "cameraPosition": "保安队长 + 正面跟随",
+              "composition": "对角线",
+              "eyeline": "车库深处",
+              "focus": "锁定保安队长",
+              "stability": "slight-shake"
+            },
+            {
+              "beats": [
+                12,
+                12
+              ],
+              "seconds": 4.5,
+              "size": "medium",
+              "camera": "Static Shot",
+              "characters": [
+                "C05",
+                "C02"
+              ],
+              "frame": "中景，保安队长老葛弯着腰向唐启山请示，手电垂在身侧，唐启山面色铁青地站在车门边",
+              "shot": "固定镜头，保安队长弯着腰请示，一句话一顿，身旁的醉汉面色铁青",
+              "lens": "35mm 广角，中景深",
+              "cameraPosition": "双人 + 平视侧面",
+              "composition": "三分法",
+              "eyeline": "身边醉汉",
+              "focus": "锁定保安队长",
+              "stability": "stable"
+            },
+            {
+              "beats": [
+                13,
+                13
+              ],
+              "seconds": 2.2,
+              "size": "medium",
+              "camera": "Shake Slightly",
+              "characters": [
+                "C02"
+              ],
+              "frame": "中景，唐启山一把夺过程野手里的接单手机摔在引擎盖上，手机弹了一下，屏幕朝上还亮着",
+              "shot": "镜头随动作轻微晃动，醉汉一把夺过司机手里的手机，扬手摔在引擎盖上，手机弹了一下，屏幕朝上还亮着",
+              "lens": "35mm 广角，中景深",
+              "cameraPosition": "引擎盖 + 平视",
+              "composition": "对角线",
+              "eyeline": "砸落的手机",
+              "focus": "锁定醉汉挥臂动作",
+              "stability": "slight-shake",
+              "props": [
+                "P02"
+              ]
+            },
+            {
+              "beats": [
+                14,
+                14
+              ],
+              "seconds": 3.0,
+              "size": "close",
+              "camera": "Push In",
+              "characters": [
+                "C02"
+              ],
+              "frame": "特写，唐启山瞪着面前的人放狠话，下颌绷紧，额角在惨白灯下泛着汗光",
+              "shot": "镜头缓推近醉汉的脸，他瞪着面前的人放话，下颌绷紧，胸口起伏",
+              "lens": "85mm 长焦，极浅景深",
+              "cameraPosition": "醉酒富商 + 微仰平视",
+              "composition": "中心构图",
+              "eyeline": "面前的人",
+              "focus": "锁定醉汉面部",
+              "stability": "stable"
+            }
+          ],
+          "h3Prompt": "How the reference pictures align with the target video — Picture 1 (from Shot 1) aligns with the 0.00-second mark of the target video; Picture 2 (from Shot 2) aligns with the 2.20-second mark of the target video; Picture 3 (from Shot 3) aligns with the 6.70-second mark of the target video; Picture 4 (from Shot 4) aligns with the 8.90-second mark of the target video.\n\nintegrated_multimodal_description:\n[Shot 1] A tracking shot follows <Picture 1>: the burly security captain jogs in from the far end with two guards fanning out behind him, his high-visibility vest flashing under the cold tubes, a walkie-talkie pressed to his lips.\n[Shot 2] At 00:02.200, The camera holds a static shot on <Picture 2>: the security captain bends at the waist, asking in a deferential rumble while the drunk man's face goes thunderous beside him (S1): <d>[Chinese] 唐总，人跑不了，要不要先把车库门落下来？</d>\n[Shot 3] At 00:06.700, A handheld take adds shake slightly through <Picture 3>: the drunk man snatches the order phone from the driver's hand and hurls it onto the hood, where it bounces once, screen still lit.\n[Shot 4] At 00:08.900, A slow push in closes on <Picture 4>: jaw clenched, the drunk man looms over the driver and spits the threat, chest heaving (S1): <d>[Chinese] 今天说不清楚，谁都别想走！</d>\n\noverall_soundscape: Walkie-talkie static crackling, security shoes converging, the crisp crack of a phone hitting a metal hood, a collective sharp intake of breath.\n\nnon_diegetic_music: Percussion tightening hit by hit, like a ring closing.",
+          "blocking": "老葛带两名保安从画面深处进入形成合围，唐启山与被围的程野隔着引擎盖对峙；保安在背景里压暗成剪影。",
+          "soundscape": "对讲机电流声哗哗作响，皮鞋围拢的脚步声由远及近，手机砸在金属引擎盖上一声脆响，人群里有人倒抽气",
+          "music": "打击乐一下一下收紧，像合围的圈"
+        },
+        {
+          "id": "E01-08",
+          "sceneIndex": 2,
+          "cuts": [
+            {
+              "beats": [
+                15,
+                15
+              ],
+              "seconds": 2.2,
+              "size": "close",
+              "camera": "Static Shot",
+              "characters": [
+                "C05",
+                "C01"
+              ],
+              "frame": "特写，老葛翻过程野的口袋摊开在掌心：一部接单手机和一张行驶证，白手套沾着灰",
+              "shot": "固定镜头俯看，保安队长翻过司机的口袋，把接单手机和行驶证摊开在戴白手套的掌心",
+              "lens": "50mm 标准，浅景深",
+              "cameraPosition": "摊开的掌心 + 俯视 30 度",
+              "composition": "中心构图",
+              "eyeline": "掌心的物件",
+              "focus": "锁定掌心物件",
+              "stability": "stable",
+              "props": [
+                "P02"
+              ]
+            },
+            {
+              "beats": [
+                16,
+                16
+              ],
+              "seconds": 2.2,
+              "size": "medium",
+              "camera": "Pull Out",
+              "characters": [
+                "C01"
+              ],
+              "frame": "中景，四下里举起好几部手机，镜头全对着被围在中间的程野，画面缓缓拉远见出合围",
+              "shot": "镜头缓缓拉远，四面举起的手机构成的包围圈收紧，年轻司机站在正中间，冷光落在他脸上",
+              "lens": "24mm 广角，深景深",
+              "cameraPosition": "被围者 + 环视拉远",
+              "composition": "对称",
+              "eyeline": "四周的手机",
+              "focus": "锁定中央的司机",
+              "stability": "stable"
+            },
+            {
+              "beats": [
+                17,
+                17
+              ],
+              "seconds": 2.2,
+              "size": "medium",
+              "camera": "Push In",
+              "characters": [
+                "C01"
+              ],
+              "frame": "中景，程野深吸一口气把行驶证举过头顶，手臂笔直，眼神不躲，惨白灯带在他身后排成纵线",
+              "shot": "镜头缓推，年轻司机深吸一口气，把手里的证件举过头顶，手臂笔直，眼神不躲不闪",
+              "lens": "35mm 广角，中景深",
+              "cameraPosition": "司机 + 微仰平视",
+              "composition": "中心构图",
+              "eyeline": "前方人群",
+              "focus": "锁定司机与举起的证件",
+              "stability": "stable"
+            }
+          ],
+          "h3Prompt": "How the reference pictures align with the target video — Picture 1 (from Shot 1) aligns with the 0.00-second mark of the target video; Picture 2 (from Shot 2) aligns with the 2.20-second mark of the target video; Picture 3 (from Shot 3) aligns with the 4.40-second mark of the target video.\n\nintegrated_multimodal_description:\n[Shot 1] The camera holds a static shot from overhead on <Picture 1>: the security captain turns out the driver's pockets and spreads the findings across a gloved palm — an order phone and a worn vehicle permit.\n[Shot 2] At 00:02.200, A slow pull out reveals <Picture 2>: phones rise on every side, their lenses trained on the driver standing boxed at the center of the closing ring.\n[Shot 3] At 00:04.400, A slow push in moves toward <Picture 3>: the driver draws one deep breath and raises the permit straight overhead, arm rigid, eyes unwavering.\n\noverall_soundscape: Camera shutters crackling from every side, a walkie-talkie squelched into silence, tube hum suddenly loud, a low buzz of murmurs floating up.\n\nnon_diegetic_music: N/A",
+          "blocking": "程野被围在画面正中，四面的手机构成画框；老葛的手电从侧后方打光，把他的影子长长投在车位线上。",
+          "soundscape": "好几部手机快门声噼啪响成一片，对讲机滋啦一声被谁按掉，灯管电流声忽然显得很响，人群里压低的议论嗡嗡浮起",
+          "music": null
+        },
+        {
+          "id": "E01-09",
+          "sceneIndex": 2,
+          "cuts": [
+            {
+              "beats": [
+                18,
+                18
+              ],
+              "seconds": 4.3,
+              "size": "close",
+              "camera": "Static Shot",
+              "characters": [
+                "C01"
+              ],
+              "frame": "特写，程野举着证件的手没有放下，目光扫过四周，声音不高却一字一顿",
+              "shot": "固定镜头近看年轻司机，他举着证件，声音不高，一字一顿把条件说清",
+              "lens": "85mm 长焦，浅景深",
+              "cameraPosition": "司机 + 微仰平视",
+              "composition": "中心构图",
+              "eyeline": "四周的人群",
+              "focus": "锁定司机面部",
+              "stability": "stable"
+            },
+            {
+              "beats": [
+                19,
+                19
+              ],
+              "seconds": 4.8,
+              "size": "medium",
+              "camera": "Push In",
+              "characters": [
+                "C01"
+              ],
+              "frame": "中景，程野放下手往前半步，一条条报出要求，语气不重却不容还价，围观的光斑在他背后浮动",
+              "shot": "镜头缓推，年轻司机放下手臂上前半步，一条条报出要求，语气不重却不容还价",
+              "lens": "50mm 标准，中浅景深",
+              "cameraPosition": "司机 + 平视正面",
+              "composition": "三分法",
+              "eyeline": "面前的人群",
+              "focus": "锁定司机上半身",
+              "stability": "stable"
+            },
+            {
+              "beats": [
+                20,
+                20
+              ],
+              "seconds": 2.2,
+              "size": "wide",
+              "camera": "Static Shot",
+              "characters": [
+                "C01"
+              ],
+              "frame": "全景，车库里的围观圈静了两秒，举起的手机镜头一台都没放下，惨白灯带下人人都僵着",
+              "shot": "固定镜头全景，围拢的人群静了两秒，举起的手机一台都没放下，灯管的光落在每张仰起的脸上",
+              "lens": "24mm 广角，深景深",
+              "cameraPosition": "围观圈 + 环视平视",
+              "composition": "对称",
+              "eyeline": "圈中央的司机",
+              "focus": "锁定合围的人群",
+              "stability": "stable"
+            }
+          ],
+          "h3Prompt": "How the reference pictures align with the target video — Picture 1 (from Shot 1) aligns with the 0.00-second mark of the target video; Picture 2 (from Shot 2) aligns with the 4.30-second mark of the target video; Picture 3 (from Shot 3) aligns with the 9.10-second mark of the target video.\n\nintegrated_multimodal_description:\n[Shot 1] The camera holds a static shot framed close on <Picture 1>: permit still raised, the driver sweeps a level gaze around the ring and sets out his one condition, quiet and unhurried (S1): <d>[Chinese] 货证在这，人也跑不了。我只提一个要求。</d>\n[Shot 2] At 00:04.300, A slow push in follows <Picture 2>: lowering his arm and stepping forward half a pace, the driver lists his demands one by one, soft-spoken but immovable (S1): <d>[Chinese] 报物业，调监控，按流程来。谁想私了，免谈。</d>\n[Shot 3] At 00:09.100, The camera holds a static shot framed wide on <Picture 3>: the ring of onlookers falls silent for two long seconds, not one raised phone lowered, cold light settling on every upturned face.\n\noverall_soundscape: The shutters stop; tube current buzzes and a far ventilation shaft hums, so quiet a swallowed gulp is audible.\n\nnon_diegetic_music: N/A",
+          "blocking": "程野在圆心，人群在四周；他上前半步逼退的是整个包围圈，最后全景把僵局钉在惨白灯带下。",
+          "soundscape": "快门声停了，只剩灯管滋滋的电流声和远处通风井的低鸣，谁咽了口唾沫的声音都听得见",
+          "music": null
+        },
+        {
+          "id": "E01-10",
+          "sceneIndex": 2,
+          "cuts": [
+            {
+              "beats": [
+                21,
+                21
+              ],
+              "seconds": 2.8,
+              "size": "medium",
+              "camera": "Static Shot",
+              "characters": [
+                "C03"
+              ],
+              "frame": "中景，白恬站在人群里轻轻笑了一声，肩线松着，慢条斯理地抛出一句",
+              "shot": "固定镜头，年轻女助理站在人群里轻轻笑了一声，慢条斯理地开口，肩线松弛",
+              "lens": "50mm 标准，浅景深",
+              "cameraPosition": "女助理 + 平视正面",
+              "composition": "三分法",
+              "eyeline": "圈中央的司机",
+              "focus": "锁定女助理上半身",
+              "stability": "stable"
+            },
+            {
+              "beats": [
+                22,
+                22
+              ],
+              "seconds": 3.4,
+              "size": "close",
+              "camera": "Push In",
+              "characters": [
+                "C03"
+              ],
+              "frame": "特写，白恬补上一句报修单的来历，嘴角挂着一点若有若无的笑",
+              "shot": "镜头缓推近女助理的脸，她补上一句，嘴角挂着一点若有若无的笑",
+              "lens": "85mm 长焦，极浅景深",
+              "cameraPosition": "女助理 + 平视特写",
+              "composition": "中心构图",
+              "eyeline": "圈中央的司机",
+              "focus": "锁定女助理面部",
+              "stability": "stable"
+            },
+            {
+              "beats": [
+                23,
+                23
+              ],
+              "seconds": 2.2,
+              "size": "close",
+              "camera": "Push In",
+              "characters": [
+                "C01"
+              ],
+              "frame": "特写，程野猛地抬头，隔着人群盯住声音来处，眼睛慢慢眯起",
+              "shot": "镜头缓推，年轻司机猛地抬起头，隔着人群盯住声音来处，眼睛慢慢眯起",
+              "lens": "85mm 长焦，浅景深",
+              "cameraPosition": "司机 + 微仰平视",
+              "composition": "中心构图",
+              "eyeline": "人群对面的女助理",
+              "focus": "锁定司机面部",
+              "stability": "stable"
+            },
+            {
+              "beats": [
+                24,
+                24
+              ],
+              "seconds": 4.4,
+              "size": "extreme-wide",
+              "camera": "Static Shot",
+              "characters": [],
+              "frame": "大远景，惨白灯带下的地下车库全景，人群围成一圈僵立不动，一支灯管滋滋闪烁，没有一个人说话",
+              "shot": "固定镜头大远景，地下车库惨白灯带下人群围成一圈僵立不动，一支灯管滋滋闪烁明灭，全场再没有人出声",
+              "lens": "24mm 广角，深景深",
+              "cameraPosition": "车库全貌 + 高机位俯瞰",
+              "composition": "对称",
+              "eyeline": "僵立的人群",
+              "focus": "锁定整圈合围的人",
+              "stability": "stable"
+            }
+          ],
+          "h3Prompt": "How the reference pictures align with the target video — Picture 1 (from Shot 1) aligns with the 0.00-second mark of the target video; Picture 2 (from Shot 2) aligns with the 2.80-second mark of the target video; Picture 3 (from Shot 3) aligns with the 6.20-second mark of the target video; Picture 4 (from Shot 4) aligns with the 8.40-second mark of the target video.\n\nintegrated_multimodal_description:\n[Shot 1] The camera holds a static shot on <Picture 1>: a soft laugh escapes the assistant as she draws out the information, shoulders slack with ease (S1): <d>[Chinese] 巧了。车库监控坏了三天。</d>\n[Shot 2] At 00:02.800, A slow push in closes on <Picture 2>: the faint smile never leaving her mouth, the assistant adds the detail that lands like a trap closing (S1): <d>[Chinese] 报修单还是我昨天替物业登记的。</d>\n[Shot 3] At 00:06.200, A slow push in catches <Picture 3>: the driver's head snaps up, his eyes narrowing as they lock across the crowd toward the voice.\n[Shot 4] At 00:08.400, The camera holds a static shot framed in extreme wide on <Picture 4>: under the cold light rows the crowd stands frozen in its ring, a failing tube buzzing on and off, and no one in the garage speaks again.\n\noverall_soundscape: A soft laugh rolling echo across the empty garage, a failing tube buzzing on and off, the ventilation lowing like the whole garage breathing.\n\nnon_diegetic_music: A long low string note left hanging, unresolved.",
+          "blocking": "白恬从人群里开口，与圈心的程野隔空对峙；最后大远景收掉全集，人圈与灯带构成对称的死寂。",
+          "soundscape": "一声轻笑在空旷车库里荡开回音，灯管滋滋闪烁的电流声一下一下，远处通风井低鸣像整座车库在呼吸",
+          "music": "低音弦乐一个长音悬住，不落"
+        }
+      ]
+    },
+    {
+      "ep": 2,
+      "segments": [
+        {
+          "id": "E02-01",
+          "sceneIndex": 1,
+          "cuts": [
+            {
+              "beats": [
+                1,
+                2
+              ],
+              "seconds": 5.0,
+              "size": "wide",
+              "camera": "Tracking Shot",
+              "characters": [
+                "C01",
+                "C04"
+              ],
+              "frame": "全景，监控室的门被推开，程野举着亮屏的旧手机率先走进蓝光里，值班经理周晓桐披着制服外套抱登记簿跟进来，监视器墙的光打在两人脸上",
+              "shot": "镜头跟随两人进门，年轻司机举着亮屏的旧手机率先走入蓝光，披制服外套的值班女经理抱着翻毛边的登记簿跟进来，反手带上房门",
+              "lens": "24mm 广角，深景深",
+              "cameraPosition": "进门双人 + 正面跟随",
+              "composition": "三分法",
+              "eyeline": "屋内众人",
+              "focus": "锁定进门两人",
+              "stability": "slight-shake",
+              "props": [
+                "P02"
+              ]
+            },
+            {
+              "beats": [
+                3,
+                3
+              ],
+              "seconds": 4.3,
+              "size": "medium",
+              "camera": "Static Shot",
+              "characters": [
+                "C04"
+              ],
+              "frame": "中景，周晓桐把登记簿摊开拍在机柜上，手指点着其中一行的记录，目光一圈扫过屋里众人",
+              "shot": "固定镜头，值班女经理把登记簿摊开拍在机柜上，手指点着其中一行，目光一圈扫过屋里众人",
+              "lens": "50mm 标准，中浅景深",
+              "cameraPosition": "值班经理 + 平视正面",
+              "composition": "三分法",
+              "eyeline": "登记簿纸页",
+              "focus": "锁定值班经理上半身",
+              "stability": "stable"
+            },
+            {
+              "beats": [
+                4,
+                4
+              ],
+              "seconds": 2.5,
+              "size": "close",
+              "camera": "Push In",
+              "characters": [
+                "C04"
+              ],
+              "frame": "特写，登记簿摊开的纸页与周晓桐点在字迹上的指尖，她补上一句事由",
+              "shot": "镜头缓推向登记簿摊开的纸页，值班女经理的指尖点在字迹上，补了一句事由",
+              "lens": "85mm 长焦，浅景深",
+              "cameraPosition": "纸页 + 俯视 30 度",
+              "composition": "中心构图",
+              "eyeline": "指尖下的字迹",
+              "focus": "锁定登记簿纸页",
+              "stability": "stable"
+            }
+          ],
+          "h3Prompt": "How the reference pictures align with the target video — Picture 1 (from Shot 1) aligns with the 0.00-second mark of the target video; Picture 2 (from Shot 2) aligns with the 5.00-second mark of the target video; Picture 3 (from Shot 3) aligns with the 9.30-second mark of the target video.\n\nintegrated_multimodal_description:\n[Shot 1] A tracking shot follows <Picture 1> through the opening door: the young driver steps into the blue monitor glow first, battered phone held up and lit, while the duty manager in her uniform coat follows close with a dog-eared ledger hugged to her chest.\n[Shot 2] At 00:05.000, The camera holds a static shot on <Picture 2>: the duty manager flattens the ledger open on the equipment rack and taps one line of entries, her gaze circling the room; she reads it out, crisp and unhurried (S1): <d>[Chinese] 凌晨零点五十一，白小姐登记了临时车位。</d>\n[Shot 3] At 00:09.300, A slow push in moves toward <Picture 3>: her fingertip rests on the written entry as she adds the recorded purpose, letting the word hang in the room (S1): <d>[Chinese] 事由一栏写着，放行李。</d>\n\noverall_soundscape: The door catching its magnet with a light knock, rack fans humming underneath, indicator beeps thin as insect legs, the ledger landing on the metal desk with a dull thud.\n\nnon_diegetic_music: A cold electronic pulse ticking like the indicator lights counting beats.",
+          "blocking": "进门动线由门口纵贯机柜：程野举手机在前，周晓桐抱登记簿随后；白恬靠在门内侧的墙上，唐启山与老葛在长桌远端。",
+          "soundscape": "房门撞上门吸的一声轻响，主机风扇嗡嗡铺底，机柜指示灯的蜂鸣细若蚊足，登记簿拍在金属台面上一声闷响",
+          "music": "冷调电子脉冲音一下一下，像指示灯在数拍子"
+        },
+        {
+          "id": "E02-02",
+          "sceneIndex": 1,
+          "cuts": [
+            {
+              "beats": [
+                5,
+                5
+              ],
+              "seconds": 4.1,
+              "size": "close",
+              "camera": "Static Shot",
+              "characters": [
+                "C04"
+              ],
+              "frame": "特写，周晓桐合上登记簿压在掌下，抬眼直视门边方向，不紧不慢反问",
+              "shot": "固定镜头近看值班女经理，她合上登记簿压在掌下，抬眼直视门边方向，不紧不慢反问",
+              "lens": "85mm 长焦，浅景深",
+              "cameraPosition": "值班经理 + 平视正面",
+              "composition": "中心构图",
+              "eyeline": "门边的女助理",
+              "focus": "锁定值班经理面部",
+              "stability": "stable"
+            },
+            {
+              "beats": [
+                6,
+                6
+              ],
+              "seconds": 2.2,
+              "size": "medium",
+              "camera": "Static Shot",
+              "characters": [
+                "C03"
+              ],
+              "frame": "中景，白恬抱着手臂靠在门框上，下巴微抬，姿态松着，眼神不松",
+              "shot": "固定镜头，年轻女助理抱着手臂靠在门框上，下巴微抬，慢悠悠开口",
+              "lens": "35mm 广角，中景深",
+              "cameraPosition": "女助理 + 微仰平视",
+              "composition": "三分法",
+              "eyeline": "对面的值班经理",
+              "focus": "锁定女助理上半身",
+              "stability": "stable"
+            },
+            {
+              "beats": [
+                7,
+                7
+              ],
+              "seconds": 3.4,
+              "size": "close",
+              "camera": "Static Shot",
+              "characters": [
+                "C03"
+              ],
+              "frame": "特写，白恬眼睛盯着周晓桐，把质问推过去，嘴角绷成一条线",
+              "shot": "固定镜头近看女助理，她盯着对面把质问推过去，嘴角绷成一条线",
+              "lens": "85mm 长焦，极浅景深",
+              "cameraPosition": "女助理 + 平视特写",
+              "composition": "中心构图",
+              "eyeline": "对面的值班经理",
+              "focus": "锁定女助理面部",
+              "stability": "stable"
+            },
+            {
+              "beats": [
+                8,
+                9
+              ],
+              "seconds": 3.6,
+              "size": "medium",
+              "camera": "Static Shot",
+              "characters": [
+                "C03",
+                "C04"
+              ],
+              "frame": "中景，白恬的质问悬在半空，周晓桐把登记簿压在掌下，目光不动，短短几个字把场面压住",
+              "shot": "固定镜头，值班女经理把登记簿压在掌下接过话头，目光不动，语气平直",
+              "lens": "35mm 广角，中景深",
+              "cameraPosition": "双人 + 平视侧面",
+              "composition": "三分法",
+              "eyeline": "门边的女助理",
+              "focus": "锁定值班经理",
+              "stability": "stable"
+            }
+          ],
+          "h3Prompt": "How the reference pictures align with the target video — Picture 1 (from Shot 1) aligns with the 0.00-second mark of the target video; Picture 2 (from Shot 2) aligns with the 4.10-second mark of the target video; Picture 3 (from Shot 3) aligns with the 6.30-second mark of the target video; Picture 4 (from Shot 4) aligns with the 9.70-second mark of the target video.\n\nintegrated_multimodal_description:\n[Shot 1] The camera holds a static shot framed close on <Picture 1>: closing the ledger under her palm, the duty manager lifts her eyes toward the door and returns the question without hurry (S1): <d>[Chinese] 行李箱就在你们后备箱里。这叫放行李？</d>\n[Shot 2] At 00:04.100, The camera holds a static shot on <Picture 2>: the assistant leans against the doorframe, arms folded, chin tilted as she answers with silky insolence (S1): <d>[Chinese] 周经理，我们家老板的东西丢了。</d>\n[Shot 3] At 00:06.300, The camera holds a static shot framed close on <Picture 3>: her mouth pulls into a taut line as she pushes the taunt across the room (S1): <d>[Chinese] 你管车位，还是管赃物？</d>\n[Shot 4] At 00:09.700, The camera holds a static shot on <Picture 4>: the assistant flings the question across the room (S1): <d>[Chinese] 你管车位，还是管赃物？</d> and the duty manager answers without looking up, palm flat on the ledger (S2): <d>[Chinese] 我管流程。</d>\n\noverall_soundscape: Rack fans droning on, ledger pages pressed flat under a palm, one voice soft and one hard trading lines in the blue rack light.\n\nnon_diegetic_music: N/A",
+          "blocking": "白恬与周晓桐隔着长桌对峙，一个倚门一个压簿；程野在桌侧举着手机没有插话，老葛在桌尾压阵。",
+          "soundscape": "主机风扇持续低鸣，登记簿纸页被压平的窸窣，两个女人的声音一软一硬在机柜的蓝光里交锋",
+          "music": null
+        },
+        {
+          "id": "E02-03",
+          "sceneIndex": 1,
+          "cuts": [
+            {
+              "beats": [
+                10,
+                10
+              ],
+              "seconds": 2.1,
+              "size": "medium",
+              "camera": "Static Shot",
+              "characters": [
+                "C04"
+              ],
+              "frame": "中景，周晓桐按着登记簿承认枪机坏了，语气没有一丝波动",
+              "shot": "固定镜头，值班女经理按着登记簿承认现状，语气没有一丝波动",
+              "lens": "50mm 标准，中浅景深",
+              "cameraPosition": "值班经理 + 平视正面",
+              "composition": "三分法",
+              "eyeline": "屋内众人",
+              "focus": "锁定值班经理上半身",
+              "stability": "stable"
+            },
+            {
+              "beats": [
+                11,
+                11
+              ],
+              "seconds": 4.1,
+              "size": "medium",
+              "camera": "Push In",
+              "characters": [
+                "C04"
+              ],
+              "frame": "中景，周晓桐抬手指向墙上的线路走向，说出进出口独立线路的底牌，蓝光顺着她的侧脸流动",
+              "shot": "镜头缓推，值班女经理抬手指了指墙面线路的方向，一条条报出独立线路的走向，语速不快",
+              "lens": "35mm 广角，中景深",
+              "cameraPosition": "值班经理 + 平视侧面",
+              "composition": "三分法",
+              "eyeline": "墙面线路方向",
+              "focus": "锁定值班经理",
+              "stability": "stable"
+            },
+            {
+              "beats": [
+                12,
+                12
+              ],
+              "seconds": 2.2,
+              "size": "medium",
+              "camera": "Static Shot",
+              "characters": [
+                "C02"
+              ],
+              "frame": "中景，唐启山撑着机柜直起身，眼睛熬红，撑在台面上的手背上青筋凸起",
+              "shot": "固定镜头，醉汉撑着机柜直起身，眼睛熬红，喉咙里滚出一声冷响",
+              "lens": "35mm 广角，中景深",
+              "cameraPosition": "醉酒富商 + 微仰平视",
+              "composition": "三分法",
+              "eyeline": "对面众人",
+              "focus": "锁定醉汉上半身",
+              "stability": "stable"
+            },
+            {
+              "beats": [
+                13,
+                13
+              ],
+              "seconds": 3.2,
+              "size": "close",
+              "camera": "Push In",
+              "characters": [
+                "C02"
+              ],
+              "frame": "特写，唐启山一掌拍在机柜上下令先看回放再看车，声音沙哑发狠",
+              "shot": "镜头缓推近醉汉，他一掌拍在机柜上，哑着嗓子下令，眼里的红血丝更重了",
+              "lens": "85mm 长焦，浅景深",
+              "cameraPosition": "醉酒富商 + 微仰平视",
+              "composition": "中心构图",
+              "eyeline": "面前的屏幕墙",
+              "focus": "锁定醉汉面部",
+              "stability": "stable"
+            }
+          ],
+          "h3Prompt": "How the reference pictures align with the target video — Picture 1 (from Shot 1) aligns with the 0.00-second mark of the target video; Picture 2 (from Shot 2) aligns with the 2.10-second mark of the target video; Picture 3 (from Shot 3) aligns with the 6.20-second mark of the target video; Picture 4 (from Shot 4) aligns with the 8.40-second mark of the target video.\n\nintegrated_multimodal_description:\n[Shot 1] The camera holds a static shot on <Picture 1>: palm still on the ledger, the duty manager concedes the broken cameras without a flicker (S1): <d>[Chinese] 车库监控确实坏了。</d>\n[Shot 2] At 00:02.100, A slow push in follows <Picture 2>: the duty manager gestures toward the wall run of conduits and lays out the independent feed in the same even tone (S1): <d>[Chinese] 但进出口走独立线路，直连机房，能看。</d>\n[Shot 3] At 00:06.200, The camera holds a static shot on <Picture 3>: hauling himself upright against the equipment rack, the drunk man's bloodshot eyes sweep the room while his knuckles whiten on the metal edge.\n[Shot 4] At 00:08.400, A slow push in closes on <Picture 4>: a flat hand cracks against the rack as the drunk man rasps out the order, the red in his eyes deepening (S1): <d>[Chinese] 那就先看进出口。再看他的车！</d>\n\noverall_soundscape: Rack fans stepping up a notch, a palm cracking the metal cabinet door with a hollow bang, the indicator beeps drowned for a beat then resurfacing.\n\nnon_diegetic_music: N/A",
+          "blocking": "周晓桐报出独立线路是全段支点：她站在机柜与监视器墙之间，唐启山从撑柜到拍柜起身，程野的手机始终立在台面上待命。",
+          "soundscape": "机柜风扇转高一档，手掌拍在金属柜门上嗡的一声，指示灯蜂鸣被压过一瞬又浮起来",
+          "music": null
+        },
+        {
+          "id": "E02-04",
+          "sceneIndex": 1,
+          "cuts": [
+            {
+              "beats": [
+                14,
+                15
+              ],
+              "seconds": 5.0,
+              "size": "medium",
+              "camera": "Static Shot",
+              "characters": [
+                "C01",
+                "C04"
+              ],
+              "frame": "中景，周晓桐抱起手臂站到屏幕侧面让开机位，程野把旧手机立在机柜上按下播放，屏幕蓝光打亮每个人的脸",
+              "shot": "固定镜头，值班女经理抱起手臂让开机位，年轻司机把手机立在机柜上按下播放，屋里的脸被屏幕蓝光一盏盏点亮",
+              "lens": "35mm 广角，中景深",
+              "cameraPosition": "机柜台面 + 平视",
+              "composition": "三分法",
+              "eyeline": "立在机柜上的手机",
+              "focus": "锁定手机与两张脸",
+              "stability": "stable",
+              "props": [
+                "P02"
+              ]
+            },
+            {
+              "beats": [
+                16,
+                17
+              ],
+              "seconds": 5.0,
+              "size": "close",
+              "camera": "Zoom In",
+              "characters": [
+                "C03"
+              ],
+              "frame": "特写，手机屏幕里的画面：白恬绕到车尾放行李箱，弯腰姿势没变，另一只手探进椅背上的大衣内袋，指缝里一点金属的光",
+              "shot": "镜头缓变焦推近手机屏幕，画面里弯腰放行李的女助理另一只手探进椅背上的大衣内袋，手收回时指缝里闪过一点金属的光",
+              "lens": "85mm 长焦，极浅景深",
+              "cameraPosition": "手机屏幕 + 平视推进",
+              "composition": "中心构图",
+              "eyeline": "屏幕里的手",
+              "focus": "锁定屏幕画面",
+              "stability": "stable",
+              "props": [
+                "P01"
+              ]
+            },
+            {
+              "beats": [
+                18,
+                18
+              ],
+              "seconds": 2.2,
+              "size": "extreme-close",
+              "camera": "Static Shot",
+              "characters": [
+                "C03"
+              ],
+              "frame": "大特写，手机屏幕定格在指缝那一点金属光上，屏幕噪点微微滚动，没有人出声",
+              "shot": "固定镜头大特写，手机屏幕定格在那一点金属光上，屏幕噪点微微滚动，画面停住",
+              "lens": "100mm 长焦，极浅景深",
+              "cameraPosition": "手机屏幕 + 平视",
+              "composition": "中心构图",
+              "eyeline": "屏幕定格处",
+              "focus": "锁定屏幕定格画面",
+              "stability": "stable"
+            }
+          ],
+          "h3Prompt": "How the reference pictures align with the target video — Picture 1 (from Shot 1) aligns with the 0.00-second mark of the target video; Picture 2 (from Shot 2) aligns with the 5.00-second mark of the target video; Picture 3 (from Shot 3) aligns with the 10.00-second mark of the target video.\n\nintegrated_multimodal_description:\n[Shot 1] The camera holds a static shot on <Picture 1>: the duty manager folds her arms aside to clear the angle while the driver props the battered phone upright on the rack and presses play, blue screen light climbing every face in the room.\n[Shot 2] At 00:05.000, A slow zoom in pushes into <Picture 2>: on the phone screen the recorded figure bending at the trunk slides one hand into the coat pocket draped over the seatback — and as it withdraws, a glint of metal flashes between the fingers.\n[Shot 3] At 00:10.000, The camera holds a static shot framed in extreme close on <Picture 3>: the screen freezes on that single glint of metal, sensor noise crawling in the pause, and nobody in the room breathes.\n\noverall_soundscape: A soft press of the play key, fan noise suddenly conspicuous, the recording itself thin and far away, nobody speaking.\n\nnon_diegetic_music: A sustained electronic high tone hanging thinner as the zoom pushes in.",
+          "blocking": "全段只有一块屏幕在动：周晓桐让位、程野按下播放，镜头从屋里众人一步步收进手机屏幕，金属光是钉在全场的一根针。",
+          "soundscape": "播放键按下的一声轻响，主机风扇声忽然显得很响，录像里的环境音又薄又远，没有人说话",
+          "music": "一根持续的电子高音悬着，随变焦推进越拉越细"
+        },
+        {
+          "id": "E02-05",
+          "sceneIndex": 1,
+          "cuts": [
+            {
+              "beats": [
+                19,
+                19
+              ],
+              "seconds": 3.4,
+              "size": "close",
+              "camera": "Static Shot",
+              "characters": [
+                "C04"
+              ],
+              "frame": "特写，周晓桐盯着屏幕报出画面时间戳，手指点着屏幕边缘，语速一字一停",
+              "shot": "固定镜头近看值班女经理，她盯着屏幕报出画面时间，手指点着屏幕边缘，一字一停",
+              "lens": "85mm 长焦，浅景深",
+              "cameraPosition": "值班经理 + 侧正面平视",
+              "composition": "三分法",
+              "eyeline": "手机屏幕",
+              "focus": "锁定值班经理面部",
+              "stability": "stable"
+            },
+            {
+              "beats": [
+                20,
+                20
+              ],
+              "seconds": 3.7,
+              "size": "medium",
+              "camera": "Push In",
+              "characters": [
+                "C04"
+              ],
+              "frame": "中景，周晓桐转过身把结论交给屋里的人，一句车与表都是唐先生的落地，蓝光从她背后打来",
+              "shot": "镜头缓推，值班女经理转过身面向众人，把结论平平地放下，蓝光从她背后打来",
+              "lens": "50mm 标准，浅景深",
+              "cameraPosition": "值班经理 + 平视正面",
+              "composition": "三分法",
+              "eyeline": "屋内的醉汉",
+              "focus": "锁定值班经理上半身",
+              "stability": "stable"
+            },
+            {
+              "beats": [
+                21,
+                21
+              ],
+              "seconds": 2.2,
+              "size": "medium",
+              "camera": "Static Shot",
+              "characters": [
+                "C02"
+              ],
+              "frame": "中景，唐启山伸手关掉播放，手机屏幕暗下去，屋里只剩主机风扇声，他的手停在半空",
+              "shot": "固定镜头，醉汉伸手把播放关掉，手机屏幕暗下去，他的手停在半空没有收回来",
+              "lens": "35mm 广角，中景深",
+              "cameraPosition": "机柜 + 平视",
+              "composition": "三分法",
+              "eyeline": "暗下去的手机屏",
+              "focus": "锁定醉汉的手",
+              "stability": "stable"
+            }
+          ],
+          "h3Prompt": "How the reference pictures align with the target video — Picture 1 (from Shot 1) aligns with the 0.00-second mark of the target video; Picture 2 (from Shot 2) aligns with the 3.40-second mark of the target video; Picture 3 (from Shot 3) aligns with the 7.10-second mark of the target video.\n\nintegrated_multimodal_description:\n[Shot 1] The camera holds a static shot framed close on <Picture 1>: eyes on the screen, the duty manager taps its edge and reads the timestamp out in measured beats (S1): <d>[Chinese] 画面时间，一点零二分四十一秒。</d>\n[Shot 2] At 00:03.400, A slow push in follows <Picture 2>: turning from the screen to face the room, the duty manager sets the conclusion down flat and lets it sit (S1): <d>[Chinese] 车是唐先生的车，表是唐先生的表。</d>\n[Shot 3] At 00:07.100, The camera holds a static shot on <Picture 3>: the drunk man reaches out and kills the playback, the screen going dark under his hand, which stays hovering in the air while the room sinks into fan noise.\n\noverall_soundscape: Playback cut off with a soft click, fan noise flooding back to fill the room, a held breath audible, indicator beeps ticking on.\n\nnon_diegetic_music: The electronic high tone stops dead, leaving a low fan-like drone.",
+          "blocking": "周晓桐的时间戳与结论两句把全屋钉死，唐启山关掉播放的手停在半空——蓝光熄了，没人接话。",
+          "soundscape": "播放被掐断的一声轻响，主机风扇声涌回来填满屋子，谁咽气的声音都清晰，指示灯蜂鸣一下一下",
+          "music": "电子高音骤停，只剩低频风扇般的持续音"
+        },
+        {
+          "id": "E02-06",
+          "sceneIndex": 1,
+          "cuts": [
+            {
+              "beats": [
+                22,
+                22
+              ],
+              "seconds": 2.8,
+              "size": "close",
+              "camera": "Static Shot",
+              "characters": [
+                "C02"
+              ],
+              "frame": "特写，唐启山盯着暗掉的手机屏幕开口质问，声音发沉，眼里的红血丝更重",
+              "shot": "固定镜头近看醉汉，他盯着暗掉的手机屏幕开口，声音发沉，喉结滚了一下",
+              "lens": "85mm 长焦，浅景深",
+              "cameraPosition": "醉酒富商 + 平视特写",
+              "composition": "中心构图",
+              "eyeline": "身边的白恬",
+              "focus": "锁定醉汉面部",
+              "stability": "stable"
+            },
+            {
+              "beats": [
+                23,
+                23
+              ],
+              "seconds": 3.7,
+              "size": "close",
+              "camera": "Shake Slightly",
+              "characters": [
+                "C03"
+              ],
+              "frame": "特写，白恬的嗓子劈了一瞬，反手把挑衅甩回来，眼睛第一次露出慌",
+              "shot": "镜头轻微晃动，年轻女助理的嗓子劈了一瞬，反手把挑衅甩回来，眼睛里的慌一闪而过",
+              "lens": "50mm 标准，浅景深",
+              "cameraPosition": "女助理 + 平视特写",
+              "composition": "对角线",
+              "eyeline": "面前的醉汉",
+              "focus": "锁定女助理面部",
+              "stability": "slight-shake"
+            },
+            {
+              "beats": [
+                24,
+                25
+              ],
+              "seconds": 5.0,
+              "size": "medium",
+              "camera": "Static Shot",
+              "characters": [
+                "C03",
+                "C05"
+              ],
+              "frame": "中景，白恬把随身的包倒扣在机柜上，化妆刷滚了一地；老葛戴着手套把包里外翻了三遍，摊开两手",
+              "shot": "固定镜头，女助理把包倒扣在机柜上，化妆刷和充电线滚了一地；保安队长戴着手套把包里外翻了三遍，摊开两手",
+              "lens": "35mm 广角，中景深",
+              "cameraPosition": "机柜 + 平视",
+              "composition": "三分法",
+              "eyeline": "翻包的双手",
+              "focus": "锁定机柜上的翻找",
+              "stability": "stable"
+            }
+          ],
+          "h3Prompt": "How the reference pictures align with the target video — Picture 1 (from Shot 1) aligns with the 0.00-second mark of the target video; Picture 2 (from Shot 2) aligns with the 2.80-second mark of the target video; Picture 3 (from Shot 3) aligns with the 6.50-second mark of the target video.\n\nintegrated_multimodal_description:\n[Shot 1] The camera holds a static shot framed close on <Picture 1>: staring at the dead screen, the drunk man asks the question in a voice gone heavy, throat working (S1): <d>[Chinese] 白恬，这是什么时候的事。</d>\n[Shot 2] At 00:02.800, A handheld take adds shake slightly through <Picture 2>: her voice cracks for a single syllable before she flings the challenge back, the flash of panic buried almost instantly (S1): <d>[Chinese] 一段录像说明什么？有本事现在搜！</d>\n[Shot 3] At 00:06.500, The camera holds a static shot on <Picture 3>: the assistant upends her bag across the rack, brushes and cables rolling loose, while the gloved security captain goes through it three times and spreads his hands — empty.\n\noverall_soundscape: A bag thudding flat on the metal desk, brushes bouncing and rolling away, gloved hands rustling nylon lining three times over, cloth sighing as hands spread empty.\n\nnon_diegetic_music: N/A",
+          "blocking": "白恬主动倒包是孤注一掷：她把包砸在机柜上，老葛的翻找与摊手把答案交还给全场；两名女性与保安构成一个三角。",
+          "soundscape": "包倒扣在金属台面上一声闷响，化妆刷滚落蹦跳，手套翻动尼龙内袋的窸窣声翻了三遍，摊手时布料摩擦一声",
+          "music": null
+        },
+        {
+          "id": "E02-07",
+          "sceneIndex": 1,
+          "cuts": [
+            {
+              "beats": [
+                26,
+                26
+              ],
+              "seconds": 2.1,
+              "size": "medium",
+              "camera": "Static Shot",
+              "characters": [
+                "C05"
+              ],
+              "frame": "中景，老葛摊开两手给出结论，目光在醉汉和司机之间转了一圈",
+              "shot": "固定镜头，保安队长摊开两手给出结论，目光在屋里两个人之间转了一圈",
+              "lens": "50mm 标准，中浅景深",
+              "cameraPosition": "保安队长 + 平视正面",
+              "composition": "三分法",
+              "eyeline": "屋内众人",
+              "focus": "锁定保安队长",
+              "stability": "stable"
+            },
+            {
+              "beats": [
+                27,
+                27
+              ],
+              "seconds": 2.2,
+              "size": "medium",
+              "camera": "Static Shot",
+              "characters": [
+                "C02"
+              ],
+              "frame": "中景，满屋目光僵在半空，唐启山看看空包又看看那部手机，嘴张了张没声",
+              "shot": "固定镜头，醉汉看看空空如也的包又看看那部手机，嘴张了张没有声音",
+              "lens": "35mm 广角，中景深",
+              "cameraPosition": "醉酒富商 + 平视",
+              "composition": "中心构图",
+              "eyeline": "空包与手机",
+              "focus": "锁定醉汉",
+              "stability": "stable"
+            },
+            {
+              "beats": [
+                28,
+                28
+              ],
+              "seconds": 2.8,
+              "size": "close",
+              "camera": "Push In",
+              "characters": [
+                "C02"
+              ],
+              "frame": "特写，唐启山的声音哑下去，追问表的下落，额头沁出薄汗",
+              "shot": "镜头缓推近醉汉，他的声音哑下去追问表的下落，额头沁出一层薄汗",
+              "lens": "85mm 长焦，极浅景深",
+              "cameraPosition": "醉酒富商 + 平视特写",
+              "composition": "中心构图",
+              "eyeline": "面前的人",
+              "focus": "锁定醉汉面部",
+              "stability": "stable"
+            },
+            {
+              "beats": [
+                29,
+                29
+              ],
+              "seconds": 2.2,
+              "size": "close",
+              "camera": "Pan Right",
+              "characters": [
+                "C01"
+              ],
+              "frame": "特写，程野没有接话，慢慢转头，目光越过众人盯住那扇通向车库的门",
+              "shot": "镜头自左向右缓缓摇过年轻司机没有表情的侧脸，他的目光越过众人，落在那扇通向车库的门上",
+              "lens": "85mm 长焦，浅景深",
+              "cameraPosition": "司机 + 侧正面平视",
+              "composition": "三分法",
+              "eyeline": "通向车库的门",
+              "focus": "锁定司机的视线方向",
+              "stability": "stable"
+            },
+            {
+              "beats": [
+                30,
+                30
+              ],
+              "seconds": 3.2,
+              "size": "close",
+              "camera": "Push In",
+              "characters": [
+                "C01"
+              ],
+              "frame": "特写，程野的画外音响起，画面停在那扇门上，门缝底下透出一线车道的冷光",
+              "shot": "镜头缓推向那扇通向车库的门，门缝底下透出一线冷光，年轻司机的画外音轻轻落下",
+              "lens": "50mm 标准，中浅景深",
+              "cameraPosition": "房门 + 平视",
+              "composition": "中心构图",
+              "eyeline": "门缝冷光",
+              "focus": "锁定房门",
+              "stability": "stable"
+            }
+          ],
+          "h3Prompt": "How the reference pictures align with the target video — Picture 1 (from Shot 1) aligns with the 0.00-second mark of the target video; Picture 2 (from Shot 2) aligns with the 2.10-second mark of the target video; Picture 3 (from Shot 3) aligns with the 4.30-second mark of the target video; Picture 4 (from Shot 4) aligns with the 7.10-second mark of the target video; Picture 5 (from Shot 5) aligns with the 9.30-second mark of the target video.\n\nintegrated_multimodal_description:\n[Shot 1] The camera holds a static shot on <Picture 1>: hands spread, the security captain delivers the flat verdict, his gaze swinging from the drunk man to the driver (S1): <d>[Chinese] 没有。表不在包里。</d>\n[Shot 2] At 00:02.100, The camera holds a static shot on <Picture 2>: the drunk man looks from the empty bag to the phone and back, mouth opening on nothing.\n[Shot 3] At 00:04.300, A slow push in tightens on <Picture 3>: the voice drops to a rasp as the drunk man presses the question, a sheen of sweat on his brow (S1): <d>[Chinese] 表在哪儿……表去哪儿了？</d>\n[Shot 4] At 00:07.100, A slow pan right drifts across <Picture 4>: the driver offers no answer, only turns his head by degrees until his gaze settles on the door that leads down to the garage.\n[Shot 5] At 00:09.300, A slow push in drifts toward <Picture 5> and holds on the door, cold light leaking under it, as the driver says in an off-screen voiceover, quiet and certain, his lips remaining completely closed (S1): <d>[Chinese] 那只手收回去的方向，不是包。</d>\n\noverall_soundscape: Fan noise pushed suddenly far, a thread of garage ventilation seeping under the door, every ambient sound receding to a thin bed as the voiceover lands.\n\nnon_diegetic_music: A low drone pressed almost to inaudibility, sinking once as the voiceover falls.",
+          "blocking": "从老葛的摊手结论起，镜头一步步交给唐启山失神的脸，最后落在程野的视线与那扇门上——全集悬念钉在门缝的冷光里。",
+          "soundscape": "主机风扇声忽然被推远，门缝下灌进一丝车库通风的低鸣，画外音落下时所有环境声退成一层薄底",
+          "music": "低音持续音压到几乎听不见，只在画外音落下时轻轻一沉"
+        }
+      ]
+    },
+    {
+      "ep": 3,
+      "segments": [
+        {
+          "id": "E03-01",
+          "sceneIndex": 1,
+          "cuts": [
+            {
+              "beats": [
+                1,
+                2
+              ],
+              "seconds": 5.0,
+              "size": "close",
+              "camera": "Push In",
+              "characters": [
+                "C05"
+              ],
+              "frame": "特写，手电光扫过后备箱，停在折叠电动车的车把上，缠把布条里鼓着一块方形硬物，老葛戴手套的手探进来拆布条",
+              "shot": "镜头缓推，手电光扫过后备箱停在电动车车把上，保安队长戴着手套的手拆开缠把布条，一块机械腕表滑进掌心，表带间缠着半根长头发",
+              "lens": "85mm 长焦，极浅景深",
+              "cameraPosition": "后备箱 + 手电俯视",
+              "composition": "中心构图",
+              "eyeline": "车把上的布条",
+              "focus": "锁定布条与滑出的腕表",
+              "stability": "stable",
+              "props": [
+                "P01",
+                "P02"
+              ]
+            },
+            {
+              "beats": [
+                3,
+                3
+              ],
+              "seconds": 2.2,
+              "size": "close",
+              "camera": "Static Shot",
+              "characters": [
+                "C05"
+              ],
+              "frame": "特写，老葛捧着表转过身，手电光从下往上打在他为难的脸上",
+              "shot": "固定镜头，保安队长手套捧着腕表转过身，手电光从下往上打在他为难的脸上",
+              "lens": "50mm 标准，浅景深",
+              "cameraPosition": "保安队长 + 微仰平视",
+              "composition": "三分法",
+              "eyeline": "掌心的腕表",
+              "focus": "锁定保安队长",
+              "stability": "stable"
+            }
+          ],
+          "h3Prompt": "How the reference pictures align with the target video — Picture 1 (from Shot 1) aligns with the 0.00-second mark of the target video; Picture 2 (from Shot 2) aligns with the 5.00-second mark of the target video.\n\nintegrated_multimodal_description:\n[Shot 1] A slow push in follows the flashlight beam of <Picture 1> into the trunk: gloved fingers unwind the worn handlebar wrap, a mechanical watch slides into the security captain's palm with a few strands of long black hair caught in the bracelet.\n[Shot 2] At 00:05.000, The camera holds a static shot on <Picture 2>: cupping the watch in both gloves, the security captain turns, the flashlight beam throwing his reluctant face into relief (S1): <d>[Chinese] 唐总，表。</d>\n\noverall_soundscape: A flashlight clicking on, hollow echo across the epoxy floor, handlebar wrap unwinding in dry rasps, the watch sliding into a gloved palm with a light click.\n\nnon_diegetic_music: N/A",
+          "blocking": "冷开场直击物证：手电光圈里只有车把、布条与滑出的腕表，老葛在光圈边缘，其余人都在后备箱外的暗处。",
+          "soundscape": "手电开关咔哒一声，环氧地坪的空旷回声，布条被拆开的窸窣，腕表滑进手套掌心一声轻响",
+          "music": null
+        },
+        {
+          "id": "E03-02",
+          "sceneIndex": 1,
+          "cuts": [
+            {
+              "beats": [
+                4,
+                4
+              ],
+              "seconds": 2.2,
+              "size": "medium",
+              "camera": "Shake Slightly",
+              "characters": [
+                "C02",
+                "C05"
+              ],
+              "frame": "中景，唐启山一把夺过腕表，转身指住程野，声音都劈了，老葛的手还保持着捧表姿势",
+              "shot": "镜头随动作轻微晃动，醉汉一把夺过腕表，转身指住一旁的司机，握表的手抖得厉害",
+              "lens": "35mm 广角，中景深",
+              "cameraPosition": "双人 + 平视",
+              "composition": "对角线",
+              "eyeline": "被指认的司机",
+              "focus": "锁定醉汉挥臂动作",
+              "stability": "slight-shake",
+              "props": [
+                "P01"
+              ]
+            },
+            {
+              "beats": [
+                5,
+                5
+              ],
+              "seconds": 2.1,
+              "size": "close",
+              "camera": "Push In",
+              "characters": [
+                "C02"
+              ],
+              "frame": "特写，唐启山脸涨红放话，额头青筋隐现，手里的表晃在镜头边缘",
+              "shot": "镜头缓推近醉汉涨红的脸，他放狠话时握表的手在镜头边缘晃",
+              "lens": "85mm 长焦，极浅景深",
+              "cameraPosition": "醉酒富商 + 微仰平视",
+              "composition": "中心构图",
+              "eyeline": "面前众人",
+              "focus": "锁定醉汉面部",
+              "stability": "stable"
+            },
+            {
+              "beats": [
+                6,
+                6
+              ],
+              "seconds": 2.2,
+              "size": "wide",
+              "camera": "Static Shot",
+              "characters": [
+                "C01",
+                "C04"
+              ],
+              "frame": "全景，程野站在原地没动，周晓桐举着平板从车库口快步走进惨白光圈，屏幕亮着",
+              "shot": "固定镜头全景，年轻司机站在原地没动，值班女经理举着亮屏的平板从车库口快步走进光圈",
+              "lens": "24mm 广角，深景深",
+              "cameraPosition": "车库 + 平视远望",
+              "composition": "三分法",
+              "eyeline": "走进光圈的平板",
+              "focus": "锁定走进来的值班经理",
+              "stability": "stable"
+            }
+          ],
+          "h3Prompt": "How the reference pictures align with the target video — Picture 1 (from Shot 1) aligns with the 0.00-second mark of the target video; Picture 2 (from Shot 2) aligns with the 2.20-second mark of the target video; Picture 3 (from Shot 3) aligns with the 4.30-second mark of the target video.\n\nintegrated_multimodal_description:\n[Shot 1] A handheld take adds shake slightly through <Picture 1>: the drunk man snatches the watch away and wheels on the driver, finger out, the hand holding the watch trembling as his voice splits (S1): <d>[Chinese] 好啊，你们俩演我！</d>\n[Shot 2] At 00:02.200, A slow push in closes on <Picture 2>: face flushing dark, the drunk man brandishes the watch at the edge of frame while he spits the accusation (S1): <d>[Chinese] 好啊，你们俩演我！</d>\n[Shot 3] At 00:04.300, The camera holds a static shot framed wide on <Picture 3>: the driver does not move a step, while the duty manager strides into the pool of cold light holding up a tablet, its screen lit.\n\noverall_soundscape: A yank of fabric as the watch is snatched, shoes grinding a turn on the floor, the thin chime of a tablet screen lighting up from the ramp mouth.\n\nnon_diegetic_music: Two heavy percussion hits, then hanging.",
+          "blocking": "夺表与反咬挤在两秒里，程野不动如钉；周晓桐举平板进光圈是全段的破局信号，两人的静与动对切。",
+          "soundscape": "夺表的一声布料扯动，皮鞋碾地转身，平板屏幕点亮的一声轻响由车库口传来",
+          "music": "打击乐两记重音后悬住"
+        },
+        {
+          "id": "E03-03",
+          "sceneIndex": 1,
+          "cuts": [
+            {
+              "beats": [
+                7,
+                7
+              ],
+              "seconds": 2.5,
+              "size": "medium",
+              "camera": "Static Shot",
+              "characters": [
+                "C04"
+              ],
+              "frame": "中景，周晓桐举着平板报出回放来源与时刻，屏幕光照亮她的下颌",
+              "shot": "固定镜头，值班女经理举着平板报出回放的来源与时刻，屏幕光照亮她的下颌",
+              "lens": "50mm 标准，浅景深",
+              "cameraPosition": "值班经理 + 平视正面",
+              "composition": "三分法",
+              "eyeline": "手中平板",
+              "focus": "锁定值班经理上半身",
+              "stability": "stable"
+            },
+            {
+              "beats": [
+                8,
+                8
+              ],
+              "seconds": 2.8,
+              "size": "close",
+              "camera": "Push In",
+              "characters": [
+                "C04"
+              ],
+              "frame": "特写，平板屏幕上黑白的回放画面定格在车库角落，周晓桐报出方位",
+              "shot": "镜头缓推向平板屏幕，黑白回放画面里车库角落一个人影背对镜头，值班女经理报出方位",
+              "lens": "85mm 长焦，浅景深",
+              "cameraPosition": "平板屏幕 + 过肩俯视",
+              "composition": "中心构图",
+              "eyeline": "屏幕里的车库角落",
+              "focus": "锁定平板屏幕",
+              "stability": "stable"
+            },
+            {
+              "beats": [
+                9,
+                10
+              ],
+              "seconds": 3.0,
+              "size": "medium",
+              "camera": "Zoom In",
+              "characters": [
+                "C04",
+                "C03"
+              ],
+              "frame": "中景，平板转向众人，画面里白恬背对镜头往电动车把手上缠着什么，众人围拢的头影凑进画面边缘",
+              "shot": "镜头缓变焦推向平板画面，黑白影像里背对镜头的人影正往电动车把手上缠着什么，围拢的头影一个个凑进画面边缘",
+              "lens": "50mm 标准，中浅景深",
+              "cameraPosition": "平板屏幕 + 环视",
+              "composition": "中心构图",
+              "eyeline": "屏幕里的背影",
+              "focus": "锁定平板屏幕",
+              "stability": "stable",
+              "props": [
+                "P02",
+                "P03"
+              ]
+            }
+          ],
+          "h3Prompt": "How the reference pictures align with the target video — Picture 1 (from Shot 1) aligns with the 0.00-second mark of the target video; Picture 2 (from Shot 2) aligns with the 2.50-second mark of the target video; Picture 3 (from Shot 3) aligns with the 5.30-second mark of the target video.\n\nintegrated_multimodal_description:\n[Shot 1] The camera holds a static shot on <Picture 1>: holding up the tablet, the duty manager names the feed and the minute in a level voice (S1): <d>[Chinese] 进出口的回放调出来了。</d>\n[Shot 2] At 00:02.500, A slow push in moves toward <Picture 2>: on the tablet's grainy black-and-white feed a lone figure stands in the garage corner, back to the lens, as the duty manager reads the location (S1): <d>[Chinese] 零点五十一分，车库角落。</d>\n[Shot 3] At 00:05.300, A slow zoom in presses into <Picture 3>: on the tablet the recorded figure winds something around the e-bike's handlebar with her back turned, and the duty manager drives in the count over the crowd's silence (S1): <d>[Chinese] 前后十九秒，没有第二个人。</d>\n\noverall_soundscape: The tablet speaker's tinny playback audio, the crowd's hushed breathing around it, the fine scrape of tiptoes on epoxy floor.\n\nnon_diegetic_music: N/A",
+          "blocking": "平板是全段唯一光源与唯一证词：周晓桐报时刻、报方位、报秒数，众人围拢的头影在屏幕四周越压越低。",
+          "soundscape": "平板扬声器里单薄的回放原声，围拢人群压低的呼吸，环氧地坪上脚尖挪动的细响",
+          "music": null
+        },
+        {
+          "id": "E03-04",
+          "sceneIndex": 1,
+          "cuts": [
+            {
+              "beats": [
+                11,
+                11
+              ],
+              "seconds": 2.2,
+              "size": "medium",
+              "camera": "Static Shot",
+              "characters": [
+                "C03"
+              ],
+              "frame": "中景，白恬靠着机柜慢慢滑坐到地上，行李箱歪倒在脚边，顶灯把她的影子钉在车位线上",
+              "shot": "固定镜头，年轻女助理背靠机柜慢慢滑坐到地上，行李箱歪倒在脚边，她的影子被顶灯钉在车位线上",
+              "lens": "35mm 广角，中景深",
+              "cameraPosition": "女助理 + 平视正面",
+              "composition": "三分法",
+              "eyeline": "脚边的行李箱",
+              "focus": "锁定滑坐的女助理",
+              "stability": "stable",
+              "props": [
+                "P03"
+              ]
+            },
+            {
+              "beats": [
+                12,
+                12
+              ],
+              "seconds": 2.0,
+              "size": "close",
+              "camera": "Push In",
+              "characters": [
+                "C03"
+              ],
+              "frame": "特写，白恬坐在地上抬起头，第一句话轻得像自言自语，眼泪已经在眼眶里",
+              "shot": "镜头缓推，坐在地上的年轻女助理抬起头开口，声音很轻，眼泪已经在眼眶里打转",
+              "lens": "85mm 长焦，浅景深",
+              "cameraPosition": "女助理 + 微俯平视",
+              "composition": "中心构图",
+              "eyeline": "面前的人群",
+              "focus": "锁定女助理面部",
+              "stability": "stable"
+            },
+            {
+              "beats": [
+                13,
+                13
+              ],
+              "seconds": 3.9,
+              "size": "close",
+              "camera": "Push In",
+              "characters": [
+                "C03"
+              ],
+              "frame": "特写，白恬指着唐启山腕上曾经的位置，一字一字控诉，笑意和眼泪一起涌上来",
+              "shot": "镜头缓推，坐在地上的女助理抬手指向对面，一字一字控诉，笑着笑着眼泪涌上来",
+              "lens": "85mm 长焦，浅景深",
+              "cameraPosition": "女助理 + 微俯平视",
+              "composition": "三分法",
+              "eyeline": "对面的醉汉",
+              "focus": "锁定女助理面部",
+              "stability": "stable",
+              "props": [
+                "P01"
+              ]
+            },
+            {
+              "beats": [
+                14,
+                14
+              ],
+              "seconds": 2.5,
+              "size": "close",
+              "camera": "Static Shot",
+              "characters": [
+                "C03"
+              ],
+              "frame": "特写，白恬说出母亲在等手术费，声音稳得反常，眼泪顺着下颌线砸在衣领上",
+              "shot": "固定镜头，女助理说出医院里等手术费的母亲，声音稳得反常，眼泪顺着下颌线砸在衣领上",
+              "lens": "85mm 长焦，极浅景深",
+              "cameraPosition": "女助理 + 微俯平视",
+              "composition": "中心构图",
+              "eyeline": "面前的人群",
+              "focus": "锁定女助理面部",
+              "stability": "stable"
+            },
+            {
+              "beats": [
+                15,
+                15
+              ],
+              "seconds": 2.8,
+              "size": "medium",
+              "camera": "Pull Out",
+              "characters": [
+                "C03",
+                "C02",
+                "C01"
+              ],
+              "frame": "中景，白恬举起手里没有东西的两只手把最后一句抛向全场，车库里死一样静，画面缓缓拉开见出围观的圈",
+              "shot": "镜头缓缓拉远，坐在地上的女助理摊开两只手把最后一句抛向全场，车库里死一样静，围观的圈一点点显出来",
+              "lens": "35mm 广角，中景深",
+              "cameraPosition": "女助理 + 环视拉远",
+              "composition": "对称",
+              "eyeline": "全场众人",
+              "focus": "锁定圈中央的女助理",
+              "stability": "stable"
+            }
+          ],
+          "h3Prompt": "How the reference pictures align with the target video — Picture 1 (from Shot 1) aligns with the 0.00-second mark of the target video; Picture 2 (from Shot 2) aligns with the 2.20-second mark of the target video; Picture 3 (from Shot 3) aligns with the 4.20-second mark of the target video; Picture 4 (from Shot 4) aligns with the 8.10-second mark of the target video; Picture 5 (from Shot 5) aligns with the 10.60-second mark of the target video.\n\nintegrated_multimodal_description:\n[Shot 1] The camera holds a static shot on <Picture 1>: her legs giving out by degrees, the assistant slides down the rack to the floor, the suitcase toppling sideways at her feet while the overhead light nails her shadow to the parking line.\n[Shot 2] At 00:02.200, A slow push in settles on <Picture 2>: seated on the floor, the assistant tips her head back and begins almost to herself, tears already standing in her eyes (S1): <d>[Chinese] 工资，欠了半年。</d>\n[Shot 3] At 00:04.200, A slow push in tightens on <Picture 3>: pointing at the empty place where the watch used to sit, the assistant lays out the humiliation sentence by sentence, laughter and tears arriving together (S1): <d>[Chinese] 他戴着几十万的表，让我陪客户喝酒。</d>\n[Shot 4] At 00:08.100, The camera holds a static shot framed close on <Picture 4>: her voice unnervingly steady as she says the last part, a tear breaking free and striking her collar (S1): <d>[Chinese] 我妈还在医院等手术费。</d>\n[Shot 5] At 00:10.600, A slow pull out widens from <Picture 5>: spreading both empty hands at the crowd, the assistant throws the last question at the whole silent ring of them (S1): <d>[Chinese] 这块表就当利息，怎么了？</d>\n\noverall_soundscape: Fabric scraping the rack as she slides down, tears landing soundlessly, the garage so quiet only the ventilation shaft hums, the last line rolling a faint echo through the hall.\n\nnon_diegetic_music: Strings climbing from far below and stopping the instant her hands spread open.",
+          "blocking": "白恬的控诉从地上开始：滑坐、抬头、指人、摊手，四拍递进；行李箱歪在脚边当实物注脚，围观的圈越收越紧。",
+          "soundscape": "滑坐时布料蹭过机柜的摩擦声，眼泪砸在衣领上无声，全场静得只剩通风井低鸣，最后一句在空库里荡出回音",
+          "music": "弦乐从极低处爬升，在她摊手的一瞬停住"
+        },
+        {
+          "id": "E03-05",
+          "sceneIndex": 1,
+          "cuts": [
+            {
+              "beats": [
+                16,
+                16
+              ],
+              "seconds": 2.2,
+              "size": "medium",
+              "camera": "Push In",
+              "characters": [
+                "C02"
+              ],
+              "frame": "中景，车库里死一样地静，唐启山脸上的红一点点褪下去，嘴唇动了动没出声",
+              "shot": "镜头缓推，醉汉脸上的红一点点褪下去，嘴唇动了动没有出声，喉结上下滚了一趟",
+              "lens": "50mm 标准，浅景深",
+              "cameraPosition": "醉酒富商 + 平视特写",
+              "composition": "中心构图",
+              "eyeline": "地上的女助理",
+              "focus": "锁定醉汉面部",
+              "stability": "stable"
+            },
+            {
+              "beats": [
+                17,
+                17
+              ],
+              "seconds": 2.5,
+              "size": "close",
+              "camera": "Shake Slightly",
+              "characters": [
+                "C02"
+              ],
+              "frame": "特写，唐启山终于找回声音，色厉内荏地喊出盗窃两个字，手指却不敢指下去",
+              "shot": "镜头轻微晃动，醉汉终于找回声音喊出那两个字，抬到一半的手又软下去",
+              "lens": "85mm 长焦，浅景深",
+              "cameraPosition": "醉酒富商 + 微仰平视",
+              "composition": "中心构图",
+              "eyeline": "面前众人",
+              "focus": "锁定醉汉面部",
+              "stability": "slight-shake"
+            }
+          ],
+          "h3Prompt": "How the reference pictures align with the target video — Picture 1 (from Shot 1) aligns with the 0.00-second mark of the target video; Picture 2 (from Shot 2) aligns with the 2.20-second mark of the target video.\n\nintegrated_multimodal_description:\n[Shot 1] A slow push in watches <Picture 1>: the flush draining from the drunk man's face by degrees, his lips moving around words that do not come.\n[Shot 2] At 00:02.200, A handheld take adds shake slightly through <Picture 2>: the drunk man finally finds his voice and shouts the word theft, the half-raised hand wilting midair as the threat loses its floor (S1): <d>[Chinese] 你这是盗窃！我有录音！</d>\n\noverall_soundscape: Ventilation hum filling the dead silence, leather shoes shifting half a step and stopping, the shout bouncing off the racks into a thin, dry echo.\n\nnon_diegetic_music: N/A",
+          "blocking": "静场给唐启山：脸上的红褪下去比任何台词都响；他找补的那句喊声在空库里显得又干又薄。",
+          "soundscape": "通风井低鸣填满静场，皮鞋碾地半步又停，喊声撞在机柜上弹回一点干巴巴的回响",
+          "music": null
+        },
+        {
+          "id": "E03-06",
+          "sceneIndex": 2,
+          "cuts": [
+            {
+              "beats": [
+                1,
+                1
+              ],
+              "seconds": 2.2,
+              "size": "medium",
+              "camera": "Static Shot",
+              "characters": [
+                "C03"
+              ],
+              "frame": "中景，日光灯全亮的监控室里，白恬在笔录上按完指印抬起手，指腹上一枚红印，身后两名警察一左一右站定",
+              "shot": "固定镜头，坐在长桌前的女助理在笔录上按完指印抬起手，指腹一枚红印，两名警察的影子一左一右落在他身后的墙上",
+              "lens": "50mm 标准，中浅景深",
+              "cameraPosition": "长桌 + 平视",
+              "composition": "三分法",
+              "eyeline": "按印的指尖",
+              "focus": "锁定白恬与笔录",
+              "stability": "stable",
+              "props": [
+                "P01"
+              ]
+            },
+            {
+              "beats": [
+                2,
+                2
+              ],
+              "seconds": 2.1,
+              "size": "close",
+              "camera": "Pan Left",
+              "characters": [
+                "C02"
+              ],
+              "frame": "特写，唐启山在机柜边被拦住，探着身子朝长桌方向喊，脖子上青筋鼓起",
+              "shot": "镜头自右向左摇到醉汉，他探着身子朝长桌方向喊，被抬起来的一只手臂拦在半途",
+              "lens": "85mm 长焦，浅景深",
+              "cameraPosition": "醉酒富商 + 平视特写",
+              "composition": "对角线",
+              "eyeline": "长桌方向",
+              "focus": "锁定醉汉面部",
+              "stability": "slight-shake"
+            },
+            {
+              "beats": [
+                3,
+                3
+              ],
+              "seconds": 4.8,
+              "size": "medium",
+              "camera": "Static Shot",
+              "characters": [
+                "C04"
+              ],
+              "frame": "中景，周晓桐站在长桌后抬手压住场面，一句话把另一桩事摆到台面上，日光灯把她影子投在制度公示牌上",
+              "shot": "固定镜头，值班女经理站在长桌后抬手压住场面，不紧不慢把话递过去，影子落在门后的公示牌上",
+              "lens": "35mm 广角，中景深",
+              "cameraPosition": "值班经理 + 平视正面",
+              "composition": "三分法",
+              "eyeline": "门口方向的醉汉",
+              "focus": "锁定值班经理上半身",
+              "stability": "stable"
+            }
+          ],
+          "h3Prompt": "How the reference pictures align with the target video — Picture 1 (from Shot 1) aligns with the 0.00-second mark of the target video; Picture 2 (from Shot 2) aligns with the 2.20-second mark of the target video; Picture 3 (from Shot 3) aligns with the 4.30-second mark of the target video.\n\nintegrated_multimodal_description:\n[Shot 1] The camera holds a static shot on <Picture 1>: under flat white tubes the assistant lifts her inked thumb from the statement page, the two officers standing planted at either shoulder, their shadows doubled on the wall behind.\n[Shot 2] At 00:02.200, A pan left swings to <Picture 2>: leaning past the arm that bars his way, the drunk man bellows toward the desk, cords standing out on his neck (S1): <d>[Chinese] 白恬！把话说清楚！</d>\n[Shot 3] At 00:04.300, The camera holds a static shot on <Picture 3>: one raised hand settles the room as the duty manager, unhurried behind the desk, lays the second matter on the table with the same even voice (S1): <d>[Chinese] 劳动监察那边，也请您解释解释拖欠工资的事。</d>\n\noverall_soundscape: A thumbpress landing softly on paper, cloth straining as a man is held back, one light hum from the fluorescent ballast, pages of a statement turning at the desk.\n\nnon_diegetic_music: N/A",
+          "blocking": "笔录收尾一场戏三个站位：长桌前按印的白恬、被拦在机柜边的唐启山、桌后压场的周晓桐；警察只是两面沉默的墙。",
+          "soundscape": "指印按在纸上的轻响，被拦者挣扎的衣料声，日光灯镇流器一声轻嗡，长桌另一头翻动笔录的纸页声",
+          "music": null
+        },
+        {
+          "id": "E03-07",
+          "sceneIndex": 2,
+          "cuts": [
+            {
+              "beats": [
+                4,
+                5
+              ],
+              "seconds": 5.0,
+              "size": "wide",
+              "camera": "Tracking Shot",
+              "characters": [
+                "C03"
+              ],
+              "frame": "全景，白恬起身走向门口，忽然回头，目光从每张脸上扫过最后落在唐启山身上，她轻轻笑了一声，什么都没说，跟着警察出了门",
+              "shot": "镜头平稳跟随，年轻女助理起身走向门口，忽然回头，目光从每张脸上扫过最后停在醉汉身上，轻轻笑了一声，什么都没说，跟着警察走出门去",
+              "lens": "24mm 广角，深景深",
+              "cameraPosition": "女助理 + 背面跟随转正面",
+              "composition": "对角线",
+              "eyeline": "屋内众人",
+              "focus": "锁定回头的女助理",
+              "stability": "slight-shake"
+            }
+          ],
+          "h3Prompt": "For the target video, at 0.00 seconds into the target video, <Picture 1> (from [Shot 1]) is fully referenced.\n\nintegrated_multimodal_description:\n[Shot 1] A tracking shot follows <Picture 1>: rising on unsteady legs the assistant walks for the door, stops, and sweeps one last look across every face until it settles on the drunk man — a small laugh, no words — then walks out between the officers.\n\noverall_soundscape: A chair leg scraping, footsteps fading toward the door, the door catch clicking home, footsteps beyond it sinking out of hearing.\n\nnon_diegetic_music: N/A",
+          "blocking": "退场一镜到底：回头、扫视、轻笑、出门，全段没有一句台词，门在镜头尽头合拢。",
+          "soundscape": "椅腿蹭地一声，脚步声走向门口越来越轻，门吸合拢的哒声，门后走廊的脚步渐渐听不见",
+          "music": null
+        },
+        {
+          "id": "E03-08",
+          "sceneIndex": 3,
+          "cuts": [
+            {
+              "beats": [
+                1,
+                2
+              ],
+              "seconds": 5.0,
+              "size": "wide",
+              "camera": "Static Shot",
+              "characters": [
+                "C01",
+                "C02"
+              ],
+              "frame": "全景，警灯的蓝红光扫进车库，唐启山围着程野转了半圈，从钱夹里抽出名片双手递过去，程野站在电动车旁没有动",
+              "shot": "固定镜头全景，蓝红光带扫过车位，醉汉围着年轻司机转了半圈，从钱夹里抽出名片双手递过去，司机站在电动车旁没有接",
+              "lens": "24mm 广角，深景深",
+              "cameraPosition": "双人 + 平视侧面",
+              "composition": "三分法",
+              "eyeline": "递出的名片",
+              "focus": "锁定两人对峙",
+              "stability": "stable",
+              "props": [
+                "P01"
+              ]
+            }
+          ],
+          "h3Prompt": "For the target video, at 0.00 seconds into the target video, <Picture 1> (from [Shot 1]) is fully referenced.\n\nintegrated_multimodal_description:\n[Shot 1] The camera holds a static shot framed wide on <Picture 1>: red-and-blue light sweeping the bay, the drunk man makes half a circle around the driver and extends a business card with both hands; the driver stands by the e-bike and does not take it.\n\noverall_soundscape: Squad-light sweeps with radio static stammering from the far ramp, a wallet flipping open, the business card trembling faintly in the night air.\n\nnon_diegetic_music: N/A",
+          "blocking": "收尾段开场维持双人对峙：唐启山绕圈、递名片，程野不接；警灯把两个人的脸轮番染成蓝红。",
+          "soundscape": "警灯扫过时车门远方传来对讲机断续的电流声，钱夹开合一声，名片递出时纸板轻响",
+          "music": null
+        },
+        {
+          "id": "E03-09",
+          "sceneIndex": 3,
+          "cuts": [
+            {
+              "beats": [
+                3,
+                3
+              ],
+              "seconds": 3.9,
+              "size": "medium",
+              "camera": "Static Shot",
+              "characters": [
+                "C02"
+              ],
+              "frame": "中景，唐启山举着名片开口招揽，语气里带着酒后残余的笃定，蓝红光在他脸上轮番洗过",
+              "shot": "固定镜头，醉汉举着名片开口招揽，语气里带着酒后残余的笃定，蓝红光轮番洗过他的脸",
+              "lens": "50mm 标准，浅景深",
+              "cameraPosition": "醉酒富商 + 平视正面",
+              "composition": "三分法",
+              "eyeline": "面前的司机",
+              "focus": "锁定醉汉上半身",
+              "stability": "stable"
+            },
+            {
+              "beats": [
+                4,
+                4
+              ],
+              "seconds": 2.2,
+              "size": "close",
+              "camera": "Static Shot",
+              "characters": [
+                "C01"
+              ],
+              "frame": "特写，程野把手电和行驶证收好，目光从名片上抬起来，没有伸手",
+              "shot": "固定镜头近看年轻司机，他把手电和行驶证收好，目光从名片上抬起来，没有伸手",
+              "lens": "85mm 长焦，浅景深",
+              "cameraPosition": "司机 + 平视特写",
+              "composition": "三分法",
+              "eyeline": "递来的名片",
+              "focus": "锁定司机的眼睛",
+              "stability": "stable",
+              "props": [
+                "P02"
+              ]
+            },
+            {
+              "beats": [
+                5,
+                5
+              ],
+              "seconds": 3.4,
+              "size": "close",
+              "camera": "Push In",
+              "characters": [
+                "C01"
+              ],
+              "frame": "特写，程野开口只讨一句道歉，语气平直，蓝红光在他身后交错",
+              "shot": "镜头缓推近年轻司机，他语气平直把要求说完，目光没有挪开",
+              "lens": "85mm 长焦，浅景深",
+              "cameraPosition": "司机 + 平视特写",
+              "composition": "中心构图",
+              "eyeline": "对面的醉汉",
+              "focus": "锁定司机面部",
+              "stability": "stable"
+            }
+          ],
+          "h3Prompt": "How the reference pictures align with the target video — Picture 1 (from Shot 1) aligns with the 0.00-second mark of the target video; Picture 2 (from Shot 2) aligns with the 3.90-second mark of the target video; Picture 3 (from Shot 3) aligns with the 6.10-second mark of the target video.\n\nintegrated_multimodal_description:\n[Shot 1] The camera holds a static shot on <Picture 1>: card still extended, the drunk man makes his pitch with the residue of drink-bold confidence, alternating red and blue washing his face (S1): <d>[Chinese] 小程，跟着我干。别浪费在方向盘上。</d>\n[Shot 2] At 00:03.900, The camera holds a static shot framed close on <Picture 2>: pocketing his flashlight and permit, the driver lifts his gaze from the card to the man holding it, and his hands stay at his sides.\n[Shot 3] At 00:06.100, A slow push in closes on <Picture 3>: level and unhurried, the driver asks for the one thing money was supposed to cover (S1): <d>[Chinese] 表找回来了。道歉的事，别忘了。</d>\n\noverall_soundscape: The cardstock shivering in the breeze, a car door thudding shut in the distance, radio static receding into the background.\n\nnon_diegetic_music: N/A",
+          "blocking": "名片在两人之间悬着：唐启山给的是收买，程野要的是道歉；警灯把这场交易照得无处遁形。",
+          "soundscape": "名片纸板在夜风里轻颤的细响，远处车门关闭一声闷响，对讲机电流声退成背景",
+          "music": null
+        },
+        {
+          "id": "E03-10",
+          "sceneIndex": 3,
+          "cuts": [
+            {
+              "beats": [
+                6,
+                7
+              ],
+              "seconds": 5.0,
+              "size": "medium",
+              "camera": "Pull Out",
+              "characters": [
+                "C01",
+                "C02",
+                "C04"
+              ],
+              "frame": "中景，唐启山僵在原地名片举在半空；车库口周晓桐帮程野把折叠电动车扶正，蓝红光扫过两个人的背",
+              "shot": "镜头缓缓拉远，醉汉僵在原地名片还举在半空，车库口值班女经理帮年轻司机把折叠电动车扶正，蓝红光扫过两个人的背",
+              "lens": "35mm 广角，中景深",
+              "cameraPosition": "车库口 + 平视拉远",
+              "composition": "三分法",
+              "eyeline": "扶车的两人",
+              "focus": "锁定车库口两人",
+              "stability": "stable"
+            },
+            {
+              "beats": [
+                8,
+                9
+              ],
+              "seconds": 3.9,
+              "size": "close",
+              "camera": "Static Shot",
+              "characters": [
+                "C04",
+                "C01"
+              ],
+              "frame": "特写，周晓桐扶着车把夸了那句习惯，程野跨上车笑了，答了四个字",
+              "shot": "固定镜头近看，值班女经理扶着车把开口，跨上车的年轻司机笑了笑接了话",
+              "lens": "50mm 标准，浅景深",
+              "cameraPosition": "双人 + 平视侧面",
+              "composition": "三分法",
+              "eyeline": "彼此的脸",
+              "focus": "锁定两人中近景",
+              "stability": "stable"
+            }
+          ],
+          "h3Prompt": "How the reference pictures align with the target video — Picture 1 (from Shot 1) aligns with the 0.00-second mark of the target video; Picture 2 (from Shot 2) aligns with the 5.00-second mark of the target video.\n\nintegrated_multimodal_description:\n[Shot 1] A slow pull out widens from <Picture 1>: the drunk man frozen with the card still hanging in the air, while across the bay the duty manager steadies the folded e-bike upright for the driver, blue and red light raking both their backs.\n[Shot 2] At 00:05.000, The camera holds a static shot framed close on <Picture 2>: steadying the handlebar, the duty manager nods at the habit that saved the night (S1): <d>[Chinese] 这习惯挺好，录像。</d> and the driver, swinging a leg over the saddle, answers with a small laugh (S2): <d>[Chinese] 被讹出来的习惯。</d>\n\noverall_soundscape: The e-bike stand snapping upright with a click, the handlebar steadied with a light metallic knock, far police radio stuttering intermittently.\n\nnon_diegetic_music: N/A",
+          "blocking": "僵局与暖意同框：一端是名片悬在半空的唐启山，一端是车库口扶车的周晓桐；两句对话把全集的主题轻轻落地。",
+          "soundscape": "电动车支架撑开立稳的咔哒声，车把扶正的金属轻响，远处警用无线电的断续电流",
+          "music": null
+        },
+        {
+          "id": "E03-11",
+          "sceneIndex": 3,
+          "cuts": [
+            {
+              "beats": [
+                10,
+                10
+              ],
+              "seconds": 3.2,
+              "size": "close",
+              "camera": "Static Shot",
+              "characters": [
+                "C01"
+              ],
+              "frame": "特写，程野跨坐在车上说出每单必录的来历，语气不重，眼睛亮着",
+              "shot": "固定镜头近看跨坐在车上的年轻司机，他不急不慢说出每单必录的来历，眼睛亮着",
+              "lens": "85mm 长焦，浅景深",
+              "cameraPosition": "司机 + 平视特写",
+              "composition": "中心构图",
+              "eyeline": "面前的人",
+              "focus": "锁定司机面部",
+              "stability": "stable"
+            },
+            {
+              "beats": [
+                11,
+                11
+              ],
+              "seconds": 2.5,
+              "size": "close",
+              "camera": "Push In",
+              "characters": [
+                "C01"
+              ],
+              "frame": "特写，程野补上后一半，嘴角带笑，蓝红光退成身后的背景",
+              "shot": "镜头缓推近年轻司机，他补上后一半，嘴角带笑，蓝红光退成身后的背景",
+              "lens": "85mm 长焦，浅景深",
+              "cameraPosition": "司机 + 平视特写",
+              "composition": "三分法",
+              "eyeline": "空荡荡的车库口",
+              "focus": "锁定司机面部",
+              "stability": "stable"
+            },
+            {
+              "beats": [
+                12,
+                13
+              ],
+              "seconds": 5.0,
+              "size": "wide",
+              "camera": "Tracking Shot",
+              "characters": [
+                "C01"
+              ],
+              "frame": "全景，程野骑车汇进空荡荡的马路，接单手机又亮了一下；新订单的起点还是环宇大厦，他把旧手机往支架上一卡，镜头朝后，按下录像",
+              "shot": "镜头平稳跟随，年轻司机骑车汇进空荡荡的马路，接单手机亮了一下，他捏闸减速，把旧手机卡上支架，镜头朝后按下录像，重新汇进车流",
+              "lens": "35mm 广角，中景深",
+              "cameraPosition": "骑行司机 + 侧面跟随",
+              "composition": "对角线",
+              "eyeline": "前方空荡的马路",
+              "focus": "锁定骑行的司机与支架手机",
+              "stability": "slight-shake",
+              "props": [
+                "P02"
+              ]
+            }
+          ],
+          "h3Prompt": "How the reference pictures align with the target video — Picture 1 (from Shot 1) aligns with the 0.00-second mark of the target video; Picture 2 (from Shot 2) aligns with the 3.20-second mark of the target video; Picture 3 (from Shot 3) aligns with the 5.70-second mark of the target video.\n\nintegrated_multimodal_description:\n[Shot 1] The camera holds a static shot framed close on <Picture 1>: seated on the saddle, the driver explains the habit without hurry, eyes bright under the receding siren light (S1): <d>[Chinese] 每一单都录，是为保护我自己。</d>\n[Shot 2] At 00:03.200, A slow push in closes on <Picture 2>: the last of it lands almost lightly, the siren glow fading behind his shoulder (S1): <d>[Chinese] 今天头一回，护了别人。</d>\n[Shot 3] At 00:05.700, A tracking shot rides with <Picture 3>: the driver merges into the empty boulevard, his order phone blinking once — the next pickup again at the same office tower — and he slows just enough to seat the battered phone into its mount, lens facing back, and presses record before the city swallows him.\n\noverall_soundscape: Tires hissing over asphalt as the rider fades away, one order chime, the soft click of the mount clamp, night wind opening past his ears.\n\nnon_diegetic_music: Two sparse single piano notes, fading with the ride.",
+          "blocking": "收尾与开场互为镜像：同一只手、同一个支架、同一个按下录像的动作；唯一变了的是夜色里的身份——他不再是自保的猎物。",
+          "soundscape": "轮胎碾过路面的沙沙声由近及远，接单提示音叮的一声，支架卡槽咔哒轻响，夜风掠过耳边的呼声铺开",
+          "music": "极简钢琴单音两粒，随骑行远去淡出"
+        }
+      ]
+    }
+  ]
+}

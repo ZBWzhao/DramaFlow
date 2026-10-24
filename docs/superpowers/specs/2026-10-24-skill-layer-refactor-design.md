@@ -73,10 +73,10 @@
 5. 选定样例小说，在 Claude Code 中端到端跑通技能链，产物留作阶段 1 测试夹具。
 
 验收清单：
-- [ ] `pipeline_skills/` 下 7 个新技能就位且有清单说明；
-- [ ] 数据契约文档定稿；
-- [ ] 样例小说端到端跑通 6 个文本管线技能（outline/script/characters/art/staging/storyboard），产出 JSON + 评审报告；`character-refs` 依赖出图后端（ComfyUI/OpenAI），后端就绪则跑通，未就绪则只验收其提示词产物并在文档记录缺口；
-- [ ] migration 脚本草稿完成（阶段 1 执行）。
+- [x] `pipeline_skills/` 下 7 个新技能就位且有清单说明；
+- [x] 数据契约文档定稿；
+- [x] 样例小说端到端跑通 6 个文本管线技能（outline/script/characters/art/staging/storyboard），产出 JSON + 评审报告；`character-refs` 依赖出图后端（ComfyUI/OpenAI），后端就绪则跑通，未就绪则只验收其提示词产物并在文档记录缺口；
+- [x] migration 脚本草稿完成（阶段 1 执行）。
 
 ### 阶段 1：链路打通（约 1 周）
 

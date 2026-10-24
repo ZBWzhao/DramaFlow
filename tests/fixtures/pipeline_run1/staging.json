@@ -1,0 +1,173 @@
+{
+  "source": "最后一单",
+  "lang": "zh",
+  "locations": [
+    {
+      "sceneId": "S02",
+      "name": "唐启山轿车车厢",
+      "readFrom": "prompt",
+      "items": [
+        { "name": "仪表台", "alt": "dashboard", "plan": [0.15, 0.0, 0.85, 0.15], "on": false },
+        { "name": "驾驶座", "alt": "driver seat", "plan": [0.08, 0.35, 0.45, 0.7], "on": true },
+        { "name": "副驾驶座椅", "alt": "front passenger seat", "plan": [0.55, 0.35, 0.92, 0.7], "on": true },
+        { "name": "后排座椅", "alt": "rear bench", "plan": [0.12, 0.72, 0.88, 0.98], "on": true }
+      ]
+    },
+    {
+      "sceneId": "S01",
+      "name": "翠湖一号地下车库",
+      "readFrom": "prompt",
+      "items": [
+        { "name": "出入口闸机", "alt": "entry barrier gate", "plan": [0.4, 0.0, 0.62, 0.07], "on": false },
+        { "name": "绿色出口灯牌", "alt": "green exit lightbox", "plan": [0.64, 0.0, 0.74, 0.05], "on": false },
+        { "name": "西侧编号立柱", "alt": "west numbered pillar", "plan": [0.16, 0.16, 0.24, 0.46], "on": false },
+        { "name": "东侧编号立柱", "alt": "east numbered pillar", "plan": [0.74, 0.18, 0.82, 0.48], "on": false },
+        { "name": "轿车车位", "alt": "sedan parking bay", "plan": [0.36, 0.28, 0.64, 0.5], "on": false },
+        { "name": "折叠电动车位", "alt": "folded e-bike spot", "plan": [0.3, 0.52, 0.42, 0.66], "on": true },
+        { "name": "车库中央空地", "alt": "garage central floor", "plan": [0.46, 0.52, 0.78, 0.8], "on": true }
+      ]
+    },
+    {
+      "sceneId": "S03",
+      "name": "物业监控室",
+      "readFrom": "prompt",
+      "items": [
+        { "name": "监视器墙", "alt": "monitor wall", "plan": [0.25, 0.0, 0.75, 0.12], "on": false },
+        { "name": "设备机柜", "alt": "equipment rack", "plan": [0.02, 0.12, 0.14, 0.5], "on": false },
+        { "name": "值班椅", "alt": "duty chair", "plan": [0.42, 0.3, 0.56, 0.5], "on": true },
+        { "name": "登记簿长桌", "alt": "ledger desk", "plan": [0.2, 0.35, 0.75, 0.65], "on": false },
+        { "name": "监控室门口", "alt": "monitoring room doorway", "plan": [0.4, 0.9, 0.6, 1.0], "on": false }
+      ]
+    }
+  ],
+  "scenes": [
+    {
+      "ep": 1,
+      "scene": 1,
+      "sceneId": "S02",
+      "lighting": "夜路路灯流动",
+      "cast": [
+        { "id": "C01", "name": "程野" },
+        { "id": "C02", "name": "唐启山" },
+        { "id": "C03", "name": "白恬" }
+      ],
+      "places": [
+        { "id": "C01", "name": "程野", "present": true, "item": "驾驶座", "side": "on", "along": 0.5, "posture": "sit", "facing": "north" },
+        { "id": "C02", "name": "唐启山", "present": true, "item": "后排座椅", "side": "on", "along": 0.5, "posture": "sit", "facing": "north" },
+        { "id": "C03", "name": "白恬", "present": true, "item": "副驾驶座椅", "side": "on", "along": 0.5, "posture": "sit", "facing": "north" }
+      ],
+      "extras": 0,
+      "extrasWhere": null,
+      "why": "车内各就各位：司机在驾驶座，醉酒的老板瘫后排正对司机的后视镜视线，助理坐副驾——权力关系一眼读出，谁都不下车。"
+    },
+    {
+      "ep": 1,
+      "scene": 2,
+      "sceneId": "S01",
+      "lighting": "顶灯惨白",
+      "cast": [
+        { "id": "C01", "name": "程野" },
+        { "id": "C02", "name": "唐启山" },
+        { "id": "C03", "name": "白恬" },
+        { "id": "C05", "name": "保安队长老葛" }
+      ],
+      "places": [
+        { "id": "C01", "name": "程野", "present": true, "item": "折叠电动车位", "side": "on", "along": 0.4, "posture": "stand", "facing": "northeast" },
+        { "id": "C02", "name": "唐启山", "present": true, "item": "轿车车位", "side": "east", "along": 0.5, "posture": "stand", "facing": "west" },
+        { "id": "C03", "name": "白恬", "present": true, "item": "轿车车位", "side": "south", "along": 0.6, "posture": "stand", "facing": "north" },
+        { "id": "C05", "name": "保安队长老葛", "present": false, "item": null, "side": null, "along": null, "posture": null, "facing": null }
+      ],
+      "extras": 0,
+      "extrasWhere": null,
+      "why": "开场三人各忙各的：白恬在车尾放行李打电话，唐启山在车门边干呕，程野在车尾折电动车；老葛带两名保安是中途才围上来的，开场不在、群演为零。"
+    },
+    {
+      "ep": 2,
+      "scene": 1,
+      "sceneId": "S03",
+      "lighting": "屏幕蓝光",
+      "cast": [
+        { "id": "C01", "name": "程野" },
+        { "id": "C02", "name": "唐启山" },
+        { "id": "C03", "name": "白恬" },
+        { "id": "C04", "name": "周晓桐" },
+        { "id": "C05", "name": "保安队长老葛" }
+      ],
+      "places": [
+        { "id": "C01", "name": "程野", "present": true, "item": "监控室门口", "side": "east", "along": 0.3, "posture": "stand", "facing": "north" },
+        { "id": "C02", "name": "唐启山", "present": true, "item": "设备机柜", "side": "east", "along": 0.4, "posture": "stand", "facing": "east" },
+        { "id": "C03", "name": "白恬", "present": true, "item": "监控室门口", "side": "west", "along": 0.4, "posture": "stand", "facing": "north" },
+        { "id": "C04", "name": "周晓桐", "present": true, "item": "监控室门口", "side": "east", "along": 0.6, "posture": "stand", "facing": "north" },
+        { "id": "C05", "name": "保安队长老葛", "present": true, "item": "登记簿长桌", "side": "west", "along": 0.5, "posture": "stand", "facing": "east" }
+      ],
+      "extras": 0,
+      "extrasWhere": null,
+      "why": "程野举手机与周晓桐拿登记簿一前一后进门；唐启山撑着机柜熬红了眼，白恬靠门边抱臂，老葛在桌西侧——对立双方隔着长桌，镜头留出中间通道。"
+    },
+    {
+      "ep": 3,
+      "scene": 1,
+      "sceneId": "S01",
+      "lighting": "顶灯惨白",
+      "cast": [
+        { "id": "C01", "name": "程野" },
+        { "id": "C02", "name": "唐启山" },
+        { "id": "C03", "name": "白恬" },
+        { "id": "C04", "name": "周晓桐" },
+        { "id": "C05", "name": "保安队长老葛" }
+      ],
+      "places": [
+        { "id": "C01", "name": "程野", "present": true, "item": "折叠电动车位", "side": "on", "along": 0.5, "posture": "stand", "facing": "north" },
+        { "id": "C02", "name": "唐启山", "present": true, "item": "车库中央空地", "side": "on", "along": 0.3, "posture": "stand", "facing": "west" },
+        { "id": "C03", "name": "白恬", "present": true, "item": "车库中央空地", "side": "on", "along": 0.7, "posture": "stand", "facing": "northwest" },
+        { "id": "C04", "name": "周晓桐", "present": false, "item": null, "side": null, "along": null, "posture": null, "facing": null },
+        { "id": "C05", "name": "保安队长老葛", "present": true, "item": "轿车车位", "side": "south", "along": 0.5, "posture": "stand", "facing": "north" }
+      ],
+      "extras": 0,
+      "extrasWhere": null,
+      "why": "开场是搜车瞬间：老葛在车尾摸出腕表，程野守在电动车旁，唐启山与白恬隔着中央空地对峙；周晓桐举着平板是中途才走进光圈的，开场不在。"
+    },
+    {
+      "ep": 3,
+      "scene": 2,
+      "sceneId": "S03",
+      "lighting": "日光灯全亮",
+      "cast": [
+        { "id": "C01", "name": "程野" },
+        { "id": "C02", "name": "唐启山" },
+        { "id": "C03", "name": "白恬" },
+        { "id": "C04", "name": "周晓桐" },
+        { "id": "C05", "name": "保安队长老葛" }
+      ],
+      "places": [
+        { "id": "C01", "name": "程野", "present": true, "item": "监视器墙", "side": "south", "along": 0.5, "posture": "stand", "facing": "south" },
+        { "id": "C02", "name": "唐启山", "present": true, "item": "设备机柜", "side": "east", "along": 0.5, "posture": "stand", "facing": "south" },
+        { "id": "C03", "name": "白恬", "present": true, "item": "登记簿长桌", "side": "south", "along": 0.3, "posture": "stand", "facing": "north" },
+        { "id": "C04", "name": "周晓桐", "present": true, "item": "登记簿长桌", "side": "north", "along": 0.5, "posture": "stand", "facing": "south" },
+        { "id": "C05", "name": "保安队长老葛", "present": true, "item": "监控室门口", "side": "east", "along": 0.5, "posture": "stand", "facing": "north" }
+      ],
+      "extras": 2,
+      "extrasWhere": "登记簿长桌南侧、白恬两侧",
+      "why": "笔录收尾：白恬在桌前按完指印、两名警察随后才站到她身侧做群演，周晓桐坐镇桌后，程野在监视器墙下旁观，唐启山在机柜边等着发难。"
+    },
+    {
+      "ep": 3,
+      "scene": 3,
+      "sceneId": "S01",
+      "lighting": "警灯扫光",
+      "cast": [
+        { "id": "C01", "name": "程野" },
+        { "id": "C02", "name": "唐启山" },
+        { "id": "C04", "name": "周晓桐" }
+      ],
+      "places": [
+        { "id": "C01", "name": "程野", "present": true, "item": "折叠电动车位", "side": "on", "along": 0.5, "posture": "stand", "facing": "northeast" },
+        { "id": "C02", "name": "唐启山", "present": true, "item": "车库中央空地", "side": "on", "along": 0.4, "posture": "stand", "facing": "west" },
+        { "id": "C04", "name": "周晓桐", "present": true, "item": "折叠电动车位", "side": "south", "along": 0.5, "posture": "stand", "facing": "north" }
+      ],
+      "extras": 0,
+      "extrasWhere": null,
+      "why": "收尾沿用上一场在车库的位置：唐启山从中央空地围过来递名片，程野守着电动车拒绝，周晓桐在车位南侧帮他扶车——白恬已被带走，群演清零。"
+    }
+  ]
+}
