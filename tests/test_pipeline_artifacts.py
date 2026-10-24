@@ -40,3 +40,8 @@ def test_get_and_for_skill_roundtrip():
         get("nope")
     with pytest.raises(KeyError):
         for_skill("drama_script")
+
+
+def test_artifacts_in_canonical_pipeline_order():
+    names = [a.name for a in ARTIFACTS]
+    assert names == ["outline", "script", "characters", "art", "staging", "storyboard", "character_refs"]
