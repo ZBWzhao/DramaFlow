@@ -41,6 +41,10 @@ export const studio = reactive({
   analysis: { running: false, cards: {} }, // cards[key] = {status, text, error}
   parsing: { running: false, episodeNo: 0 },
   syncing: false,
+
+  // 管线产物（阶段 1）：artifacts = 列表接口元数据按类型索引；detail = 单条 GET 全形状（含 content）。
+  // 画布老项目没有导入产物 → 列表为空，剧本页零变化。
+  pipeline: { loaded: false, artifacts: {}, detail: {} },
 });
 
 const qs = () => {
@@ -567,4 +571,23 @@ async function pollJob(jobId) {
 
 export async function cancelJob(jobId) {
   await postJSON(`/api/studio/jobs/${jobId}/cancel`);
+}
+
+/* ── 管线产物（阶段 1）：剧本页「管线大纲」tab 的只读数据源 ─────────
+ * GET artifacts 列表 → 有 outline 再 GET 详情（404/网络错都吞掉只记 console：
+ * 剧本页是画布项目的家，不能因为管线查询不可用而跟着挂）。loaded 防双拉。
+ */
+export async function loadPipeline() {
+  if (!studio.canvas || studio.pipeline.loaded) return;
+  studio.pipeline.loaded = true;
+  try {
+    const base = `/api/pipeline/projects/${encodeURIComponent(studio.canvas)}/artifacts`;
+    const list = (await getJSON(base)).artifacts || [];
+    studio.pipeline.artifacts = Object.fromEntries(list.map((a) => [a.artifact_type, a]));
+    if (studio.pipeline.artifacts.outline) {
+      studio.pipeline.detail.outline = await getJSON(`${base}/outline`);
+    }
+  } catch (err) {
+    console.error("管线产物读取失败（不影响剧本页）", err);
+  }
 }

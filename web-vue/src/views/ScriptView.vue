@@ -10,16 +10,17 @@ import { useRoute, useRouter } from "vue-router";
 import { ElMessageBox } from "element-plus";
 import AiPanel from "../ai/AiPanel.vue";
 import { errorText, getJSON } from "../api.js";
-import { importScript, loadAll, loadProject, loadScript, loadSegments, pollProduceJob, startProduce, studio } from "../studio/studioStore.js";
+import { importScript, loadAll, loadPipeline, loadProject, loadScript, loadSegments, pollProduceJob, startProduce, studio } from "../studio/studioStore.js";
 import StoryAnalysisCards from "./script/StoryAnalysisCards.vue";
 import AssetTablesPanel from "./script/AssetTablesPanel.vue";
+import PipelineOutlinePanel from "./script/PipelineOutlinePanel.vue";
 
 const route = useRoute();
 const router = useRouter();
 
 const editing = ref(false);
 const editText = ref("");
-/* 中列 tab：剧本正文 / 项目设定（四件套）/ 资产表（草稿区） */
+/* 中列 tab：剧本正文 / 项目设定（四件套）/ 资产表（草稿区）/ 管线大纲（只读，导入产物才有） */
 const tab = ref("script");
 async function switchTab(next) {
   tab.value = next;
@@ -42,6 +43,9 @@ const assetsAll = computed(() => {
 });
 
 const producing = computed(() => ["queued", "running"].includes(studio.produceJob?.status));
+
+/* 管线大纲 tab 开关：导入了 outline 产物才出现，画布老项目零变化 */
+const hasPipelineOutline = computed(() => Boolean(studio.pipeline?.detail?.outline));
 const producePct = computed(() => {
   const p = studio.produceJob?.progress;
   return producing.value && p?.total ? p.percent : null;
@@ -256,7 +260,8 @@ async function refresh() {
   if (name && studio.canvas !== name) studio.canvas = name;
   busy.value = true;
   try {
-    await loadAll();
+    // loadPipeline 内部吞掉一切错误（无产物/无 DB/断网只记 console），不会拖垮 loadAll
+    await Promise.all([loadAll(), loadPipeline()]);
   } finally {
     busy.value = false;
   }
@@ -315,6 +320,7 @@ onMounted(refresh);
           <button class="dt" :class="{ on: tab === 'tables' }" type="button" @click="switchTab('tables')">
             资产表<span v-if="studio.parsing.running" class="dt-spin" title="正在解析资产表"></span>
           </button>
+          <button v-if="hasPipelineOutline" class="dt" :class="{ on: tab === 'pipeline' }" type="button" @click="switchTab('pipeline')">管线大纲</button>
         </div>
         <template v-if="tab === 'script'">
           <h2>{{ episodes.find((e) => Number(e.no) === currentEp)?.title || `第 ${currentEp} 集` }}</h2>
@@ -326,6 +332,7 @@ onMounted(refresh);
       <div ref="scrollEl" class="script-scroll" @scroll="onBodyScroll">
         <StoryAnalysisCards v-if="tab === 'analysis'" />
         <AssetTablesPanel v-else-if="tab === 'tables'" />
+        <PipelineOutlinePanel v-else-if="tab === 'pipeline'" :outline="studio.pipeline?.detail?.outline?.content" />
         <template v-else>
           <div class="script-inner">
             <!-- 场景跳转轨：点场景名直达，滚动时反向高亮当前场（中栏不够宽时藏） -->
