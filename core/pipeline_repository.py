@@ -2,7 +2,7 @@
 
 表结构与约定：migrations/0005_pipeline_artifacts.sql + docs/pipeline/data-contract.md
 "存储与导入约定"——PRIMARY KEY (project_id, artifact_type)，导入即覆盖；
-schema_version 由请求/API 层负责（本模块不设置，ON CONFLICT 时保留库内原值）。
+schema_version 由请求/API 层负责（save 的可选参数，缺省不越权改写）。
 
 asyncpg 访问模式照抄 core/production_repository.py 的 PostgresProductionRunRepository：
 PostgresDatabase 包装 + db.client() 取池、$n::jsonb 显式转型、JSON 容错解码。
@@ -30,23 +30,26 @@ async def save(
     art_type: str,
     content: Any,
     source_run_id: str = "",
+    schema_version: str = "",
 ) -> dict:
     """upsert 一行（latest-wins）。返回 {"content","schema_version","source_run_id","updated_at"}。
 
-    schema_version 不在参数里：首次插入走列默认值 ''，覆盖时保留库内原值——
-    该列归请求/API 层管（阶段 1 Task 3），仓库层不越权改写。
+    schema_version 可选（阶段 1 Task 3：API 层是唯一写者）：非空时落库；
+    缺省 '' 保持本模块原行为——首次插入落列默认值 ''，覆盖时保留库内原值。
     """
     encoded = json.dumps(content, ensure_ascii=False, default=str)
     row = await db.client().fetchrow(
-        """INSERT INTO pipeline_artifacts(project_id, artifact_type, content, source_run_id,
-                                          created_at, updated_at)
-           VALUES($1, $2, $3::jsonb, $4, extract(epoch from now()), extract(epoch from now()))
+        """INSERT INTO pipeline_artifacts(project_id, artifact_type, schema_version, content,
+                                          source_run_id, created_at, updated_at)
+           VALUES($1, $2, $5, $3::jsonb, $4, extract(epoch from now()), extract(epoch from now()))
            ON CONFLICT(project_id, artifact_type) DO UPDATE
                SET content = EXCLUDED.content,
                    source_run_id = EXCLUDED.source_run_id,
+                   schema_version = CASE WHEN $5 <> '' THEN $5
+                                         ELSE pipeline_artifacts.schema_version END,
                    updated_at = EXCLUDED.updated_at
            RETURNING content, schema_version, source_run_id, updated_at""",
-        project_id, art_type, encoded, source_run_id,
+        project_id, art_type, encoded, source_run_id, schema_version,
     )
     return {
         "content": _decode_content(row["content"]),

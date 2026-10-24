@@ -2718,6 +2718,17 @@ studio.configure(
 )
 app.include_router(studio.router)
 
+# ---------------------------------------------------------------------------
+# 管线产物（pipeline artifacts）导入·查询·导出路由
+#
+# 同样必须注册在下面的静态目录挂载之前。DB 句柄由路由自己从 registry 取
+# （Postgres 后端才有；file 后端无产物表，路由返回 503）。
+# ---------------------------------------------------------------------------
+from server import pipeline as pipeline_api  # noqa: E402
+
+pipeline_api.configure(registry=registry)
+app.include_router(pipeline_api.router)
+
 # 产物目录：前端用 <img src="/assets/generated/xxx.png"> 直接显示生成的图
 (WORKSPACE / "assets").mkdir(parents=True, exist_ok=True)
 app.mount("/assets", StaticFiles(directory=str(WORKSPACE / "assets")), name="assets")
