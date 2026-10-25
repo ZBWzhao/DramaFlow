@@ -708,7 +708,12 @@ function _openRunStream() {
     }
     if (msg.type === "stage_done") {
       const s = studio.run.stages[msg.stage] || (studio.run.stages[msg.stage] = {});
-      if (msg.ok) s.status = "done";
+      if (msg.ok) {
+        s.status = "done";
+        // 阶段产物落库即强制重拉：制片台面板的 done 态要立刻能渲染该阶段 content，
+        // 下游面板/确认卡也要读到最新缓存（与 run 级 gate/done 的重拉同一机制）。
+        void loadPipeline(true);
+      }
     }
     if (msg.type === "gate") {
       // run 级确认门（红线）：停在 gated 等人工；大纲产物落库了，强制重拉供确认对话框展示

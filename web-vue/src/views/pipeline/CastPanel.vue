@@ -10,7 +10,12 @@
 import { computed, ref } from "vue";
 import { ElMessage } from "element-plus";
 
-const props = defineProps({ content: { type: Object, default: null } });
+const props = defineProps({
+  content: { type: Object, default: null },
+  // 面板状态（Task 6，容器 PipelineView 传入）：idle/running/done/failed；
+  // "" = 无活动 run 的纯只读现状。running 时内容是上一版，降透明度示意。
+  state: { type: String, default: "" },
+});
 
 const c = computed(() => (props.content && typeof props.content === "object" ? props.content : {}));
 const summary = computed(() => String(c.value.summary || ""));
@@ -55,7 +60,7 @@ function voiceMeta(v) {
 </script>
 
 <template>
-  <div class="cp">
+  <div class="cp" :class="{ stale: state === 'running' }">
     <p v-if="summary" class="cp-summary">{{ summary }}</p>
 
     <div v-if="cast.length" class="cp-cards">
@@ -116,6 +121,8 @@ function voiceMeta(v) {
 </template>
 
 <style scoped>
+/* running：显示的是上一版产物，压暗示意（状态条在容器上） */
+.stale { opacity: .55; transition: opacity .2s; }
 .cp { display: flex; flex-direction: column; gap: var(--sp-3); margin-top: var(--sp-3); }
 .cp-summary { margin: 0; font-size: var(--fs-13); color: var(--text-2); line-height: 1.9; }
 

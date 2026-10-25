@@ -11,7 +11,12 @@
  */
 import { computed } from "vue";
 
-const props = defineProps({ content: { type: Object, default: null } });
+const props = defineProps({
+  content: { type: Object, default: null },
+  // 面板状态（Task 6，容器 PipelineView 传入）：idle/running/done/failed；
+  // "" = 无活动 run 的纯只读现状。running 时内容是上一版，降透明度示意。
+  state: { type: String, default: "" },
+});
 
 const c = computed(() => (props.content && typeof props.content === "object" ? props.content : {}));
 const locations = computed(() => (Array.isArray(c.value.locations) ? c.value.locations : []));
@@ -47,7 +52,7 @@ function placeSentence(p) {
 </script>
 
 <template>
-  <div class="sp">
+  <div class="sp" :class="{ stale: state === 'running' }">
     <div v-if="scenes.length">
       <section v-for="(sc, i) in scenes" :key="`${str(sc?.ep)}-${str(sc?.scene) || i}`" class="sp-card">
         <header class="sp-head">
@@ -90,6 +95,8 @@ function placeSentence(p) {
 </template>
 
 <style scoped>
+/* running：显示的是上一版产物，压暗示意（状态条在容器上） */
+.stale { opacity: .55; transition: opacity .2s; }
 .sp { display: flex; flex-direction: column; gap: var(--sp-3); margin-top: var(--sp-3); }
 .sp-card { border: 1px solid var(--line); border-radius: var(--r-2); background: var(--card); padding: var(--sp-3) var(--sp-4); }
 .sp-head { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; }

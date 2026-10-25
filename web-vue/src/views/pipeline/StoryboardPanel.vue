@@ -12,7 +12,12 @@
 import { computed, ref } from "vue";
 import { ElMessage } from "element-plus";
 
-const props = defineProps({ content: { type: Object, default: null } });
+const props = defineProps({
+  content: { type: Object, default: null },
+  // 面板状态（Task 6，容器 PipelineView 传入）：idle/running/done/failed；
+  // "" = 无活动 run 的纯只读现状。running 时内容是上一版，降透明度示意。
+  state: { type: String, default: "" },
+});
 
 const c = computed(() => (props.content && typeof props.content === "object" ? props.content : {}));
 const episodes = computed(() => (Array.isArray(c.value.episodes) ? c.value.episodes : []));
@@ -78,7 +83,7 @@ async function copy(text) {
 </script>
 
 <template>
-  <div class="sb">
+  <div class="sb" :class="{ stale: state === 'running' }">
     <div v-if="aspect" class="sb-spec num">画幅 {{ aspect }}</div>
 
     <div v-if="episodes.length">
@@ -138,6 +143,8 @@ async function copy(text) {
 </template>
 
 <style scoped>
+/* running：显示的是上一版产物，压暗示意（状态条在容器上） */
+.stale { opacity: .55; transition: opacity .2s; }
 .sb { margin-top: var(--sp-3); }
 .sb-spec { margin-bottom: var(--sp-2); color: var(--text-3); font-size: var(--fs-11); }
 .sb-ep { margin-bottom: var(--sp-4); }

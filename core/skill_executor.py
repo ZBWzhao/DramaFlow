@@ -10,6 +10,7 @@
 红线约束落点：
 - 门只经 node 子进程（唯一可执行文件），timeout 120s，每阶段一次 tempfile.mkdtemp；
 - 迭代上限默认 5，超限 = StageResult(ok=False, findings=...)，无脏数据；
+  填表型（policy="chain_repair"：characters/art）锁 2 轮——产全文 + 恰好一轮修复；
 - 产物写入只有 pipeline_repository.save 一个口；
 - LLM 经 LLMPort 协议注入，本模块不绑任何 SDK——真链路用 _RouterLLM
   （core/llm.LLM 的响应整形），Task 3 起 runner 注入。
@@ -40,12 +41,15 @@ MAX_GATE_TIMEOUT = 120        # 门超时（秒）：node 子进程的唯一预�
 GATE_TAIL = 2000              # run_quality_gate 回给模型的输出尾部
 FINDING_TAIL = 800            # findings 里带的病灶尾部（进 pipeline_runs.findings）
 
-# 阶段规格表：新增创作阶段 = 加一份 spec（Task 4+），loop 与工具环不动。
+# 阶段规格表：新增创作阶段 = 加一份 spec，loop 与工具环不动。
 # gate 列表首元素是技能目录内的脚本相对路径，其余是参数；cwd = 阶段工作目录。
-# 通用规格键：gate_needs（上游产物注入，inputs[need] 落盘成 <need>.json 供门对账，
-# 并随 user 消息进对话）；meta_sections（模型经 write_draft 写入的元数据键，同
-# outline 口径——不写死进产物拼装逻辑）；merge_sections（write_draft 按 key 分批
-# 并入而非覆盖）；save_merge（落库按 data-contract 分批合并，缺省 latest-wins 整行替换）。
+# 通用规格键：gate_needs（上游产物注入，inputs[need] 按产物注册表文件名落盘供门
+# 对账，并随 user 消息进对话）；gate_files（非产物输入原文落盘，{文件名: inputs 键}，
+# 如 characters 的逐字引文校验要小说原文）；meta_sections（模型经 write_draft 写入
+# 的元数据键，同 outline 口径——不写死进产物拼装逻辑）；merge_sections（write_draft
+# 按 key 分批并入而非覆盖）；save_merge（落库按 data-contract 分批合并，缺省
+# latest-wins 整行替换）；policy（"agent"=多轮 gated loop；"chain_repair"=填表型，
+# 单次产全文 + 恰好一轮修复）。
 STAGE_SPECS: dict[str, dict] = {
     "outline": {
         "skill": "novel-outline", "artifact": "outline", "policy": "agent",
@@ -92,6 +96,92 @@ STAGE_SPECS: dict[str, dict] = {
                   "episodes 按 ep 逐集 write_draft（data 是数组，可分批写、可单集修，按集号并入）；"
                   "source/lang 写一次即可（source 同大纲 source，lang 固定写 \"zh\"）。"),
     },
+    # ---------------------------------------------------------------------
+    # Task 6：制片四层。填表型（characters/art）policy="chain_repair"：单次
+    # complete 产全文 → 权威门 → 未过恰好一轮修复（规格 8.1，预算锁 2 轮）；
+    # 创作型（staging/storyboard）policy="agent"：与 outline/script 同一条
+    # gated agent loop。gate 实参按各技能 SKILL.md 的 validate 用法抄写
+    # （brief 初稿与技能文档不一致处以文档为准）：文件名取自
+    # pipeline_artifacts 注册表（characters 的产物文件是 cast.json）。
+    # ---------------------------------------------------------------------
+
+    # 角色表：门 = validate cast.json book.txt（SKILL.md Step 4）——逐字引文校验
+    # 要小说原文，gate_files 把 novel_text 落成 book.txt。summary 缺失门必拦。
+    "characters": {
+        "skill": "novel-characters", "artifact": "characters", "policy": "chain_repair",
+        "playbook": ["SKILL.md", "references/schema.md"],
+        "meta_sections": ["source", "lang"],
+        "sections": ["summary", "characters"],
+        # 契约「characters 逐角色合并」：落库按 name 并入既有卡，重跑/重试不吞卡
+        # （与 script 共用 pipeline_import.prepare 的 save_merge 路径，不另起灶）。
+        "save_merge": True,
+        "gate": ["scripts/novel-characters.mjs", "validate", "cast.json", "book.txt"],
+        "gate_needs": ["outline"],
+        # 门的非产物输入：逐字引文校验要原文（唯一一个非 JSON 落盘文件）。
+        "gate_files": {"book.txt": "novel_text"},
+        "task": "从小说与大纲拆角色表（cast.json 形状），过质量门后 finish。",
+        "notes": ("注意：lang 固定写 \"zh\"（内置界面语言；写其他语言必须再写一份 ui "
+                  "翻译块，否则门直接拦）。summary 是顶层故事摘要（3–5 句、不剧透结局），"
+                  "必写。角色清单照上游大纲的 characters 块，不要自行增删角色；"
+                  "每张卡写全 persona/image.prompt/voice.prompt，同一批角色的提示词"
+                  "不得雷同（相似度门会点名成对的雷同卡）。"),
+    },
+    # 美术设定：门 = validate art.json --cast cast.json（SKILL.md 用法）——--cast
+    # 启用「提示词不含角色名」检查；characters 产物此时已落库（STAGE_ORDER 前序），
+    # gate_needs 同时把 cast 注入对话，模型才知道要避开哪些名字。
+    "art": {
+        "skill": "novel-art", "artifact": "art", "policy": "chain_repair",
+        "playbook": ["SKILL.md", "references/schema.md"],
+        "meta_sections": ["source"],
+        "sections": ["scenes", "props"],
+        "gate": ["scripts/novel-art.mjs", "validate", "art.json", "--cast", "cast.json"],
+        "gate_needs": ["outline", "characters"],
+        "task": "产出美术设定（场景锚点/光照状态/道具），过质量门后 finish。",
+        "notes": ("注意：scenes 不为空、props 可以为空数组（只收承载剧情的叙事道具）；"
+                  "场景/道具的 image.prompt/negativePrompt/sheet 与 image.tags 一项都"
+                  "不能缺；场景与道具清单照上游大纲，场景/道具提示词里严禁出现角色名"
+                  "（--cast 门逐字对账）。"),
+    },
+    # 开场站位：门 = validate staging.json --script script.json --art art.json
+    # （SKILL.md Step 4）——--script 启用 cast-complete 门（出场人物跟剧本对账）。
+    "staging": {
+        "skill": "novel-staging", "artifact": "staging", "policy": "agent",
+        "playbook": ["SKILL.md", "references/schema.md"],
+        "meta_sections": ["source", "lang"],
+        "sections": ["locations", "scenes"],
+        "gate": ["scripts/novel-staging.mjs", "validate", "staging.json",
+                 "--script", "script.json", "--art", "art.json"],
+        "gate_needs": ["script", "art"],
+        "task": "为每场戏排站位与走位，过质量门后 finish。",
+        "notes": ("注意：scenes 的集号/场号/地点/光照/出场人物全部照剧本搬运，不要"
+                  "重新想；每个地点 4–20 件 items（提示词里有、图上没有的不写，按图认"
+                  "的必须有 box）；每场每人恰好一条 places（后来才进来的人开场不在），"
+                  "同一侧不叠人，群演人数写整数并写明在哪。"),
+    },
+    # 分镜：门 = validate storyboard.json --script script.json --outline
+    # outline.json --cast cast.json（SKILL.md Step 3：--script 硬前提，--outline/
+    # --cast 启用提示词人名检查）。staging 不进门的实参，但站位是切镜与走位的
+    # 事实来源，随 gate_needs 注入对话。
+    "storyboard": {
+        "skill": "novel-storyboard", "artifact": "storyboard", "policy": "agent",
+        "playbook": ["SKILL.md", "references/schema.md"],
+        "meta_sections": ["source", "aspectRatio", "promptLang"],
+        "sections": ["episodes"],
+        "merge_sections": {"episodes": "ep"},   # 一批 ≤ 3 集，单集修复不丢已写集
+        # params 刻意不可写：切段/切镜/同框/时长容差用技能默认值（DEFAULT_PARAMS），
+        # 模型自调 tolerance 等于给时长门放水（同 script 的 params 口径）。
+        "gate": ["scripts/novel-storyboard.mjs", "validate", "storyboard.json",
+                 "--script", "script.json", "--outline", "outline.json", "--cast", "cast.json"],
+        "gate_needs": ["script", "art", "staging", "outline", "characters"],
+        "task": "把剧本+站位落成镜头表与首帧/视频提示词，过质量门后 finish。",
+        "notes": ("注意：aspectRatio 只接受 \"16:9\"/\"9:16\"（竖屏短剧写 \"9:16\"）；"
+                  "promptLang 默认写 \"en\"。每段 9–15 秒且不跨场、段内每切 2–5 秒、"
+                  "每集总时长落在剧本目标 ±15% 内、单切同框 ≤ 3 人；h3Prompt 首行对齐"
+                  "指令与 [Shot k] 切点时刻由分镜秒数推导（门逐字对账，一个字符都不许"
+                  "漂），认领台词逐字进 <d> 块；分镜图提示词直呼角色名，shot/h3 正文"
+                  "严禁出现角色名；episodes 按 ep 逐集 write_draft（可分批写、可单集修，"
+                  "按集号并入）。"),
+    },
 }
 
 
@@ -120,14 +210,21 @@ class _ToolBox:
     def __init__(self, spec: dict, workdir: Path, inputs: dict, state: dict):
         self.spec, self.workdir, self.inputs, self.state = spec, workdir, inputs, state
         # gate_needs 驱动的上游落盘（通用逻辑，非某个阶段的特判）：inputs[need] 是
-        # runner 从 pipeline_artifacts 取来的已落库 content，写成 <need>.json 供门的
-        # --outline 等实参读取（Task 5 约定）。
+        # runner 从 pipeline_artifacts 取来的已落库 content，按注册表的正式文件名
+        # 落盘（outline.json / cast.json——注册表是产物文件名唯一映射，characters
+        # 的落盘名不是 <artifact>.json 的直觉名）供门的 --outline/--cast 等实参读取。
         for need in spec.get("gate_needs") or []:
             payload = inputs.get(need)
             if payload is not None:
-                (workdir / f"{need}.json").write_text(
+                (workdir / pipeline_artifacts.get(need).filename).write_text(
                     json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8"
                 )
+        # gate_files：非产物输入原文落盘（characters 的逐字引文校验要小说原文——
+        # 没有原文文件门只会跳过引文对账，等于白送一道门的放水）。
+        for filename, key in (spec.get("gate_files") or {}).items():
+            payload = inputs.get(key)
+            if isinstance(payload, str) and payload:
+                (workdir / filename).write_text(payload, encoding="utf-8")
 
     def specs(self) -> list[dict]:
         """OpenAI 风格 tool 定义；section 枚举直接约束顶层键。"""
@@ -148,9 +245,9 @@ class _ToolBox:
                     "properties": {
                         "section": {"type": "string", "enum": sections, "description": "顶层键名"},
                         "data": {"description": "该键的完整 JSON 数据：字符串/对象/数组以 schema.md "
-                                               "对应节为准（如 source/lang 是字符串，"
+                                               "对应节为准（如 source/lang/summary 是字符串，"
                                                "params/adaptation 是对象，"
-                                               "characters/scenes/props/beats/episodes 是数组）"},
+                                               "characters/scenes/props/beats/episodes/locations 是数组）"},
                     },
                     "required": ["section", "data"],
                 },
@@ -175,8 +272,9 @@ class _ToolBox:
     # 键 → data 的期望类型：不符合直接打回（真模型会偶发漏 section、或把 data
     # 双重编码成 JSON 字符串——静默收下会让门报出难懂的"episodes 为空"）。
     _DATA_KINDS = {"source": str, "lang": str, "params": dict, "adaptation": dict,
+                   "summary": str, "aspectRatio": str, "promptLang": str,
                    "characters": list, "scenes": list, "props": list,
-                   "beats": list, "episodes": list}
+                   "beats": list, "episodes": list, "locations": list}
 
     async def dispatch(self, name: str, args: dict) -> str:
         if name == "write_draft":
@@ -216,7 +314,7 @@ class _ToolBox:
 
     async def run_gate(self) -> tuple[bool, str]:
         """组装当前草稿 → 产物 JSON，然后跑真门。自检与 finish 共用这一条路。"""
-        path = self.workdir / f"{self.spec['artifact']}.json"
+        path = self.workdir / pipeline_artifacts.get(self.spec["artifact"]).filename
         path.write_text(
             json.dumps(_finalize_draft(self.spec, self.state), ensure_ascii=False, indent=2),
             encoding="utf-8",
@@ -330,20 +428,23 @@ def _compose_system(spec: dict) -> str:
     )
     meta = spec_meta_sections(spec)
     sections = [*meta, *spec["sections"]]
-    artifact_file = f"{spec['artifact']}.json"
-    return f"""{playbook}
-
-## 执行器纪律（覆盖 playbook 里需要真人参与的步骤）
-
-你在 DramaFlow 制片管线的 {spec['artifact']} 阶段工具环里自主工作，没有用户可问：
-playbook 里需要真人参与的步骤（Step 0 询问参数、用户拍板、报告渲染等）一律取消，
-输入与口径以下文和给你的上游产物为准。
-
-1. 只能调用四个工具：write_draft / run_quality_gate / read_gate_report / finish。
-   严禁把 {artifact_file} 的 JSON 直接写在回复文本里；回复文本（如非空）只是一句话进度说明。
-   没有 Bash、Read、Write、Task 等任何其他工具——playbook 里的命令行是给人类
-   会话的示例，你没有 shell，也不要试图寻找或执行脚本。
-2. 按此顺序写全每一个顶层键，各调一次 write_draft：{'、'.join(sections)}。
+    artifact_file = pipeline_artifacts.get(spec["artifact"]).filename
+    if spec.get("policy") == "chain_repair":
+        # 填表型纪律（规格 8.1）：一轮产全文 → finish 触发权威门 → 恰好一轮修复。
+        # 不设自检轮（run_quality_gate）——预算只有 2 轮，自检等于白烧一半。
+        steps = f"""2. 第一轮就并行发齐全部 write_draft，把 {len(sections)} 个顶层键一次写全：{'、'.join(sections)}。
+   data 严格符合上面 schema.md 对应节的字段定义，一次写到位，不留空壳占位；写全后
+   同一轮立即调用 finish 触发权威质量门（门就是自检，不必也不应先 run_quality_gate）。
+   {spec.get("notes", "")}
+   write_draft 的 data 必须是该键的 JSON 数据本体（数组/对象/字符串），
+   绝不能是再编码过的 JSON 字符串。
+3. 权威门未过时你会收到一份带门报告的 user 消息——这是唯一一轮修复机会：只重调
+   write_draft 覆盖报告点名的键，data 给该键的完整数据（数组键必须整组重发全部条目，
+   别只发单条），修完同一轮立刻再 finish。不点名的键一律不动。{spec.get("repair_note", "")}
+4. 每一轮都必须发出至少一个工具调用——没有工具调用的一轮就是白白消耗一轮预算。
+5. 梗概/摘要等叙述栏一律叙述体，严禁出现引号对白（「」『』""）。"""
+    else:
+        steps = f"""2. 按此顺序写全每一个顶层键，各调一次 write_draft：{'、'.join(sections)}。
    一轮可以并行发多个 write_draft（推荐 3-4 个一组）。data 严格符合上面 schema.md
    对应节的字段定义，一次写到位，不留空壳占位。
    {spec.get("notes", "")}
@@ -356,6 +457,19 @@ playbook 里需要真人参与的步骤（Step 0 询问参数、用户拍板、�
 4. run_quality_gate 报告全过后，下一轮立刻 finish 结束，不要再打磨其他键。
 5. 每一轮都必须发出至少一个工具调用——没有工具调用的一轮就是白白消耗一轮预算。
 6. 梗概/hook/suspense 等叙述栏一律叙述体，严禁出现引号对白（「」『』""）。"""
+    return f"""{playbook}
+
+## 执行器纪律（覆盖 playbook 里需要真人参与的步骤）
+
+你在 DramaFlow 制片管线的 {spec['artifact']} 阶段工具环里自主工作，没有用户可问：
+playbook 里需要真人参与的步骤（Step 0 询问参数、用户拍板、报告渲染等）一律取消，
+输入与口径以下文和给你的上游产物为准。
+
+1. 只能调用四个工具：write_draft / run_quality_gate / read_gate_report / finish。
+   严禁把 {artifact_file} 的 JSON 直接写在回复文本里；回复文本（如非空）只是一句话进度说明。
+   没有 Bash、Read、Write、Task 等任何其他工具——playbook 里的命令行是给人类
+   会话的示例，你没有 shell，也不要试图寻找或执行脚本。
+{steps}"""
 
 
 # ---------------------------------------------------------------------------
@@ -378,6 +492,10 @@ async def run_stage(
     （自检门只是预演），失败则 findings 留档、重置 finished 让模型继续修。
     """
     spec = STAGE_SPECS[stage]
+    # chain_repair（填表型，规格 8.1）：单次产全文 + 恰好一轮修复——预算锁 2 轮，
+    # 调用方给更大的 max_iterations 也不放宽；agent 型才吃调用方预算。
+    if spec.get("policy") == "chain_repair":
+        max_iterations = min(max_iterations, 2)
     workdir = Path(tempfile.mkdtemp(prefix=f"stage-{stage}-"))   # 每阶段一次，门的 cwd
     state: dict = {"draft": {}, "finished": False, "gate_log": [], "last_gate": None}
     box = _ToolBox(spec, workdir, inputs, state)
@@ -385,11 +503,11 @@ async def run_stage(
 
     # 上游产物随 user 消息进对话：执行器模型没有 Read 工具（纪律第 1 条），
     # 大纲等 gate_needs 产物必须把内容直接给它；同一份 content 也已由 _ToolBox
-    # 落盘成 <need>.json 供门对账——模型与门看到同一事实。
+    # 按注册表文件名落盘供门对账——模型与门看到同一事实。
     user_content = spec["task"] + "\n\n【小说原文】\n" + inputs["novel_text"]
     for need in spec.get("gate_needs") or []:
         if need in inputs:
-            user_content += (f"\n\n【上游产物 {need}.json（门的对账依据，已落库版本）】\n"
+            user_content += (f"\n\n【上游产物 {pipeline_artifacts.get(need).filename}（门的对账依据，已落库版本）】\n"
                              + json.dumps(inputs[need], ensure_ascii=False, indent=2))
     messages: list[dict] = [
         {"role": "system", "content": _compose_system(spec)},

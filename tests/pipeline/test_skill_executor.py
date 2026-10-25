@@ -330,20 +330,47 @@ def test_script_gate_audits_seeded_outline(pipeline_test_database):
     _run_scenario(scenario, pipeline_test_database)
 
 
-def test_runner_chains_outline_then_script_with_real_specs(pipeline_test_database):
-    """Task 5 Step 3：真 STAGE_SPECS + 真 run_stage + 真门，fake LLM 全程脚本化——
-    outline 过门 → gated → approve → script（inputs.outline = 已落库大纲）→ done。"""
+def test_runner_chains_all_six_stages_with_real_specs(pipeline_test_database):
+    """Task 6（替代 Task 5 的两阶段链）：真 STAGE_SPECS + 真 run_stage + 真门，
+    fake LLM 全程脚本化——outline 过门 → gated → approve → script → characters →
+    art → staging → storyboard → done，六份产物全部落库。"""
 
     async def scenario(database) -> None:
         await database.pool.execute("TRUNCATE pipeline_runs")
         outline = _load("outline.json")
         script = _load("script.json")
+        cast = _load("cast.json")
+        art = _load("art.json")
+        staging = _load("staging.json")
+        storyboard = _load("storyboard.json")
+
+        def _round(pairs):
+            return [{"name": "write_draft", "args": {"section": s, "data": d}} for s, d in pairs]
+
         outline_turns = (_write_rounds(outline, [4, 3, 2])
                          + [[{"name": "run_quality_gate", "args": {}}], [{"name": "finish", "args": {}}]])
         script_turns = ([_script_meta_round(script["source"])]
                         + [_ep_round(ep) for ep in script["episodes"]]
                         + [[{"name": "finish", "args": {}}]])
-        llm = ScriptedLLM(outline_turns + script_turns)
+        # 制片四层一轮写全 + finish（chain_repair 同轮 finish；agent 型此处门全过直接收）
+        characters_turns = [_round([("source", cast["source"]), ("lang", cast["lang"]),
+                                    ("summary", cast["summary"]),
+                                    ("characters", cast["characters"])])
+                            + [{"name": "finish", "args": {}}]]
+        art_turns = [_round([("source", art["source"]), ("scenes", art["scenes"]),
+                             ("props", art["props"])])
+                     + [{"name": "finish", "args": {}}]]
+        staging_turns = [_round([("source", staging["source"]), ("lang", staging["lang"]),
+                                 ("locations", staging["locations"]),
+                                 ("scenes", staging["scenes"])])
+                         + [{"name": "finish", "args": {}}]]
+        storyboard_turns = [_round([("source", storyboard["source"]),
+                                    ("aspectRatio", storyboard["aspectRatio"]),
+                                    ("promptLang", storyboard["promptLang"]),
+                                    ("episodes", storyboard["episodes"])])
+                            + [{"name": "finish", "args": {}}]]
+        llm = ScriptedLLM(outline_turns + script_turns + characters_turns + art_turns
+                          + staging_turns + storyboard_turns)
         store, broker = RunStore(database), EventBroker()
         runner = PipelineRunner(store, database, broker=broker, llm=llm)  # executor 缺省 = 真 run_stage
         run = await store.create("proj-chain", NOVEL_TEXT)
@@ -358,21 +385,162 @@ def test_runner_chains_outline_then_script_with_real_specs(pipeline_test_databas
         await runner.resume(run["run_id"])
         await runner.wait_idle()
         state = await store.get(run["run_id"])
-        # script 过门后继续推进：characters 起没有规格（Task 6 注册）→ 无剩余可运行
-        # 阶段 → done。done = 「没有可运行阶段」的 Task 3 口径，不是六阶段全完成。
-        assert state["status"] == "done"
-        assert [c["stage"] for c in await store.stage_history(run["run_id"])] == ["outline", "script"]
-        assert state["stage_status"]["script"]["status"] == "done"
-        saved = await pipeline_repository.get(database, "proj-chain", "script")
-        assert [e["ep"] for e in saved["content"]["episodes"]] == [1, 2, 3]
+        # done = storyboard 过门（Task 6 起「没有剩余可运行阶段」与「六阶段全完成」重合）
+        assert state["status"] == "done" and state["stage"] == "storyboard"
+        assert [c["stage"] for c in await store.stage_history(run["run_id"])] == \
+            ["outline", "script", "characters", "art", "staging", "storyboard"]
+        for stage in ("script", "characters", "art", "staging", "storyboard"):
+            assert state["stage_status"][stage]["status"] == "done"
         rows = {r["artifact_type"]: r for r in await pipeline_repository.list_all(database, "proj-chain")}
-        assert rows["script"]["source_run_id"] == "stage:script"
-        # runner._upstream 真把已落库大纲塞进了 script 阶段的对话（拼在 user 消息里）
-        script_user = llm.calls[len(outline_turns)][1]["content"]
-        assert outline["episodes"][0]["synopsis"][:30] in script_user
-        # SSE 中继：script 的权威门以 stage_gate/stage_done 透传（run 级 gate 仍留给确认门）
+        assert set(rows) == {"outline", "script", "characters", "art", "staging", "storyboard"}
+        assert rows["characters"]["source_run_id"] == "stage:characters"
+        assert rows["storyboard"]["source_run_id"] == "stage:storyboard"
+        # 制片四层产物逐字对账 fixtures（characters 经 save_merge 逐卡并入后仍与稿一致）
+        saved_cast = await pipeline_repository.get(database, "proj-chain", "characters")
+        assert saved_cast["content"]["characters"] == cast["characters"]
+        assert saved_cast["content"]["summary"] == cast["summary"]
+        saved_board = await pipeline_repository.get(database, "proj-chain", "storyboard")
+        assert saved_board["content"]["episodes"] == storyboard["episodes"]
+        # 上游注入按 gate_needs：characters 的对话里有已落库大纲（拆角色的事实来源），
+        # storyboard 的对话里有已落库站位（切镜/走位的事实来源）
+        cast_user = llm.calls[len(outline_turns) + len(script_turns)][1]["content"]
+        assert outline["characters"][0]["name"] in cast_user
+        board_user = llm.calls[-1][1]["content"]   # storyboard 只有一轮，最后一次 complete 即它
+        assert staging["locations"][0]["name"] in board_user
+        # SSE 中继：每个制片阶段都有 stage 起跑与 stage_done 收尾
         seq = [(e["type"], e.get("stage")) for e in
                [events.get_nowait() for _ in range(events.qsize())]]
-        assert ("stage", "script") in seq and ("stage_done", "script") in seq
+        for stage in ("characters", "art", "staging", "storyboard"):
+            assert ("stage", stage) in seq and ("stage_done", stage) in seq
+
+    _run_scenario(scenario, pipeline_test_database)
+
+
+# ---------------------------------------------------------------------------
+# Task 6：制片四层（characters 链式修复 / staging agent 环）+ 上游落盘名对齐注册表
+# ---------------------------------------------------------------------------
+
+def test_characters_stage_chain_repair_writes_all_and_saves(pipeline_test_database):
+    """填表型：一轮并行写全 + 同轮 finish（权威门过 → 落库）。轮次脚本只有一次
+    产出、没有自检轮——chain_repair 的纪律就是门即自检。"""
+    outline = _load("outline.json")
+    cast = _load("cast.json")
+
+    async def scenario(database) -> None:
+        turns = [[{"name": "write_draft", "args": {"section": s, "data": cast[s]}}
+                  for s in ("source", "lang", "summary", "characters")]
+                 + [{"name": "finish", "args": {}}]]
+        llm = ScriptedLLM(turns)
+        events: list[dict] = []
+        result = await run_stage(database, "proj-cast", "characters",
+                                 {"novel_text": NOVEL_TEXT, "outline": outline},
+                                 llm=llm, on_event=events.append, max_iterations=9)
+        assert result.ok and result.artifact_type == "characters"
+        assert result.iterations == 1                     # 单轮产全文 + finish
+        assert any(e["type"] == "gate" and e["ok"] for e in events)
+        assert events[-1] == {"type": "done", "ok": True}
+        saved = await pipeline_repository.get(database, "proj-cast", "characters")
+        assert saved["content"]["summary"] == cast["summary"]
+        assert saved["content"]["characters"] == cast["characters"]
+        rows = await pipeline_repository.list_all(database, "proj-cast")
+        assert rows[0]["source_run_id"] == "stage:characters"
+        # chain_repair 纪律进 system（唯一一轮修复机会）；门按 SKILL.md 拿到原文
+        # book.txt 做逐字引文校验（cast 引文不是逐字时这条门会拦）
+        system = llm.calls[0][0]["content"]
+        assert "修复机会" in system and "run_quality_gate）" in system
+        user = llm.calls[0][1]["content"]
+        assert NOVEL_TEXT in user and outline["characters"][0]["name"] in user
+
+    _run_scenario(scenario, pipeline_test_database)
+
+
+def test_characters_chain_repair_gate_fail_repairs_exactly_once(pipeline_test_database):
+    cast = _load("cast.json")
+
+    async def scenario(database) -> None:
+        def _turn(sections):
+            return [{"name": "write_draft", "args": {"section": s, "data": cast[s]}}
+                    for s in sections] + [{"name": "finish", "args": {}}]
+
+        # 第一轮漏 summary（门必拦：报告顶部会空着）→ 恰好一轮修复 → 过门落库
+        turns = [_turn(("source", "lang", "characters")), _turn(("summary",))]
+        llm = ScriptedLLM(turns)
+        events: list[dict] = []
+        result = await run_stage(database, "proj-cast-fix", "characters",
+                                 {"novel_text": NOVEL_TEXT, "outline": _load("outline.json")},
+                                 llm=llm, on_event=events.append)
+        assert result.ok and result.iterations == 2       # 产全文 + 一轮修复，没有第三轮
+        assert [e["ok"] for e in events if e["type"] == "gate"] == [False, True]
+        # 修复轮收到带门报告的 user 消息
+        assert any(m["role"] == "user" and m["content"].startswith("质量门未过")
+                   for m in llm.calls[1])
+        saved = await pipeline_repository.get(database, "proj-cast-fix", "characters")
+        assert saved["content"]["summary"] == cast["summary"]
+        assert saved["content"]["characters"] == cast["characters"]
+
+    _run_scenario(scenario, pipeline_test_database)
+
+
+def test_characters_chain_repair_budget_locked_at_two_rounds(pipeline_test_database):
+    """chain_repair 的预算锁 2：调用方给 max_iterations=9 也不放宽——两轮门都没过
+    就带 findings 退出、绝不落库（调用方预算只对 agent 型生效）。"""
+    cast = _load("cast.json")
+
+    async def scenario(database) -> None:
+        def _turn():
+            return [{"name": "write_draft", "args": {"section": "source", "data": cast["source"]}},
+                    {"name": "write_draft", "args": {"section": "lang", "data": cast["lang"]}},
+                    {"name": "write_draft", "args": {"section": "summary", "data": cast["summary"]}},
+                    {"name": "write_draft", "args": {"section": "characters", "data": []}},  # 空 cast 门必拦
+                    {"name": "finish", "args": {}}]
+
+        llm = ScriptedLLM([_turn(), _turn()])             # 修复轮也不修：门再拦一次
+        result = await run_stage(database, "proj-cast-cap", "characters",
+                                 {"novel_text": NOVEL_TEXT, "outline": _load("outline.json")},
+                                 llm=llm, max_iterations=9)
+        assert not result.ok and result.findings
+        assert result.iterations == 2
+        assert len(llm.calls) == 2                        # 第 3 轮不存在
+        assert await pipeline_repository.get(database, "proj-cast-cap", "characters") is None
+
+    _run_scenario(scenario, pipeline_test_database)
+
+
+def test_staging_stage_agent_gate_fail_then_repair_saves(pipeline_test_database):
+    """创作型（policy=agent）：写全 → finish 门拦（地点认图不足 4 件）→ 单键修复
+    → 过门落库；上游 script/art 按 gate_needs 落盘成门的 --script/--art 实参。"""
+    script = _load("script.json")
+    art = _load("art.json")
+    staging = _load("staging.json")
+    thin = {**staging,
+            "locations": [{**staging["locations"][0], "items": staging["locations"][0]["items"][:2]},
+                          *staging["locations"][1:]]}
+
+    async def scenario(database) -> None:
+        def _round(pairs):
+            return [{"name": "write_draft", "args": {"section": s, "data": d}} for s, d in pairs]
+
+        turns = ([_round([("source", thin["source"]), ("lang", thin["lang"]),
+                          ("locations", thin["locations"]), ("scenes", thin["scenes"])])
+                  + [{"name": "finish", "args": {}}]]
+                 + [_round([("locations", staging["locations"])])
+                    + [{"name": "finish", "args": {}}]])
+        llm = ScriptedLLM(turns)
+        events: list[dict] = []
+        result = await run_stage(database, "proj-stage", "staging",
+                                 {"novel_text": NOVEL_TEXT, "script": script, "art": art},
+                                 llm=llm, on_event=events.append)
+        assert result.ok and result.artifact_type == "staging"
+        assert result.iterations == 2                     # 写全+finish 一轮、修复+finish 一轮
+        gate_events = [e for e in events if e["type"] == "gate"]
+        assert [e["ok"] for e in gate_events] == [False, True]
+        # 剧本对账真的发生在 inputs 上：staging 的 user 消息带 script/art 全文
+        user = llm.calls[0][1]["content"]
+        assert script["source"] in user and art["scenes"][0]["name"] in user
+        saved = await pipeline_repository.get(database, "proj-stage", "staging")
+        assert saved["content"]["locations"] == staging["locations"]
+        assert saved["content"]["scenes"] == staging["scenes"]
+        rows = await pipeline_repository.list_all(database, "proj-stage")
+        assert rows[0]["source_run_id"] == "stage:staging"
 
     _run_scenario(scenario, pipeline_test_database)
