@@ -67,8 +67,11 @@ STAGE_SPECS: dict[str, dict] = {
         # 阶段专属口径（_compose_system 原样带进执行器纪律，不进通用模板——
         # outline 自己定集数，script 等下游阶段的集数以上游产物为事实）。
         "notes": ("注意：source 是书名字符串（去掉书名号）；lang 固定写 \"zh\"；"
-                  "params.episodes 必须与 episodes 数组长度一致。episodes 数量按小说体量定："
-                  "几千字的短篇用 6–12 集，更长的原作才逐步上探；集数自检通过后不要再改。"),
+                  "params.episodes 必须与 episodes 数组长度一致。"
+                  "体量可行性硬约束（自检不过 = 大纲门不过）：episodes × minutesPerEpisode × 60"
+                  " 不得超过 源材料字数 ÷ 800 × 90——每约 800 字原文最多支撑 1 集 90 秒的剧情量；"
+                  "宁少勿多、最少 1 集，几千字短篇通常 2–4 集。先定 minutesPerEpisode（60–120），"
+                  "再按上限公式定 episodes。集数与时长自检通过后不要再改。"),
         "repair_note": ("点名第几集缺什么预警就在该集 warnings 补原词"
                         "（报告里「第 N 集缺「X」」是机械判据：该集文本扫到了生成难点关键词，"
                         "而 warnings 数组里没有字符串 X——把 X 原样加进该集 warnings 即可，"
@@ -134,6 +137,12 @@ STAGE_SPECS: dict[str, dict] = {
                   "必写。角色清单照上游大纲的 characters 块，不要自行增删角色；"
                   "每张卡写全 persona/image.prompt/voice.prompt，同一批角色的提示词"
                   "不得雷同（相似度门会点名成对的雷同卡）。"),
+        # 修复口径（2026-10-25 复冒烟 III 实证：voice.prompt 5/5 系统性超 400 字上限、
+        # 引文 paraphrase 当逐字引且两轮修复未自察——队列 11）。引文空数组不违规，
+        # 所以「找不到就留空」是合法出路；口径随 _compose_system 前置进产稿指令。
+        "repair_note": ("persona.evidence 引文必须是小说原文的连续逐字片段（门逐条对账）；"
+                        "找不到贴切的就少放或留空数组（空不违规），绝不改写、拼接或浓缩原句。"
+                        "voice.prompt ≤400 字符：紧凑参数串（音色/语速/语气关键词），不写人物小传。"),
     },
     # 美术设定：门 = validate art.json --cast cast.json（SKILL.md 用法）——--cast
     # 启用「提示词不含角色名」检查；characters 产物此时已落库（STAGE_ORDER 前序），

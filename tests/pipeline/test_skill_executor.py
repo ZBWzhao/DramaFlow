@@ -632,6 +632,23 @@ def test_script_repair_note_mentions_duration_conversion():
     assert "欠时最多" in note                    # 定向补足策略：先补差额最大的集
 
 
+def test_outline_notes_carry_volume_feasibility_cap():
+    """outline 口径必须带体量可行性上限（2026-10-25 story-测试实证：2700 字被定成
+    10×120s，script 20 轮 3 门烧穿也没收敛——集数必须在源头就受材料密度约束）。"""
+    notes = STAGE_SPECS["outline"].get("notes") or ""
+    assert "800" in notes and "90" in notes      # 上限公式：每约 800 字 ≤ 1 集 90 秒
+    assert "不得超过" in notes                    # 是硬上限不是建议
+    assert "6–12" not in notes                   # 旧口径（几千字短篇 6–12 集）已废除
+
+
+def test_characters_repair_note_covers_quote_and_voice():
+    """characters 的 repair_note 必须覆盖引文逐字口径（空数组不违规 = 合法出路）
+    与 voice.prompt 400 字符上限——2026-10-25 复冒烟 III 实证的两类系统性违规。"""
+    note = STAGE_SPECS["characters"].get("repair_note") or ""
+    assert "逐字" in note and "留空" in note     # 引文：找不到就留空，绝不改写
+    assert "400" in note                         # voice.prompt 字符上限
+
+
 def test_agent_repair_tail_demands_self_gate(pipeline_test_database):
     """agent 政策（outline）：修复尾要求修完先 run_quality_gate 自检、全过才 finish
     ——多轮预算下自检不亏，这条纪律必须保留在注入的修复消息里。"""
