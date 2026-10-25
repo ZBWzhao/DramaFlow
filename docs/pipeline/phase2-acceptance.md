@@ -63,7 +63,8 @@ python -m core.skill_executor characters <小说.txt> --project smoke1 --provide
 
 ## 四、快速跟进队列（终审 POSTPONE，均不阻塞使用）
 
-1. **runs-list 接口 + 页面刷新重挂载 + 启动清扫孤儿 run**（服务器重启后卡 running 的 run 目前无法批准/重试；F5 丢 run 卡）
+0. **顶栏项目名不随 URL 刷新**（2026-10-25 浏览器验证发现，存量问题非阶段 2 引入）：直接以 hash URL 进入另一项目时，内容区渲染新项目数据，但顶栏 `.pname` 仍显示上一个项目名（如从 署名 直接跳 冒烟-创作入口，顶栏还写着 署名）。经首页点选进入则正常。cosmetic 但有误导性。
+1. **runs-list 接口 + 页面刷新重挂载 + 启动清扫孤儿 run**（路由为 hash 模式，F5 本身能回到页面——2026-10-25 实测修正；真正的问题是 run 状态只在内存，刷新后 run 卡消失，gated run 无法批准；服务器重启后卡 running 的 run 同样无法处理）
 2. 回滚时 save 再抛异常 → 编辑卡 applying 直至重启；回滚前瞬态窗口可见 gated 内容（无事务，write-then-rewrite）
 3. `pipeline_import.prepare()` 契约警告被丢弃（审计线索缺口）；SSE failed 事件 `stage:""` 哨兵值未声明
 4. chain_repair 修复轮尾指令是 agent 纪律措辞，真模型可能先跑门再等结果烧掉最后一轮（失败安全，可重试）
@@ -71,6 +72,22 @@ python -m core.skill_executor characters <小说.txt> --project smoke1 --provide
 6. 同项目换小说重跑保留旧剧本/角色卡（merge 语义正确、UX 未定；DELETE 产物接口是手动出口）
 7. 小项：retry 按钮无 in-flight 防抖、非 script apply 无体检门（可加 UI 提示）、`_sessions` 无上限、桥接 art 行文本未截断、重复 import 期 `_RouterLLM()` 实例
 
-## 五、给面试官的演示口径
+## 五、浏览器验证记录（2026-10-25，headless Edge + CDP）
+
+零 LLM 成本完成的 UI 消费端验证（导入《署名》大纲+剧本，另建空项目测创作入口）：
+
+| 检查 | 结果 |
+|---|---|
+| 后端重启 → 0006 迁移自动应用（schema_migrations 六条全记） | ✅ |
+| 《署名》导入：outline 200 / script ep1 200 / script ep2-3 批次 200，**逐集合并契约**三集齐全（ep1 保留 + ep2/3 并入） | ✅ |
+| 剧本页：《署名》三集字数/场景头/对白渲染正确；改稿提案空态文案正确；AI 助手"确认才应用"提示可见；零 JS 错误 | ✅ |
+| 「管线产物」tab：characters/art/staging/storyboard 四面板空态正确（只导了大纲+剧本） | ✅ |
+| 创作入口（无产物项目）：textarea + ≥50 字门（5/50 禁用 → 100/50 启用）+「开始创作」+ 如实确认门文案 | ✅ |
+| CreateRunPanel 仅在无产物项目或有活跃 run 时显示（署名有产物 → 入口隐藏，设计行为） | ✅ |
+| 顶栏项目名 direct-URL 不刷新 | ⚠️ 存量，见队列 0 |
+
+未验证（需真实 LLM，见第 2/3 层）：run 启动后的直播进度、确认对话框交互、门报告流、改稿三拍、失败重试。
+
+## 六、给面试官的演示口径
 
 架构 = **Workflow 当脊柱，Agent 当关节**：确定性状态机管顺序和门，创作阶段是带 4 工具的 gated agent loop（门即终止条件），填表型阶段链+一次修复，改稿脑写入必过审批门。每次 run 的迭代数/门通过率/工具调用留痕可查——"门即环境反馈的自我修正"是可验证的 Agent 能力，不是套壳工作流。
