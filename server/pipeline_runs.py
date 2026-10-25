@@ -54,10 +54,11 @@ def build_pipeline_runs(db: Any, llm: Any = None) -> tuple[RunStore, EventBroker
     store = RunStore(db)
     broker = EventBroker()
     # 装配级预算调优：真模型冒烟（skill_executor.__main__，--max-iterations 默认 20）
-    # 首过 outline 用了 12 轮、2-3 类违规时 16 轮刚好差一口气，默认 5 几乎必耗尽。
+    # 默认 5 几乎必耗尽；16 轮曾刚好差一口气；2026-10-25 实测《最后一单》outline
+    # 真跑 18 轮过门（gate_runs=7）——按证据放宽到与冒烟 CLI 一致的 20。
     # 只在此装配点放宽；run_stage/PipelineRunner 的保守默认 5 按台账裁定保持不动。
     runner = PipelineRunner(store, db, broker=broker, llm=llm or _default_llm(),
-                            max_iterations=16)
+                            max_iterations=20)
     return store, broker, runner
 
 
