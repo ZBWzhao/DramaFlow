@@ -9,12 +9,12 @@
  */
 import { computed, onBeforeUnmount, onMounted, ref } from "vue";
 import { useRoute, useRouter } from "vue-router";
-import { ElMessageBox } from "element-plus";
+import { ElMessage, ElMessageBox } from "element-plus";
 import AiPanel from "../ai/AiPanel.vue";
 import { errorText, getJSON } from "../api.js";
-import { hasPipelineScript, importScript, loadAll, loadPipeline, loadProject, loadScript, loadSegments, pollProduceJob, startProduce, studio } from "../studio/studioStore.js";
-import StoryAnalysisCards from "./script/StoryAnalysisCards.vue";
-import AssetTablesPanel from "./script/AssetTablesPanel.vue";
+import { hasPipelineScript, importScript, loadAll, loadAssets, loadPipeline, loadScript, loadSegments, pollProduceJob, startProduce, studio, syncPipelineAssets } from "../studio/studioStore.js";
+import CastPanel from "./pipeline/CastPanel.vue";
+import ArtPanel from "./pipeline/ArtPanel.vue";
 import PipelineOutlinePanel from "./script/PipelineOutlinePanel.vue";
 
 const route = useRoute();
@@ -22,11 +22,12 @@ const router = useRouter();
 
 const editing = ref(false);
 const editText = ref("");
-/* 中列 tab：剧本正文 / 项目设定（四件套）/ 资产表（草稿区）/ 管线大纲（只读，导入产物才有） */
+/* 中列 tab：剧本正文 / 项目（角色设定、美术设定，均为管线产物只读）/ 管线大纲。
+ * 三套脑切换（阶段 2 Task 7）：项目设定的唯一内容源是管线产物——
+ * 四卡分析面板与资产表草稿面板已从本页退役（组件文件保留一个版本周期）。 */
 const tab = ref("script");
-async function switchTab(next) {
+function switchTab(next) {
   tab.value = next;
-  if (next !== "script" && !studio.storyAnalysis) await loadProject(); // 产物随 project 下发
 }
 const busy = ref(false);
 const notice = ref("");
@@ -73,6 +74,37 @@ const producing = computed(() => ["queued", "running"].includes(studio.produceJo
 
 /* 管线大纲 tab 开关：导入了 outline 产物才出现，画布老项目零变化 */
 const hasPipelineOutline = computed(() => Boolean(studio.pipeline?.detail?.outline));
+
+/* 角色设定 / 美术设定（Task 7 换源）：内容 = characters / art 产物详情。
+ * 缺产物 → null，面板位置给空态 + 同步按钮置灰；同步按钮把产物经
+ * sync-assets 桥入资产库（只增不改不删），成功 toast added 数。 */
+const castContent = computed(() => {
+  const c = studio.pipeline?.detail?.characters?.content;
+  return c && typeof c === "object" ? c : null;
+});
+const artContent = computed(() => {
+  const c = studio.pipeline?.detail?.art?.content;
+  return c && typeof c === "object" ? c : null;
+});
+const syncingAssets = ref(false);
+/* 当前项目 tab 对应的产物：tab 键（cast/art）→ 落库 artifact_type（characters/art） */
+const paneContent = computed(() => (tab.value === "cast" ? castContent.value : artContent.value));
+const paneType = computed(() => (tab.value === "cast" ? "characters" : "art"));
+const paneLabel = computed(() => (tab.value === "cast" ? "角色设定" : "美术设定"));
+async function syncAssets(artifactType) {
+  if (syncingAssets.value) return;
+  syncingAssets.value = true;
+  try {
+    const res = await syncPipelineAssets(artifactType);
+    ElMessage.success(res?.message || `同步完成：新增 ${res?.added ?? 0} 项`);
+    // 资产库变了：刷新资产与剧本统计（左栏「资产就绪」计数）
+    await Promise.all([loadAssets(), loadScript()]);
+  } catch (err) {
+    ElMessage.error(errorText(err));
+  } finally {
+    syncingAssets.value = false;
+  }
+}
 const producePct = computed(() => {
   const p = studio.produceJob?.progress;
   return producing.value && p?.total ? p.percent : null;
@@ -380,12 +412,8 @@ onMounted(refresh);
           <button class="dt" :class="{ on: tab === 'script' }" type="button" @click="switchTab('script')">剧本</button>
           <span class="dt-sep" aria-hidden="true"></span>
           <span class="dt-group">项目</span>
-          <button class="dt" :class="{ on: tab === 'analysis' }" type="button" @click="switchTab('analysis')">
-            项目设定<span v-if="studio.analysis.running" class="dt-spin" title="正在解析"></span>
-          </button>
-          <button class="dt" :class="{ on: tab === 'tables' }" type="button" @click="switchTab('tables')">
-            资产表<span v-if="studio.parsing.running" class="dt-spin" title="正在解析资产表"></span>
-          </button>
+          <button class="dt" :class="{ on: tab === 'cast' }" type="button" @click="switchTab('cast')">角色设定</button>
+          <button class="dt" :class="{ on: tab === 'art' }" type="button" @click="switchTab('art')">美术设定</button>
           <button v-if="hasPipelineOutline" class="dt" :class="{ on: tab === 'pipeline' }" type="button" @click="switchTab('pipeline')">管线大纲</button>
         </div>
         <template v-if="tab === 'script'">
@@ -396,8 +424,27 @@ onMounted(refresh);
       </div>
 
       <div ref="scrollEl" class="script-scroll" @scroll="onBodyScroll">
-        <StoryAnalysisCards v-if="tab === 'analysis'" />
-        <AssetTablesPanel v-else-if="tab === 'tables'" />
+        <!-- 项目设定换源（Task 7）：管线产物只读面板 +「同步资产库」（只增不改不删） -->
+        <div v-if="tab === 'cast' || tab === 'art'" class="pipe-pane">
+          <div class="pane-bar">
+            <span class="pane-tip">来自管线产物，只读；入库走「同步资产库」——只增不改不删</span>
+            <span style="flex: 1"></span>
+            <button
+              class="btn sm primary"
+              type="button"
+              :disabled="syncingAssets || !paneContent"
+              @click="syncAssets(paneType)"
+            >
+              {{ syncingAssets ? "同步中…" : "同步资产库" }}
+            </button>
+          </div>
+          <CastPanel v-if="tab === 'cast' && castContent" :content="castContent" />
+          <ArtPanel v-else-if="tab === 'art' && artContent" :content="artContent" />
+          <div v-else class="pane-empty">
+            该项目还没有「{{ paneLabel }}」管线产物。<br />
+            在「创作」页从小说生成，或经管线导入写入产物后，这里会显示。
+          </div>
+        </div>
         <PipelineOutlinePanel v-else-if="tab === 'pipeline'" :outline="studio.pipeline?.detail?.outline?.content" />
         <template v-else>
           <div class="script-inner">
@@ -504,9 +551,6 @@ onMounted(refresh);
 /* 项目级 tab 与本集 tab 之间的分界 */
 .dt-sep { width: 1px; background: var(--line-2); margin: 5px 8px; }
 .dt-group { align-self: center; color: var(--text-3); font-size: 10px; letter-spacing: .14em; }
-/* 解析运行徽标：跨 tab 可见（不用切过去才知道在跑） */
-.dt-spin { width: 8px; height: 8px; border-radius: 50%; border: 1.5px solid rgba(194, 163, 107, .3); border-top-color: var(--gold); animation: dt-rot 0.9s linear infinite; }
-@keyframes dt-rot { to { transform: rotate(360deg); } }
 .script-lay { display: grid; grid-template-columns: 232px 6px minmax(0, 1fr) 6px 340px; height: 100%; min-height: 0; }
 .script-lay, .script-lay * { box-sizing: border-box; }
 
@@ -546,6 +590,16 @@ onMounted(refresh);
 .script-head .vm { font-size: var(--fs-11); color: var(--text-3); }
 .script-scroll { flex: 1; overflow-y: auto; }
 .script-inner { max-width: 700px; margin: 0 auto; position: relative; }
+
+/* 管线产物面板（角色设定 / 美术设定）：顶部说明 + 同步按钮，内容宽对齐大纲页 */
+.pipe-pane { max-width: 860px; margin: 0 auto; padding: var(--sp-4) var(--sp-6) 96px; }
+.pane-bar { display: flex; align-items: center; gap: var(--sp-2); padding-bottom: var(--sp-3); }
+.pane-tip { font-size: var(--fs-12); color: var(--text-3); }
+.pane-empty {
+  margin-top: var(--sp-4); padding: var(--sp-6) var(--sp-4); text-align: center;
+  border: 1px dashed var(--line-2); border-radius: var(--r-2);
+  color: var(--text-3); font-size: var(--fs-13); line-height: 2;
+}
 .script-doc { max-width: 100%; padding: var(--sp-6) var(--sp-6) 96px; font-family: var(--serif); font-size: 16px; line-height: 2.15; color: var(--text); }
 .script-doc p { margin-bottom: var(--sp-3); text-align: justify; }
 .script-doc p b { color: var(--gold); font-weight: 600; }

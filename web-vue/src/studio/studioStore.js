@@ -643,6 +643,18 @@ export async function savePipelineEpisode(no, text) {
   return data;
 }
 
+/* ── 管线产物 → 资产库 同步桥（阶段 2 Task 7）：剧本页「同步资产库」按钮的数据源 ──
+ * 服务端契约（server/pipeline_assets.py）：POST
+ * /api/pipeline/projects/{canvas}/artifacts/{type}/sync-assets，type ∈ characters|art，
+ * 响应 {message, added}——merge 只增不改不删，added = 新建资产 + 新增形象。
+ */
+export async function syncPipelineAssets(artifactType) {
+  return postJSON(
+    `/api/pipeline/projects/${encodeURIComponent(studio.canvas)}/artifacts/${artifactType}/sync-assets`,
+    {},
+  );
+}
+
 /* ── 管线运行（阶段 2 Task 4）：粘贴小说 → SSE 直播 → 大纲确认门 ─────
  * 服务端契约：server/pipeline_runs.py 六端点 + SSE。run.status 同 0006 CHECK：
  * running / gated / failed / done / cancelled；run.id 为空 = 没有活动运行。

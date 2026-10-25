@@ -2794,6 +2794,15 @@ if _runs_db is not None:
     pipeline_runs_api.configure(store=_runs_store, runner=_runs_runner, broker=_runs_broker)
 app.include_router(pipeline_runs_api.router)
 
+# ---------------------------------------------------------------------------
+# 管线 → 资产库 同步桥（阶段 2 Task 7）：cast.json / art.json 入库，只增不改不删。
+# 读侧复用 artifacts 路由的 DB 句柄与 503/404 形态，写侧复用 studio 的资产同步
+# 执行函数（mutate_canvas_with_retry 串行写）。同样必须注册在静态目录挂载之前。
+# ---------------------------------------------------------------------------
+from server import pipeline_assets as pipeline_assets_api  # noqa: E402
+
+app.include_router(pipeline_assets_api.router)
+
 # 产物目录：前端用 <img src="/assets/generated/xxx.png"> 直接显示生成的图
 (WORKSPACE / "assets").mkdir(parents=True, exist_ok=True)
 app.mount("/assets", StaticFiles(directory=str(WORKSPACE / "assets")), name="assets")
