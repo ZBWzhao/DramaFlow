@@ -10,7 +10,8 @@
 红线约束落点：
 - 门只经 node 子进程（唯一可执行文件），timeout 120s，每阶段一次 tempfile.mkdtemp；
 - 迭代上限默认 5，超限 = StageResult(ok=False, findings=...)，无脏数据；
-  填表型（policy="chain_repair"：characters/art）锁 2 轮——产全文 + 恰好一轮修复；
+  填表型（policy="chain_repair"：characters/art）按权威门运行次数锁 2 次——产全文
+  + 恰好一轮修复，被拒的组装轮不消耗门预算（finish 组装检查，fastfollow-2）；
 - 产物写入只有 pipeline_repository.save 一个口；
 - LLM 经 LLMPort 协议注入，本模块不绑任何 SDK——真链路用 _RouterLLM
   （core/llm.LLM 的响应整形），Task 3 起 runner 注入。
@@ -105,7 +106,8 @@ STAGE_SPECS: dict[str, dict] = {
     },
     # ---------------------------------------------------------------------
     # Task 6：制片四层。填表型（characters/art）policy="chain_repair"：单次
-    # complete 产全文 → 权威门 → 未过恰好一轮修复（规格 8.1，预算锁 2 轮）；
+    # complete 产全文 → 权威门 → 未过恰好一轮修复（规格 8.1，预算按权威门计、
+    # 锁 2 次，fastfollow-2 起 finish 前置组装检查）；
     # 创作型（staging/storyboard）policy="agent"：与 outline/script 同一条
     # gated agent loop。gate 实参按各技能 SKILL.md 的 validate 用法抄写
     # （brief 初稿与技能文档不一致处以文档为准）：文件名取自
@@ -315,6 +317,21 @@ class _ToolBox:
             self.state["gate_log"].append(output[-GATE_TAIL:])
             return output if name == "read_gate_report" else output[-GATE_TAIL:]
         if name == "finish":
+            # chain_repair 的结构保证（fastfollow-2）：finish 前置组装检查——缺键/
+            # 空键直接打回（点名缺失键），半稿进不了权威门。真模型实证（2026-10-25）：
+            # deepseek-chat 把 characters 产稿拆两轮，修复轮拿到半成品烧光预算未落库；
+            # 旧口径 finish 无条件置 finished，半稿直接进门。组装轮不消耗门预算
+            # （预算按权威门运行次数计，见 run_stage 的动态上界）。
+            if self.spec.get("policy") == "chain_repair":
+                required = [*spec_meta_sections(self.spec), *self.spec["sections"]]
+                missing = [k for k in required
+                           if k not in self.state["draft"]
+                           or self.state["draft"][k] in (None, "", [], {})]
+                if missing:
+                    self.state["finish_rejections"] = self.state.get("finish_rejections", 0) + 1
+                    return (f"finish 被拒绝：草稿还缺 {'、'.join(missing)}。"
+                            "先把这些键 write_draft 写全（数组键一次整组），"
+                            "同一轮立即再 finish——组装轮不消耗你的门预算。")
             self.state["finished"] = True
             return "ok"
         return f"未知工具 {name}"
@@ -468,7 +485,7 @@ def _compose_system(spec: dict) -> str:
     artifact_file = pipeline_artifacts.get(spec["artifact"]).filename
     if spec.get("policy") == "chain_repair":
         # 填表型纪律（规格 8.1）：一轮产全文 → finish 触发权威门 → 恰好一轮修复。
-        # 不设自检轮（run_quality_gate）——预算只有 2 轮，自检等于白烧一半。
+        # 不设自检轮（run_quality_gate）——预算只有 2 次权威门，自检等于白烧一半。
         steps = f"""2. 第一轮就并行发齐全部 write_draft，把 {len(sections)} 个顶层键一次写全：{'、'.join(sections)}。
    data 严格符合上面 schema.md 对应节的字段定义，一次写到位，不留空壳占位；写全后
    同一轮立即调用 finish 触发权威质量门（门就是自检，不必也不应先 run_quality_gate）。
@@ -527,14 +544,20 @@ async def run_stage(
 
     一轮 = 一次 llm.complete() + 顺序执行该轮全部工具调用；finish 触发权威门
     （自检门只是预演），失败则 findings 留档、重置 finished 让模型继续修。
+    chain_repair（填表型）的 finish 前置组装检查：缺键/空键直接打回、不置
+    finished，被拒组装轮不消耗门预算（循环上界随 finish_rejections 动态抬高）；
+    预算语义 = 权威门运行次数，锁 2 次。
     """
     spec = STAGE_SPECS[stage]
-    # chain_repair（填表型，规格 8.1）：单次产全文 + 恰好一轮修复——预算锁 2 轮，
-    # 调用方给更大的 max_iterations 也不放宽；agent 型才吃调用方预算。
-    if spec.get("policy") == "chain_repair":
-        max_iterations = min(max_iterations, 2)
+    # chain_repair（填表型，规格 8.1）：单次产全文 + 恰好一轮修复——预算按"权威门
+    # 运行次数"计、锁 2 次（调用方给更大的 max_iterations 也不放宽）。被拒的组装
+    # 轮不消耗门预算：循环上界随 finish_rejections 动态抬高（每轮重算，见下）。
+    # agent 型才吃调用方预算。
+    chain_repair = spec.get("policy") == "chain_repair"
+    base_iterations = min(max_iterations, 2) if chain_repair else max_iterations
     workdir = Path(tempfile.mkdtemp(prefix=f"stage-{stage}-"))   # 每阶段一次，门的 cwd
-    state: dict = {"draft": {}, "finished": False, "gate_log": [], "last_gate": None}
+    state: dict = {"draft": {}, "finished": False, "gate_log": [], "last_gate": None,
+                   "finish_rejections": 0}
     box = _ToolBox(spec, workdir, inputs, state)
     gate_log: list[str] = state["gate_log"]
 
@@ -551,7 +574,12 @@ async def run_stage(
         {"role": "user", "content": user_content},
     ]
     findings: list[dict] = []
-    for rnd in range(1, max_iterations + 1):
+    # while 化（原 for range）：chain_repair 的上界 = min(max_iterations, 2) +
+    # finish_rejections，拒绝发生在轮内，必须每轮重算；agent 型上界恒定。
+    rnd = 0
+    while rnd < (base_iterations + state["finish_rejections"]
+                 if chain_repair else base_iterations):
+        rnd += 1
         resp = await llm.complete(messages, tools=box.specs())
         calls = list(getattr(resp, "tool_calls", None) or [])
         # OpenAI 协议要求 assistant 带回它发出的 tool_calls（id 配对 tool 消息）；
@@ -614,9 +642,9 @@ async def run_stage(
         # 修复指令要具体到"覆盖哪个键、整组重发"——首冒烟里模型曾反复只改第 1 集
         # 和无关的 scenes，对报告点名的 warnings 视而不见，预算烧光也没修对。
         # 尾巴按策略分支（与 _compose_system 两个分支的自检口径一致）：agent 型
-        # 多轮预算下自检不亏，修完先 run_quality_gate；chain_repair 预算锁 2 轮，
-        # 自检等于白烧一半——修完同轮立刻 finish（门即自检）。
-        tail = ("修完同一轮立刻再 finish，不要先 run_quality_gate（预算只有 2 轮，自检等于白烧）。"
+        # 多轮预算下自检不亏，修完先 run_quality_gate；chain_repair 预算锁 2 次
+        # 权威门，自检等于白烧一半——修完同轮立刻 finish（门即自检）。
+        tail = ("修完同一轮立刻再 finish，不要先 run_quality_gate（预算只有 2 次权威门，自检等于白烧）。"
                 if spec.get("policy") == "chain_repair"
                 else "修完 run_quality_gate，报告全过就立刻 finish。")
         messages.append({"role": "user",
@@ -626,14 +654,14 @@ async def run_stage(
                                       + (spec.get("repair_note") or "")
                                       + tail})
 
-    # 迭代耗尽：带失败报告退出，绝不落产物
+    # 迭代耗尽：带失败报告退出，绝不落产物（iterations = 实际轮数，含被拒组装轮）
     if not findings:
         last = state["last_gate"]
         findings = [{"gate": "validate",
                      "detail": last["output"][-FINDING_TAIL:] if last
-                     else f"{max_iterations} 轮内未 finish，无质量门结果"}]
+                     else f"{rnd} 轮内未 finish，无质量门结果"}]
     on_event and on_event({"type": "done", "ok": False})
-    return StageResult(False, spec["artifact"], max_iterations, gate_log, findings)
+    return StageResult(False, spec["artifact"], rnd, gate_log, findings)
 
 
 # ---------------------------------------------------------------------------
