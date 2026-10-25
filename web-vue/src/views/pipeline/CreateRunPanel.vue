@@ -26,6 +26,10 @@ const retryError = ref("");
 const outlineEl = ref(null); // 「查看大纲并确认」的滚动目标
 
 const run = computed(() => studio.run);
+/* 归属判定：运行卡（含确认门/重试/意见）只在本项目的页面上渲染——A 项目的活动
+ * run 绝不出现在 B 项目的 PipelineView，否则会看着 B 的大纲缓存给 A 的 run 点
+ * 确认（review 修复）。不匹配时回落到入口卡片；SSE 流在 store 层继续，不受影响。 */
+const runHere = computed(() => Boolean(run.value.id) && run.value.project_id === studio.canvas);
 const charCount = computed(() => novel.value.trim().length);
 const canStart = computed(() => charCount.value >= 50 && Boolean(studio.canvas) && !starting.value);
 
@@ -158,8 +162,8 @@ function scrollToOutline() {
 
 <template>
   <section class="crp">
-    <!-- ① 入口：还没有活动 run -->
-    <div v-if="!run.id" class="card">
+    <!-- ① 入口：本项目没有可显示的 run（无 run，或活动 run 属于别的项目） -->
+    <div v-if="!runHere" class="card">
       <div class="cap">从小说开始<span class="sub">粘贴正文 → Agent 逐阶段改编 → 大纲停下来等你确认</span></div>
       <textarea
         v-model="novel"
@@ -248,8 +252,8 @@ function scrollToOutline() {
       </div>
     </div>
 
-    <!-- ③ gated：大纲草案（滚动目标 + 确认对象） -->
-    <div v-if="run.id && run.status === 'gated'" ref="outlineEl" class="outline-wrap">
+    <!-- ③ gated：大纲草案（滚动目标 + 确认对象）；同 runHere 判归属 -->
+    <div v-if="runHere && run.status === 'gated'" ref="outlineEl" class="outline-wrap">
       <div class="outline-cap">大纲草案 · 质量门已过，待人工确认</div>
       <PipelineOutlinePanel v-if="outlineContent" :outline="outlineContent" />
       <div v-else class="outline-none">大纲产物加载中，请稍候……若长时间为空请刷新页面。</div>

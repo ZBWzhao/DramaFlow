@@ -49,8 +49,13 @@ const meta = computed(() => {
 const imported = computed(() => Boolean(studio.pipeline?.artifacts?.[cur.value.type]));
 
 /* 创作入口的占位开关（阶段 2 Task 4）：项目还没有任何管线产物 → 常驻入口；
- * 已有产物 → 只在存在活动 run 时才显示运行卡，平时不占位。 */
+ * 已有产物 → 只在存在活动 run 时才显示运行卡，平时不占位。
+ * 归属判定带 project_id：别的项目还有 run 在跑，也不在本页渲染它的运行卡
+ * （review 修复：防 A 项目的确认门渲染到 B 项目、对着 B 的大纲缓存点确认）。 */
 const hasArtifacts = computed(() => Object.keys(studio.pipeline?.artifacts || {}).length > 0);
+const runActiveHere = computed(
+  () => Boolean(studio.run.id) && studio.run.project_id === studio.canvas,
+);
 
 onMounted(async () => {
   const name = String(route.params.name || "");
@@ -67,8 +72,8 @@ onMounted(async () => {
         <span class="sub">来自管线导入，只读 · 修订走重导入</span>
       </div>
 
-      <!-- 创作入口：无产物常驻（从小说开始），有产物只跟随活动 run -->
-      <CreateRunPanel v-if="!hasArtifacts || studio.run.id" />
+      <!-- 创作入口：无产物常驻（从小说开始），有产物只跟随本项目的活动 run -->
+      <CreateRunPanel v-if="!hasArtifacts || runActiveHere" />
 
       <div class="pv-tabs">
         <button

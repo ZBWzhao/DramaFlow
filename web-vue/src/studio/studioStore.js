@@ -48,7 +48,9 @@ export const studio = reactive({
   pipeline: { loaded: false, canvas: "", artifacts: {}, detail: {} },
 
   // 管线运行（阶段 2 Task 4）：id 为空 = 没有活动运行。状态机与 SSE 消费见文件尾「管线运行」节。
-  run: { id: "", status: "", stage: "", stages: {}, events: [], link: "" },
+  // project_id 随 startRun 落账：面板按 run.project_id === canvas 判归属，防止 A 项目的
+  // 运行卡（尤其确认门）渲染在 B 项目页面上、对着 B 的大纲缓存点确认（review 修复）。
+  run: { id: "", project_id: "", status: "", stage: "", stages: {}, events: [], link: "" },
 });
 
 const qs = () => {
@@ -659,6 +661,7 @@ export async function startRun(projectId, novel) {
   const data = await postJSON(`/api/pipeline/runs`, { project_id: projectId, novel_text: novel });
   studio.run = {
     id: data.run_id,
+    project_id: projectId,
     status: data.status || "running",
     stage: data.stage || "",
     stages: {},
