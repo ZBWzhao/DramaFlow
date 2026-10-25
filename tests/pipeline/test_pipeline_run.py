@@ -7,9 +7,9 @@
 - 状态机、确认门、事件契约、断点续跑、无脏数据约束全部是真的。
 - 只有 executor 是假的：同步返回 StageResult，不碰 LLM/质量门/临时目录。
 
-STAGE_SPECS 现在只有 outline：默认路径下 outline 过门（approve 后）即 done
-（没有剩余可运行阶段）。要验证全 STAGE_ORDER 推进，用 monkeypatch 把
-skill_executor.STAGE_SPECS 换成六阶段桩——Task 5/6 落地真规格后行为不变。
+STAGE_SPECS 真规格已覆盖 outline+script（Task 5）：approve 后推进到 script，
+characters 起仍无规格 → 无剩余可运行阶段即 done。要验证全 STAGE_ORDER 推进，
+用 monkeypatch 把 skill_executor.STAGE_SPECS 换成六阶段桩——Task 6 落地后不变。
 """
 from __future__ import annotations
 
@@ -105,10 +105,13 @@ def test_runner_pauses_at_confirmation_gate(pipeline_test_database):
         await runner.wait_idle()
         state = await store.get(run["run_id"])
         assert state["status"] == "done"
-        # 当前 STAGE_SPECS 只有 outline：后续阶段无规格、不可运行 → 无剩余阶段即 done
-        # （Task 5/6 补齐规格后收紧为全 STAGE_ORDER，见下一用例）。
-        assert [c["stage"] for c in await store.stage_history(run["run_id"])] == ["outline"]
+        # Task 5 起 script 已注册：approve 后推进到 script（fake executor 直接放行）；
+        # characters 起仍无规格、不可运行 → 无剩余阶段即 done（Task 6 补齐后收紧）。
+        assert [c["stage"] for c in await store.stage_history(run["run_id"])] == ["outline", "script"]
         assert state["stage_status"]["outline"] == {
+            "status": "done", "attempts": 1, "gate_runs": 1, "findings": [],
+        }
+        assert state["stage_status"]["script"] == {
             "status": "done", "attempts": 1, "gate_runs": 1, "findings": [],
         }
 

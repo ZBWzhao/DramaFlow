@@ -319,9 +319,11 @@ class PipelineRunner:
         except ValueError:
             start_index = 0
         for stage in STAGE_ORDER[start_index:]:
-            # Task 5/6 才补齐其余阶段规格：STAGE_SPECS 没有的阶段不可运行，跳过。
-            # 因此当前只有 outline 可跑，outline 过门（approve 后）即无剩余可运行
-            # 阶段 → done。Task 5/6 落地规格后这里自然收紧为全六阶段推进，无需改机。
+            # 规格逐任务补齐（Task 5 已注册 outline+script）：STAGE_SPECS 没有的
+            # 阶段不可运行，跳过。因此 script 过门后会继续推进到 characters——它
+            # 还没有规格，跳过后无剩余可运行阶段 → done（Task 3 口径：done =
+            # 「没有剩余可运行阶段」，不是六阶段全完成）；Task 6 落地其余四层规格
+            # 后自然收紧为全 STAGE_ORDER 推进，状态机无需改。
             if stage not in skill_executor.STAGE_SPECS:
                 continue
             # 断点续跑：已 done 的阶段不重跑（approve → resume 不会重复确认过的大纲）。

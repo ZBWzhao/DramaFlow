@@ -152,7 +152,9 @@ def test_create_run_persists_row_and_pauses_at_gate(runs_api):
     assert client.post(f"/api/pipeline/runs/{body['run_id']}/approve", json={}).status_code == 200
     row = _poll_run(client, body["run_id"], {"done"})
     assert row["history"][0]["stage"] == "outline"
-    assert runs_api.executor.calls == ["outline"]
+    # Task 5 起 script 已注册：approve 后推进到 script（fake 放行），characters 起
+    # 无规格 → done。
+    assert runs_api.executor.calls == ["outline", "script"]
 
 
 def test_create_run_validation_and_missing_run(runs_api):

@@ -31,7 +31,7 @@ from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, Protocol
 
-from . import pipeline_repository
+from . import pipeline_artifacts, pipeline_import, pipeline_repository
 
 ROOT_DIR = Path(__file__).resolve().parents[1]
 _SKILLS_ROOT = ROOT_DIR / "pipeline_skills"
@@ -42,6 +42,10 @@ FINDING_TAIL = 800            # findings 里带的病灶尾部（进 pipeline_ru
 
 # 阶段规格表：新增创作阶段 = 加一份 spec（Task 4+），loop 与工具环不动。
 # gate 列表首元素是技能目录内的脚本相对路径，其余是参数；cwd = 阶段工作目录。
+# 通用规格键：gate_needs（上游产物注入，inputs[need] 落盘成 <need>.json 供门对账，
+# 并随 user 消息进对话）；meta_sections（模型经 write_draft 写入的元数据键，同
+# outline 口径——不写死进产物拼装逻辑）；merge_sections（write_draft 按 key 分批
+# 并入而非覆盖）；save_merge（落库按 data-contract 分批合并，缺省 latest-wins 整行替换）。
 STAGE_SPECS: dict[str, dict] = {
     "outline": {
         "skill": "novel-outline", "artifact": "outline", "policy": "agent",
@@ -54,6 +58,39 @@ STAGE_SPECS: dict[str, dict] = {
         "gate": ["scripts/novel-outline.mjs", "validate", "outline.json", "--stage", "full"],
         "gate_needs": [],   # 无上游文件
         "task": "按 playbook 把用户小说改编为短剧大纲五件套，写全六节后跑质量门，全过才 finish。",
+        # 阶段专属口径（_compose_system 原样带进执行器纪律，不进通用模板——
+        # outline 自己定集数，script 等下游阶段的集数以上游产物为事实）。
+        "notes": ("注意：source 是书名字符串（去掉书名号）；lang 固定写 \"zh\"；"
+                  "params.episodes 必须与 episodes 数组长度一致。episodes 数量按小说体量定："
+                  "几千字的短篇用 6–12 集，更长的原作才逐步上探；集数自检通过后不要再改。"),
+        "repair_note": ("点名第几集缺什么预警就在该集 warnings 补原词"
+                        "（报告里「第 N 集缺「X」」是机械判据：该集文本扫到了生成难点关键词，"
+                        "而 warnings 数组里没有字符串 X——把 X 原样加进该集 warnings 即可，"
+                        "不用改梗概原文）。"),
+    },
+    # Task 5：novel-script 执行器。难度在时长门——每集估算秒数必须落在目标 ±15% 内
+    # （台词按语速折算、动作按拍计秒），写超写欠都要回炉。
+    "script": {
+        "skill": "novel-script", "artifact": "script", "policy": "agent",
+        "playbook": ["SKILL.md", "references/schema.md"],
+        "sections": ["episodes"],           # 按 ep 逐集 write_draft(section="episodes", data=[...])
+        # source 是门的硬输入（validate 必填）；params 刻意不可写——语速/容差用技能
+        # 默认值，模型自调 tolerance 等于给时长门放水。
+        "meta_sections": ["source", "lang"],
+        # 逐集写按集号并入（playbook：一批 ≤ 3 集）：分批写、单集修复都不丢已写集。
+        "merge_sections": {"episodes": "ep"},
+        # 落库按 data-contract「script 分批合并」：批次外的集保留，不是 outline 那种整行替换。
+        "save_merge": True,
+        "gate": ["scripts/novel-script.mjs", "validate", "script.json", "--outline", "outline.json"],
+        "gate_needs": ["outline"],
+        "task": "按 playbook 把大纲落成分集剧本（结构化节拍流），逐集写 episodes 后跑质量门，全过才 finish。",
+        # 集数/时长/钩子/爽点全部是上游大纲的既有事实（seed 的确定性搬运口径；
+        # 执行器没有 seed 命令，由模型逐集搬运，门逐项对账）。
+        "notes": ("注意：集数、集号与每集事实字段一律以上游大纲为准，不要自行增删集或改时长："
+                  "targetSeconds = 大纲 params.minutesPerEpisode × 60；hook/cliff 从大纲对应集"
+                  "的 hook/suspense 搬运；beatsClaimed 认领大纲 beats 落在该集的爽点 type。"
+                  "episodes 按 ep 逐集 write_draft（data 是数组，可分批写、可单集修，按集号并入）；"
+                  "source/lang 写一次即可（source 同大纲 source，lang 固定写 \"zh\"）。"),
     },
 }
 
@@ -82,27 +119,45 @@ class _ToolBox:
 
     def __init__(self, spec: dict, workdir: Path, inputs: dict, state: dict):
         self.spec, self.workdir, self.inputs, self.state = spec, workdir, inputs, state
+        # gate_needs 驱动的上游落盘（通用逻辑，非某个阶段的特判）：inputs[need] 是
+        # runner 从 pipeline_artifacts 取来的已落库 content，写成 <need>.json 供门的
+        # --outline 等实参读取（Task 5 约定）。
+        for need in spec.get("gate_needs") or []:
+            payload = inputs.get(need)
+            if payload is not None:
+                (workdir / f"{need}.json").write_text(
+                    json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8"
+                )
 
     def specs(self) -> list[dict]:
         """OpenAI 风格 tool 定义；section 枚举直接约束顶层键。"""
-        sections = [*self.spec["meta_sections"], *self.spec["sections"]]
+        meta = spec_meta_sections(self.spec)
+        sections = [*meta, *self.spec["sections"]]
+        merge_note = "".join(
+            f"；{sec} 按 {key} 逐条并入：可整组重发，也可只发要写/要改的条目，"
+            f"已写的其他条目不受影响"
+            for sec, key in (self.spec.get("merge_sections") or {}).items()
+        )
         return [
             {"type": "function", "function": {
                 "name": "write_draft",
-                "description": "写入大纲的一个顶层键；重复调用即覆盖该键。九个键全部写完后才允许跑门。",
+                "description": f"写入产物的一个顶层键；重复调用即覆盖该键{merge_note}。"
+                               f"{len(sections)} 个键全部写完后才允许跑门。",
                 "parameters": {
                     "type": "object",
                     "properties": {
                         "section": {"type": "string", "enum": sections, "description": "顶层键名"},
-                        "data": {"description": "该键的完整 JSON 数据：source/lang 是字符串，"
-                                               "params/adaptation 是对象，characters/scenes/props/beats/episodes 是数组"},
+                        "data": {"description": "该键的完整 JSON 数据：字符串/对象/数组以 schema.md "
+                                               "对应节为准（如 source/lang 是字符串，"
+                                               "params/adaptation 是对象，"
+                                               "characters/scenes/props/beats/episodes 是数组）"},
                     },
                     "required": ["section", "data"],
                 },
             }},
             {"type": "function", "function": {
                 "name": "run_quality_gate",
-                "description": "把当前草稿组装成产物 JSON 并跑质量门（14 道全查），返回报告尾部。有违规就修对应键。",
+                "description": "把当前草稿组装成产物 JSON 并跑质量门（各道全查），返回报告尾部。有违规就修对应键。",
                 "parameters": {"type": "object", "properties": {}},
             }},
             {"type": "function", "function": {
@@ -125,10 +180,11 @@ class _ToolBox:
 
     async def dispatch(self, name: str, args: dict) -> str:
         if name == "write_draft":
+            meta = spec_meta_sections(self.spec)
             section = str(args.get("section", ""))
-            if section not in self.spec["meta_sections"] + self.spec["sections"]:
+            if section not in meta + self.spec["sections"]:
                 return (f"错误：缺 section 或不是合法键。可选键："
-                        f"{'、'.join([*self.spec['meta_sections'], *self.spec['sections']])}；"
+                        f"{'、'.join([*meta, *self.spec['sections']])}；"
                         f"重发时把 section 和 data 都带上。")
             data = args.get("data")
             kind = self._DATA_KINDS.get(section)
@@ -137,6 +193,15 @@ class _ToolBox:
                         f"收到的是 {type(data).__name__}。"
                         + ("不要把 JSON 再编码成字符串，直接给数组/对象。"
                            if isinstance(data, str) else "按 schema.md 该节的类型重发。"))
+            merge_key = (self.spec.get("merge_sections") or {}).get(section)
+            if merge_key is not None:
+                keyed = _keyed_items(data, merge_key)
+                if keyed is None:
+                    return (f"错误：{section} 按 {merge_key} 逐条并入，data 必须是非空数组，"
+                            f"且每项都是含合法整数 {merge_key} 的对象——修正后重发。")
+                existing = self.state["draft"].get(section)
+                if isinstance(existing, list):
+                    data = _merge_by_key(existing, keyed, merge_key)
             self.state["draft"][section] = data
             return "ok"
         if name in ("run_quality_gate", "read_gate_report"):
@@ -159,11 +224,60 @@ class _ToolBox:
         return await _run_gate(self.spec, self.workdir)
 
 
+def spec_meta_sections(spec: dict) -> list[str]:
+    """规格的元数据键；缺省无（新阶段规格可以只写 sections，不背 outline 的三件套）。"""
+    return spec.get("meta_sections") or []
+
+
+def _keyed_items(data: Any, key: str) -> dict | None:
+    """data → {key: item}；不是非空数组、或有项缺合法整数 key 时返回 None（打回重发）。
+    bool 是 int 子类，显式剔除——True 当集号会静默错并。"""
+    if not isinstance(data, list) or not data:
+        return None
+    keyed: dict[int, Any] = {}
+    for item in data:
+        if not isinstance(item, dict):
+            return None
+        k = item.get(key)
+        if not isinstance(k, int) or isinstance(k, bool):
+            return None
+        keyed[k] = item
+    return keyed
+
+
+def _merge_by_key(existing: list, keyed_new: dict, key: str) -> list:
+    """按键分批合并（docs/pipeline/data-contract.md「script 分批合并」，与
+    core/pipeline_import._merge_by_key 同一语义）：既有项原样保留（键无法识别的
+    也保留），同键整对象替换且位置不变，新键追加在后。write_draft 的
+    merge_sections 与落库 save_merge 共用这一口径——草稿和库不出现两套合并语义。"""
+
+    def _key_of(item: Any) -> int | None:
+        if isinstance(item, dict):
+            k = item.get(key)
+            if isinstance(k, int) and not isinstance(k, bool):
+                return k
+        return None
+
+    merged: list = []
+    replaced: set[int] = set()
+    for item in existing:
+        k = _key_of(item)
+        if k is not None and k in keyed_new:
+            merged.append(keyed_new[k])
+            replaced.add(k)
+        else:
+            merged.append(item)
+    for k, item in keyed_new.items():
+        if k not in replaced:
+            merged.append(item)
+    return merged
+
+
 def _finalize_draft(spec: dict, state: dict) -> dict:
     """把 write_draft 攒下的草稿拼成完整产物 JSON。只排序、不补内容——
     门对什么算合格有最终解释权，执行器不替模型圆场。"""
     draft = state["draft"]
-    ordered = [*spec["meta_sections"], *spec["sections"]]
+    ordered = [*spec_meta_sections(spec), *spec["sections"]]
     content: dict[str, Any] = {key: draft[key] for key in ordered if key in draft}
     for key, value in draft.items():          # 规格外的键原样保留在尾部
         content.setdefault(key, value)
@@ -214,15 +328,16 @@ def _compose_system(spec: dict) -> str:
         f"### pipeline_skills/{spec['skill']}/{rel}\n\n{(skill_root / rel).read_text(encoding='utf-8')}"
         for rel in spec["playbook"]
     )
-    sections = [*spec["meta_sections"], *spec["sections"]]
+    meta = spec_meta_sections(spec)
+    sections = [*meta, *spec["sections"]]
     artifact_file = f"{spec['artifact']}.json"
     return f"""{playbook}
 
 ## 执行器纪律（覆盖 playbook 里需要真人参与的步骤）
 
 你在 DramaFlow 制片管线的 {spec['artifact']} 阶段工具环里自主工作，没有用户可问：
-Step 0 的参数不再向用户询问——episodes、minutesPerEpisode、genre 等由你根据小说文本
-判断决定；Step 3/4 的用户拍板取消；Step 7 的报告渲染不归你管。
+playbook 里需要真人参与的步骤（Step 0 询问参数、用户拍板、报告渲染等）一律取消，
+输入与口径以下文和给你的上游产物为准。
 
 1. 只能调用四个工具：write_draft / run_quality_gate / read_gate_report / finish。
    严禁把 {artifact_file} 的 JSON 直接写在回复文本里；回复文本（如非空）只是一句话进度说明。
@@ -231,15 +346,13 @@ Step 0 的参数不再向用户询问——episodes、minutesPerEpisode、genre 
 2. 按此顺序写全每一个顶层键，各调一次 write_draft：{'、'.join(sections)}。
    一轮可以并行发多个 write_draft（推荐 3-4 个一组）。data 严格符合上面 schema.md
    对应节的字段定义，一次写到位，不留空壳占位。
-   注意：source 是书名字符串（去掉书名号）；lang 固定写 "zh"；
-   params.episodes 必须与 episodes 数组长度一致。episodes 数量按小说体量定：
-   几千字的短篇用 6–12 集，更长的原作才逐步上探；集数自检通过后不要再改。
+   {spec.get("notes", "")}
    write_draft 的 data 必须是该键的 JSON 数据本体（数组/对象/字符串），
    绝不能是再编码过的 JSON 字符串。
-3. 九个键全部写完调 run_quality_gate 自检；门没全过禁止 finish。
+3. {len(sections)} 个键全部写完调 run_quality_gate 自检；门没全过禁止 finish。
    修复纪律：报告点名哪个键，就只重调 write_draft 覆盖那个键，data 给该键的
-   完整数据（数组键必须整组重发全部条目，别只发单条）；点名第几集缺什么预警，
-   就在该集的 warnings 数组里补上原词。不点名的键一律不动。
+   完整数据（数组键必须整组重发全部条目，别只发单条）。不点名的键一律不动。
+   {spec.get("repair_note", "")}
 4. run_quality_gate 报告全过后，下一轮立刻 finish 结束，不要再打磨其他键。
 5. 每一轮都必须发出至少一个工具调用——没有工具调用的一轮就是白白消耗一轮预算。
 6. 梗概/hook/suspense 等叙述栏一律叙述体，严禁出现引号对白（「」『』""）。"""
@@ -270,9 +383,17 @@ async def run_stage(
     box = _ToolBox(spec, workdir, inputs, state)
     gate_log: list[str] = state["gate_log"]
 
+    # 上游产物随 user 消息进对话：执行器模型没有 Read 工具（纪律第 1 条），
+    # 大纲等 gate_needs 产物必须把内容直接给它；同一份 content 也已由 _ToolBox
+    # 落盘成 <need>.json 供门对账——模型与门看到同一事实。
+    user_content = spec["task"] + "\n\n【小说原文】\n" + inputs["novel_text"]
+    for need in spec.get("gate_needs") or []:
+        if need in inputs:
+            user_content += (f"\n\n【上游产物 {need}.json（门的对账依据，已落库版本）】\n"
+                             + json.dumps(inputs[need], ensure_ascii=False, indent=2))
     messages: list[dict] = [
         {"role": "system", "content": _compose_system(spec)},
-        {"role": "user", "content": spec["task"] + "\n\n【小说原文】\n" + inputs["novel_text"]},
+        {"role": "user", "content": user_content},
     ]
     findings: list[dict] = []
     for rnd in range(1, max_iterations + 1):
@@ -317,8 +438,18 @@ async def run_stage(
         gate_log.append(output[-GATE_TAIL:])
         on_event and on_event({"type": "gate", "ok": ok, "round": rnd})
         if ok:
+            content = _finalize_draft(spec, state)
+            if spec.get("save_merge"):
+                # data-contract「script 分批合并」：按集号并入已落库产物，批次外的
+                # 集保留——重跑/重试不吞既有集（outline 无 save_merge，latest-wins
+                # 整行替换）。合并整形唯一出口 pipeline_import.prepare，不另起灶。
+                existing = await pipeline_repository.get(db, project_id, spec["artifact"])
+                content, _ = pipeline_import.prepare(
+                    pipeline_artifacts.get(spec["artifact"]),
+                    content, existing["content"] if existing else None,
+                )
             await pipeline_repository.save(db, project_id, spec["artifact"],
-                                           _finalize_draft(spec, state),
+                                           content,
                                            source_run_id=f"stage:{stage}")
             on_event and on_event({"type": "done", "ok": True})
             return StageResult(True, spec["artifact"], rnd, gate_log, [])
@@ -330,12 +461,9 @@ async def run_stage(
         messages.append({"role": "user",
                          "content": f"质量门未过（第 {rnd} 轮），报告如下：\n" + output[-GATE_TAIL:]
                                     + "\n逐条修复：报告点名哪个键，就重调一次 write_draft 覆盖那个键"
-                                      "的完整数据（数组键整组重发全部条目，别只发单条；点名第几集缺什么"
-                                      "预警就在该集 warnings 补原词）。只动点名的键。"
-                                      "报告里「第 N 集缺「X」」是机械判据：该集文本扫到了生成难点关键词，"
-                                      "而 warnings 数组里没有字符串 X——把 X 原样加进该集 warnings 即可，"
-                                      "不用改梗概原文。"
-                                      "修完 run_quality_gate，报告全过就立刻 finish。"})
+                                      "的完整数据（数组键整组重发全部条目，别只发单条）。只动点名的键。"
+                                      + (spec.get("repair_note") or "")
+                                      + "修完 run_quality_gate，报告全过就立刻 finish。"})
 
     # 迭代耗尽：带失败报告退出，绝不落产物
     if not findings:
@@ -446,12 +574,20 @@ async def _smoke(args: argparse.Namespace) -> int:
         def _on_event(event: dict) -> None:
             print(f"[event] {json.dumps(event, ensure_ascii=False)}", flush=True)
 
+        # 上游产物按 gate_needs 注入（与 runner._upstream 同口径）：script 冒烟
+        # 依赖同项目已落库的 outline，缺了只带 novel_text（门会因缺 outline.json 失败）。
+        inputs: dict = {"novel_text": novel_text}
+        for need in STAGE_SPECS[args.stage].get("gate_needs") or []:
+            row = await pipeline_repository.get(database, args.project, need)
+            if row is not None:
+                inputs[need] = row["content"]
+
         print(f"== smoke: stage={args.stage} project={args.project} "
               f"provider={provider} model={settings.model} max_iterations={args.max_iterations}",
               flush=True)
         try:
             result = await run_stage(database, args.project, args.stage,
-                                     {"novel_text": novel_text}, llm=_RouterLLM(settings),
+                                     inputs, llm=_RouterLLM(settings),
                                      max_iterations=args.max_iterations, on_event=_on_event)
         except Exception as exc:  # 配额不足等凭据级失败：auto 时回退 DEEPSEEK 重跑一次
             if provider == "auto" and ("insufficient_quota" in str(exc) or "余额不足" in str(exc)):
@@ -459,7 +595,7 @@ async def _smoke(args: argparse.Namespace) -> int:
                 print(f"[warn] TF_ROUTER 不可用（{str(exc)[:120]}…），回退 DEEPSEEK_API_KEY "
                       f"model={settings.model}", flush=True)
                 result = await run_stage(database, args.project, args.stage,
-                                         {"novel_text": novel_text}, llm=_RouterLLM(settings),
+                                         inputs, llm=_RouterLLM(settings),
                                          max_iterations=args.max_iterations, on_event=_on_event)
             else:
                 raise
