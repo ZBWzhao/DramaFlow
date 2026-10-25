@@ -281,12 +281,13 @@ def _compose_system(project_id: str, inventory: list[dict]) -> str:
 class PipelineEditor:
     """改稿脑实例：持有 LLMPort 与按 session 的对话记忆（进程内）。"""
 
-    def __init__(self, db, *, llm: Any, max_iterations: int = MAX_ITERATIONS) -> None:
+    def __init__(self, db, *, llm: Any, max_iterations: int = MAX_ITERATIONS,
+                 history_cap: int = 30) -> None:
         self.db = db
         self.llm = llm
         self.max_iterations = max_iterations
         self._sessions: dict[str, list[dict]] = {}
-        self._history_cap = 30   # 每会话保留的最近消息条数（不含 system）
+        self._history_cap = history_cap   # 每会话保留的最近消息条数（不含 system）
 
     async def _read_artifact(self, project_id: str, artifact_type: str) -> str:
         try:
@@ -384,10 +385,12 @@ class PipelineEditor:
         if not finished:
             text = (text + "\n\n（本轮改稿预算已用完，先到这里；请继续对话或重新描述需求。）").strip()
 
-        # 记忆裁剪：system 与本轮 user/assistant 收进会话历史（不含 system 本身）
-        history = self._sessions.setdefault(session_id, [])
-        history.extend(m for m in messages[1:] if m.get("role") != "system")
-        del history[:-self._history_cap]
+        # 会话记忆：整段**赋值**回写（不能 extend —— messages[1:] 里已经含着取出来的
+        # 旧历史，再 extend 会把上一轮历史整段复制一遍，逐轮平方膨胀）。
+        # 本轮 user 消息也在 messages[1:] 里，下一轮的上下文需要它。
+        next_history = [m for m in messages[1:] if m.get("role") != "system"]
+        del next_history[:-self._history_cap]
+        self._sessions[session_id] = next_history
 
         yield {"type": "assistant_text", "text": text}
 

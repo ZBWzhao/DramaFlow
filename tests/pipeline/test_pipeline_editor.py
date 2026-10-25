@@ -323,6 +323,66 @@ def test_chat_budget_exhausts_with_visible_note(pipeline_test_database):
     _run_scenario(scenario, TEST_DSN)
 
 
+def test_history_stored_exactly_once_across_turns(pipeline_test_database):
+    """回归（review Important）：会话历史必须整段赋值回写——extend 会把取出来的旧历史
+    再 extend 回去，逐轮整段复制（第 3 轮后 q1/a1 出现 4 次）。断言：多轮之后每条
+    user/assistant 消息在存储里恰好出现一次；本轮 user 消息必须已入历史（下一轮上下文）。"""
+    async def scenario(database) -> None:
+        from collections import Counter
+
+        project = "proj-editor-nodup"
+        await pipeline_repository.save(database, project, "outline", OUTLINE,
+                                       source_run_id="stage:outline")
+        llm = ScriptedLLM([
+            [],                                                    # 轮 1：纯文本回答
+            [{"name": "read_artifact", "args": {"type": "outline"}},
+             {"name": "propose_edit", "args": {"type": "outline", "summary": "s",
+                                               "new_content": OUTLINE}},
+             {"name": "finish", "args": {}}],                      # 轮 2：带工具轮（同轮 finish）
+            [],                                                    # 轮 3：纯文本回答
+            [],                                                    # 轮 4：纯文本回答（验证第四问上下文）
+        ])
+        editor = PipelineEditor(database, llm=llm)
+        questions = ["第一问", "第二问", "第三问"]
+        for q in questions:
+            await editor.chat(project, "sess-dup", q)
+
+        history = editor._sessions["sess-dup"]
+        user_texts = [m["content"] for m in history if m.get("role") == "user"]
+        assert user_texts == questions                      # 三问各一条、按序、无复制
+        # 逐轮恰好存 2 条（纯文本轮）/ 5 条（带工具轮：assistant+3 tool）：3 轮共 9 条。
+        # 旧 extend 写法第 2 轮就会把第 1 轮历史整段复制（history 变 10 条、逐轮膨胀）。
+        assert len(history) == 9
+        assert sum(1 for m in history if m.get("role") == "tool") == 3
+        # 有内容的消息逐条唯一（空 assistant 占位两条同形属正常，不参与身份判定）
+        nonempty = Counter(json.dumps(m, ensure_ascii=False, sort_keys=True)
+                           for m in history if m.get("content"))
+        assert all(c == 1 for c in nonempty.values()), "历史里出现了重复消息"
+
+        # 下一轮递给模型的 messages：system + 历史 + 新 user，旧历史只出现一次
+        await editor.chat(project, "sess-dup", "第四问")
+        fourth = llm.calls[3]
+        assert fourth[0]["role"] == "system"
+        fourth_users = [m["content"] for m in fourth if m.get("role") == "user"]
+        assert fourth_users == [*questions, "第四问"]
+
+    _run_scenario(scenario, TEST_DSN)
+
+
+def test_history_cap_trims_from_the_front(pipeline_test_database):
+    async def scenario(database) -> None:
+        project = "proj-editor-cap"
+        llm = ScriptedLLM([[] for _ in range(4)])
+        editor = PipelineEditor(database, llm=llm, history_cap=5)
+        for i in range(4):
+            await editor.chat(project, "sess-cap", f"问{i}")
+        history = editor._sessions["sess-cap"]
+        assert len(history) == 5                     # 4 轮 × 2 条 = 8，裁到最近 5 条
+        assert [m["content"] for m in history if m.get("role") == "user"] == ["问2", "问3"]
+
+    _run_scenario(scenario, TEST_DSN)
+
+
 # ---------------------------------------------------------------------------
 # app.py 分支：mode="pipeline_editor" 的 NDJSON 聊天流
 # ---------------------------------------------------------------------------
