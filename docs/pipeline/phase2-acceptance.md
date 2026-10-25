@@ -10,7 +10,7 @@
 ### 第 1 层：零成本——自动化端到端（已锁，随时可跑）
 
 ```bash
-python -m pytest tests/ -q        # 262 passed（需 dramaflow-postgres 容器在 :5432）
+python -m pytest tests/ -q        # 269 passed（需 dramaflow-postgres 容器在 :5432）
 cd web-vue && npm run build       # 零错误
 ```
 
@@ -41,7 +41,7 @@ python -m core.skill_executor characters <小说.txt> --project smoke1 --provide
 
 script 阶段收敛策略进快速跟进（见第四节第 8 条）。outline 冒烟证明：门即环境反馈的自我修正 + 失败安全（不过门不落库）在真模型上成立——这是作品集的核心叙事，两条都已有一手证据。
 
-**2026-10-25 复冒烟（phase2-fastfollow：Task 1 修复指令"折算给死、补足定向"生效后；deepseek-chat，本组冒烟累计花费 ¥0.17）**：
+**2026-10-25 复冒烟（phase2-fastfollow：Task 1 修复指令"折算给死、补足定向"生效后；deepseek-chat，本组冒烟累计花费 ¥0.21，含首次上游缺失空转的 ¥0.05）**：
 
 | 阶段 | 结果 | 证据 |
 |---|---|---|
@@ -60,13 +60,13 @@ script 阶段收敛策略进快速跟进（见第四节第 8 条）。outline �
 **剩余风险（真实 LLM 全链的已知缺口，均不阻塞骨架）**：
 1. chain_repair 两轮预算对真模型不足——大 JSON 产稿跨轮后修复轮形同虚设（characters 实证，见第四节第 9 条）；未修前，characters/art 真实全链会在首跑大概率停在"产稿重、修复轻"上；
 2. art/staging/storyboard 缺真模型单阶段证据（本轮停在首败未跑）；
-3. 队列 0（顶栏 direct-URL 刷新）等 cosmetic 项。
+3. router-view 无 `:key`：跨项目同组件导航会复用视图实例，正文可能短暂滞后（顶栏项目名已如实，0a5db07）；其余 cosmetic 小项见队列 7。
 
 成本口径不变：全链 = 各阶段 token 费（DeepSeek 级单价估 3-10 元/本，取决于门失败重试轮数），不含任何生图/生视频。本轮实测：script 12 轮 6 门约 ¥0.05、characters 2 轮 1 门约 ¥0.07——单阶段"几毛钱"的预估成立。
 
 ## 二、浏览器手工验收清单（merge 到 Desktop 后执行）
 
-1. **创作入口**：新建 pipeline-only 项目 → 粘贴小说（≥50 字，不足被挡）→ 直播进度：工具调用/质量门/阶段事件滚动；中途刷新页面 → 重连后 hello 帧恢复状态（已知边界：整页 F5 会丢 run 卡，见第四节）
+1. **创作入口**：新建 pipeline-only 项目 → 粘贴小说（≥50 字，不足被挡）→ 直播进度：工具调用/质量门/阶段事件滚动；中途刷新页面 → 重连后 hello 帧恢复状态（整页 F5 的 run 卡重挂载已实现并经 CDP 验证——重挂载后 run 卡与「确认，开写剧本」可见；残留边界：重挂载的 stages 明细靠 hello 快照，历史事件不回放）
 2. **确认门**：大纲完成后停在确认对话框 → 「查看大纲并确认」→ 确认后自动出剧本；「记录意见」只记录、明确提示不触发自动重写；无任何跳过确认的路径
 3. **制片四层**：characters→art→staging→storyboard 依次自动执行，制片台面板状态机 idle/running/failed/done 正确切换
 4. **改稿脑三拍**：对剧本提修改 → 提案卡出现 → 审批 → 自动重跑质量门（体检）；**坏提案回滚**：审批一个会让门失败的修改 → 收到 200 `{ok:false, rolled_back:true}` → 「已回滚」toast + 面板刷新回原内容
@@ -90,16 +90,17 @@ script 阶段收敛策略进快速跟进（见第四节第 8 条）。outline �
 
 ## 四、快速跟进队列（终审 POSTPONE，均不阻塞使用）
 
-0. **顶栏项目名不随 URL 刷新**（2026-10-25 浏览器验证发现，存量问题非阶段 2 引入）：直接以 hash URL 进入另一项目时，内容区渲染新项目数据，但顶栏 `.pname` 仍显示上一个项目名（如从 署名 直接跳 冒烟-创作入口，顶栏还写着 署名）。经首页点选进入则正常。cosmetic 但有误导性。
+0. **顶栏项目名不随 URL 刷新**（2026-10-25 浏览器验证发现，存量问题非阶段 2 引入）：直接以 hash URL 进入另一项目时，内容区渲染新项目数据，但顶栏 `.pname` 仍显示上一个项目名（如从 署名 直接跳 冒烟-创作入口，顶栏还写着 署名）。经首页点选进入则正常。cosmetic 但有误导性。——**已实现（0a5db07），待浏览器复验**
 1. **runs-list 接口 + 页面刷新重挂载 + 启动清扫孤儿 run**（路由为 hash 模式，F5 本身能回到页面——2026-10-25 实测修正；真正的问题是 run 状态只在内存，刷新后 run 卡消失，gated run 无法批准；服务器重启后卡 running 的 run 同样无法处理）——**已实现（ce4f5ff）并零成本 CDP 验证：gated run 真实刷新后 run 卡仍在**（见第 2 层复冒烟节）
 2. 回滚时 save 再抛异常 → 编辑卡 applying 直至重启；回滚前瞬态窗口可见 gated 内容（无事务，write-then-rewrite）
 3. `pipeline_import.prepare()` 契约警告被丢弃（审计线索缺口）；SSE failed 事件 `stage:""` 哨兵值未声明
 4. chain_repair 修复轮尾指令是 agent 纪律措辞，真模型可能先跑门再等结果烧掉最后一轮（失败安全，可重试）——2026-10-25 复冒烟实证了另一形态：产稿本身跨轮，见第 9 条
 5. 四卡退役半程：UI 已切管线产物，冻结区 chat 工具仍写 canvas meta（留待清扫）；studioStore 死导出
 6. 同项目换小说重跑保留旧剧本/角色卡（merge 语义正确、UX 未定；DELETE 产物接口是手动出口）
-7. 小项：retry 按钮无 in-flight 防抖、非 script apply 无体检门（可加 UI 提示）、`_sessions` 无上限、桥接 art 行文本未截断、重复 import 期 `_RouterLLM()` 实例
+7. 小项：retry 按钮无 in-flight 防抖——已实现（0a5db07），待浏览器复验；非 script apply 无体检门（可加 UI 提示）、`_sessions` 无上限、桥接 art 行文本未截断、重复 import 期 `_RouterLLM()` 实例
 8. **script 时长门真模型收敛策略**（2026-10-25 冒烟实证：deepseek-chat 20 轮未收敛，10 集目标 120s 持续欠 1.3~27.6s）。候选方向：a) 修复轮指令只针对最欠的集做定向加长而非全量重写；b) SKILL.md 补"动作行也算时长"的加长技巧提示；c) outline 阶段加"目标秒数 × 集数 ≤ 源材料可支撑量"的可行性预警；d) 时长门对最后 1-2 轮的边际收敛给部分通过（±15% 放宽到 ±20% 需产品决策）——**已按 a+折算口径落地（e5e56b6），2026-10-25 复冒烟 12 轮 6 门收敛落库，本条关闭**
 9. **chain_repair 两轮预算对真模型不足**（2026-10-25 characters 冒烟实证）：大 JSON 产稿跨 2 轮（finish 落在第 2 轮）→ 门报 6 违规（5×voice.prompt 超 400 字上限、1×引文非逐字）→ 修复轮无预算可跑，ok=False 未落库（失败安全保持）。候选：预算 2→3 轮；或要求产稿与 finish 同轮完成（write_draft 分节后当轮 finish）；或门失败后带满预算自动重试一次（设成本上限）。另：voice.prompt 400 字上限被 5/5 角色系统性写超，SKILL.md 的字数口径提示值得前置到产稿指令
+10. **smoke CLI 上游缺失快速失败**：冒烟入口对 gate_needs 先查 pipeline_artifacts，缺上游直接报错退出——2026-10-25 实证缺失时 20 轮对门 ENOENT 空转烧了 ¥0.05（skill_executor.py 硬编码 pipeline_test 库，库被清理后上游静默消失）
 
 ## 五、浏览器验证记录（2026-10-25，headless Edge + CDP）
 
