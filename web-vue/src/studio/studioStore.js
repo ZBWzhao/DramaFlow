@@ -623,6 +623,9 @@ export async function loadPipeline(force = false) {
     studio.pipeline.loaded = false; // 失败不占坑：下次进页面再试，而不是永久空白
     console.error("管线产物读取失败（不影响剧本页）", err);
   }
+  // F5 重挂载（fastfollow Task 2）：产物加载无论成败都尝试找回本项目的活动
+  // run——刷新让 store 归零，但 run 还在服务端推进/等确认，运行卡必须回来。
+  await _reattachRun();
 }
 
 /* ── 管线剧本（阶段 1 Task 5）：script 产物 → 剧本页集列表/正文的数据源 ─────
@@ -662,12 +665,45 @@ export async function syncPipelineAssets(artifactType) {
  * stage_done / gate（run 级确认门）/ failed / done / retry——注意执行器内部的
  * gate/done 已被服务端重标为 stage_gate/stage_done，这里的 gate/done 只属于
  * run 级语义。stages[stage] = {status, gate_ok, round} 是面板友好的阶段摘要。
- * link 是 SSE 连接态：'' / connecting / open / reconnecting / lost。EventSource
+ * link 是 SSE 连接态：'' / connecting / open / reconnecting / lost（"restored"
+ * 是 F5 重挂载后开流前的瞬时值，_openRunStream 立刻接管为 connecting）。EventSource
  * 断线自动重连，重连后的 hello 首帧带运行快照（broker 不回放历史），状态以
  * 快照为准——approve/retry 重开流、或开流晚于 gated，都靠它追平，否则按钮
  * 态会停在旧状态。
  */
 let runStream = null; // 当前运行的 EventSource（模块级单例，不进 reactive）
+
+/* F5 重挂载（fastfollow Task 2）：本项目有未终态的 run（running/gated/failed——
+ * failed 可重试）就恢复运行卡并重开 SSE。done/cancelled 是终态，hello 后服务端
+ * 立即收流，没有后续事件可等，不恢复。恢复的 run 立即带 project_id = 当前
+ * canvas（Task 4 归属门），status/stage 交给 hello 首帧同步（快照是唯一事实
+ * 来源）；stages/events 置空——历史帧不回放，后续事件照常追加。
+ * 已挂着本项目 run 时直接返回（含 loadPipeline(force) 在活跃 run 期间的每次
+ * 强制重拉）：不白打列表接口，也绝不覆盖本地新建的 run。列表接口失败静默——
+ * 产物加载不因此受阻，下次进页面再试。 */
+async function _reattachRun() {
+  const canvas = studio.canvas;
+  if (!canvas || (studio.run.id && studio.run.project_id === canvas)) return;
+  try {
+    const { runs } = await getJSON(
+      `/api/pipeline/projects/${encodeURIComponent(canvas)}/runs`,
+    );
+    const live = runs.find((r) => ["running", "gated", "failed"].includes(r.status));
+    if (!live) return;
+    studio.run = {
+      id: live.run_id,
+      project_id: canvas,
+      status: live.status,
+      stage: live.stage || "",
+      stages: {},
+      events: [],
+      link: "restored",
+    };
+    _openRunStream();
+  } catch {
+    /* 列表接口失败不阻断产物加载 */
+  }
+}
 
 export async function startRun(projectId, novel) {
   const data = await postJSON(`/api/pipeline/runs`, { project_id: projectId, novel_text: novel });

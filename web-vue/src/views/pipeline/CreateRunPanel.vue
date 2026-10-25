@@ -23,6 +23,7 @@ const gateError = ref("");
 const feedback = ref("");
 const sendingFeedback = ref(false);
 const retryError = ref("");
+const retrying = ref(false);
 const outlineEl = ref(null); // 「查看大纲并确认」的滚动目标
 
 const run = computed(() => studio.run);
@@ -147,11 +148,15 @@ async function recordFeedback() {
 
 async function retryFailedStage() {
   if (!run.value.stage) return;
+  if (retrying.value) return;
+  retrying.value = true;
   retryError.value = "";
   try {
     await retryRun(run.value.stage);
   } catch (err) {
     retryError.value = errorText(err);
+  } finally {
+    retrying.value = false;
   }
 }
 
@@ -230,7 +235,9 @@ function scrollToOutline() {
         <div v-else class="tip">没有返回具体原因，可查看下方事件流。</div>
         <div v-if="retryError" class="err">{{ retryError }}</div>
         <div class="acts">
-          <button class="btn primary" type="button" :disabled="!run.stage" @click="retryFailedStage">重试本阶段</button>
+          <button class="btn primary" type="button" :disabled="!run.stage || retrying" @click="retryFailedStage">
+            {{ retrying ? "重试中…" : "重试本阶段" }}
+          </button>
         </div>
       </div>
 

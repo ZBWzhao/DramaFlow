@@ -96,6 +96,12 @@ STAGE_SPECS: dict[str, dict] = {
                   "的 hook/suspense 搬运；beatsClaimed 认领大纲 beats 落在该集的爽点 type。"
                   "episodes 按 ep 逐集 write_draft（data 是数组，可分批写、可单集修，按集号并入）；"
                   "source/lang 写一次即可（source 同大纲 source，lang 固定写 \"zh\"）。"),
+        # 修复口径（2026-10-25 冒烟实证：deepseek-chat 20 轮不收敛——门报每集欠多少秒，
+        # 模型只给接近达标的集加一两句，欠时最多的集始终没补够）：折算给死、补足定向。
+        "repair_note": ("时长门按集报差距（估Xs/目标Ys）：每欠 4.5 秒 ≈ 补 20 字对白或 1 个动作行"
+                        "（动作按 2.5 秒/行折算）。优先补欠时最多的集，一轮把差额一次补够，"
+                        "不要把轮数花在给已接近达标的集微调；episodes 整组重发时已达标集原样带上，"
+                        "不许降低它们的时长。"),
     },
     # ---------------------------------------------------------------------
     # Task 6：制片四层。填表型（characters/art）policy="chain_repair"：单次
@@ -607,12 +613,18 @@ async def run_stage(
         # 失败必须把报告喂回对话，模型才知道修哪里（gate_log 只留给调用方）；
         # 修复指令要具体到"覆盖哪个键、整组重发"——首冒烟里模型曾反复只改第 1 集
         # 和无关的 scenes，对报告点名的 warnings 视而不见，预算烧光也没修对。
+        # 尾巴按策略分支（与 _compose_system 两个分支的自检口径一致）：agent 型
+        # 多轮预算下自检不亏，修完先 run_quality_gate；chain_repair 预算锁 2 轮，
+        # 自检等于白烧一半——修完同轮立刻 finish（门即自检）。
+        tail = ("修完同一轮立刻再 finish，不要先 run_quality_gate（预算只有 2 轮，自检等于白烧）。"
+                if spec.get("policy") == "chain_repair"
+                else "修完 run_quality_gate，报告全过就立刻 finish。")
         messages.append({"role": "user",
                          "content": f"质量门未过（第 {rnd} 轮），报告如下：\n" + output[-GATE_TAIL:]
                                     + "\n逐条修复：报告点名哪个键，就重调一次 write_draft 覆盖那个键"
                                       "的完整数据（数组键整组重发全部条目，别只发单条）。只动点名的键。"
                                       + (spec.get("repair_note") or "")
-                                      + "修完 run_quality_gate，报告全过就立刻 finish。"})
+                                      + tail})
 
     # 迭代耗尽：带失败报告退出，绝不落产物
     if not findings:

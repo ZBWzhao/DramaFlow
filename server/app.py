@@ -101,6 +101,10 @@ async def lifespan(_: FastAPI) -> AsyncIterator[None]:
     from server import pipeline as pipeline_api  # noqa: E402  本模块在文件底部装配
     await registry.ainit()  # 启动时装载工具插件
     await pipeline_api.startup()  # 管线连接池随服务建好，首个请求不再承担建池
+    # 重启清扫（fastfollow Task 2）：running 的 run 已没有驱动任务，统一转
+    # failed 可重试；gated parked 不碰（确认门红线）。放在池建好之后。
+    from server import pipeline_runs as pipeline_runs_api  # noqa: E402  底部装配（同上）
+    await pipeline_runs_api.sweep_interrupted_runs()
     await media_jobs.start()
     if os.environ.get("MEDIA_WORKER_EMBEDDED", "true").strip().lower() not in {"0", "false", "no"}:
         media_worker = MediaJobWorker(

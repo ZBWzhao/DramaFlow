@@ -24,8 +24,14 @@ const inproj = computed(() => route.path.startsWith("/project/"));
  * 外壳顶栏再叠一层只会双份导航——画布态直接隐藏。 */
 const isCanvas = computed(() => route.path.endsWith("/canvas"));
 const pname = computed(() => String(route.params.name || ""));
-/* 顶栏展示项目标题；画布 key 只用于 URL 与 API */
-const ptitle = computed(() => studio.project?.title || pname.value);
+/* 顶栏展示项目标题；画布 key 只用于 URL 与 API。
+ * 防串项目：store 里缓存的 project 属于上一个项目时（直接 URL 进新项目、
+ * 新项目 meta 尚未 loadAll 拉回），回退显示路由参数（解码后的 canvas 名）——
+ * 顶栏永远如实，绝不显示上一个项目的标题。 */
+const ptitle = computed(() => {
+  if (studio.project?.canvas === pname.value && studio.project?.title) return studio.project.title;
+  try { return decodeURIComponent(pname.value); } catch { return pname.value; }
+});
 /* 画幅/画质来自项目 meta（新建时选的值），没加载到就不显示，不编默认值 */
 const specText = computed(() => {
   const meta = studio.project?.project || {};

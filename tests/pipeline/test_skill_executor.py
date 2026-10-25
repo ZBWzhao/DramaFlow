@@ -23,7 +23,7 @@ import pytest
 from core import pipeline_repository
 from core.pipeline_run import EventBroker, PipelineRunner, RunStore
 from core.postgres import PostgresDatabase
-from core.skill_executor import run_stage
+from core.skill_executor import STAGE_SPECS, run_stage
 from test_pipeline_repository import pipeline_test_database  # noqa: F401  session 级库装配
 
 ROOT_DIR = Path(__file__).resolve().parents[2]
@@ -542,5 +542,68 @@ def test_staging_stage_agent_gate_fail_then_repair_saves(pipeline_test_database)
         assert saved["content"]["scenes"] == staging["scenes"]
         rows = await pipeline_repository.list_all(database, "proj-stage")
         assert rows[0]["source_run_id"] == "stage:staging"
+
+    _run_scenario(scenario, pipeline_test_database)
+
+
+# ---------------------------------------------------------------------------
+# phase-2 fastfollow：script 修复口径（时长折算/定向补足）+ 修复尾按策略分支
+# （2026-10-25 冒烟实证：deepseek-chat 跑 script 20 轮不收敛——门报每集欠多少秒，
+# 模型只给接近达标的集加一两句，欠时最多的集始终没补够。）
+# ---------------------------------------------------------------------------
+
+def test_script_repair_note_mentions_duration_conversion():
+    """script spec 的 repair_note 必须给出时长折算与定向补足指令（纯规格检查，
+    不进 agent loop——与 outline 的 repair_note 同一拼接路径）。"""
+    note = STAGE_SPECS["script"].get("repair_note") or ""
+    assert "4.5" in note and "动作行" in note    # 折算公式：20 字对白/4.5 秒、动作 2.5 秒/行
+    assert "欠时最多" in note                    # 定向补足策略：先补差额最大的集
+
+
+def test_agent_repair_tail_demands_self_gate(pipeline_test_database):
+    """agent 政策（outline）：修复尾要求修完先 run_quality_gate 自检、全过才 finish
+    ——多轮预算下自检不亏，这条纪律必须保留在注入的修复消息里。"""
+    bad_outline = json.loads(FIXTURE_OUTLINE.read_text(encoding="utf-8"))
+    bad_outline["params"] = {**bad_outline["params"], "episodes": 5}  # ≠ episodes 长度(3)，门必拦
+    good_outline = json.loads(FIXTURE_OUTLINE.read_text(encoding="utf-8"))
+
+    async def scenario(database) -> None:
+        turns = (
+            _write_rounds(bad_outline, [9])
+            + [[{"name": "finish", "args": {}}]]          # 权威门失败 → 注入修复消息
+            + [[{"name": "write_draft", "args": {"section": "params", "data": good_outline["params"]}}]]
+            + [[{"name": "finish", "args": {}}]]
+        )
+        llm = ScriptedLLM(turns)
+        result = await run_stage(database, "proj-tail-agent", "outline",
+                                 {"novel_text": NOVEL_TEXT}, llm=llm)
+        assert result.ok
+        # 第 3 轮的 messages 快照里，最后一条 user 消息就是修复指令
+        repair_msg = [m for m in llm.calls[2] if m["role"] == "user"][-1]["content"]
+        assert "修完 run_quality_gate，报告全过就立刻 finish" in repair_msg
+
+    _run_scenario(scenario, pipeline_test_database)
+
+
+def test_chain_repair_repair_tail_skips_self_gate(pipeline_test_database):
+    """chain_repair（characters）：修复尾禁止自检——预算锁 2 轮，自检等于白烧一半，
+    修完同轮立刻 finish（与 _compose_system 的 chain_repair 纪律同口径）。"""
+    cast = _load("cast.json")
+
+    async def scenario(database) -> None:
+        def _turn(sections):
+            return [{"name": "write_draft", "args": {"section": s, "data": cast[s]}}
+                    for s in sections] + [{"name": "finish", "args": {}}]
+
+        # 第一轮漏 summary（门必拦）→ 恰好一轮修复 → 过门落库
+        turns = [_turn(("source", "lang", "characters")), _turn(("summary",))]
+        llm = ScriptedLLM(turns)
+        result = await run_stage(database, "proj-tail-chain", "characters",
+                                 {"novel_text": NOVEL_TEXT, "outline": _load("outline.json")},
+                                 llm=llm)
+        assert result.ok and result.iterations == 2
+        repair_msg = [m for m in llm.calls[1] if m["role"] == "user"][-1]["content"]
+        assert "立刻再 finish" in repair_msg
+        assert "run_quality_gate，报告全过" not in repair_msg
 
     _run_scenario(scenario, pipeline_test_database)

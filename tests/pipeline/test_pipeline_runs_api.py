@@ -369,3 +369,49 @@ def test_sse_stream_completes_after_approve(runs_api):
     types = [e["type"] for e in events]
     assert types[0] == "hello" and types[-1] == "done"
     assert "gate" in types
+
+
+# ---------------------------------------------------------------------------
+# fastfollow Task 2：runs 列表端点（F5 重挂载数据源）+ lifespan 启动清扫
+# ---------------------------------------------------------------------------
+
+def test_runs_list_endpoint_empty_and_isolation(runs_api):
+    """空项目 200 + {"runs": []}；项目间隔离；字段只给恢复 run 卡需要的轻量四个。"""
+    from urllib.parse import quote
+
+    client = runs_api.client
+    response = client.get(f"/api/pipeline/projects/{quote('空项目')}/runs")
+    assert response.status_code == 200 and response.json() == {"runs": []}
+
+    run_id = _create_run(client, project="proj-list-a")
+    _poll_run(client, run_id, {"gated"})
+    other = client.get("/api/pipeline/projects/proj-list-b/runs")
+    assert other.status_code == 200 and other.json() == {"runs": []}
+
+    rows = client.get("/api/pipeline/projects/proj-list-a/runs").json()["runs"]
+    assert [r["run_id"] for r in rows] == [run_id]
+    assert set(rows[0].keys()) == {"run_id", "status", "stage", "updated_at"}
+    assert rows[0]["status"] == "gated" and rows[0]["stage"] == "outline"
+
+
+def test_sweep_interrupted_runs_wrapper(runs_api, monkeypatch):
+    """lifespan 启动清扫入口：未装配（file 后端）no-op 返回 0 不炸启动；
+    装配后把库内 running 行（重启后失去驱动任务的形态）清成 failed 可重试。"""
+    from server import pipeline_runs as runs_module
+
+    client = runs_api.client
+    monkeypatch.setattr(runs_module, "_store", None)
+    assert client.portal.call(runs_module.sweep_interrupted_runs) == 0
+
+    monkeypatch.setattr(runs_module, "_store", runs_api.store)
+    run_id = _create_run(client, project="proj-sweep-api")
+    _poll_run(client, run_id, {"gated"})  # 等推进任务收尾，避免推进态竞态
+    # 手工把它摆回 running（等价"服务器重启时正在跑"的落库形态）
+    client.portal.call(
+        functools.partial(runs_api.store.set_status, run_id, "running", stage="outline")
+    )
+    assert client.portal.call(runs_module.sweep_interrupted_runs) == 1
+
+    row = client.get(f"/api/pipeline/runs/{run_id}").json()
+    assert row["status"] == "failed"
+    assert row["findings"][-1] == {"gate": "runtime", "detail": "服务器重启中断本次运行，可重试"}

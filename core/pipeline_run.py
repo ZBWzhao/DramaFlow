@@ -84,6 +84,37 @@ class RunStore:
         )
         return self._row(row) if row is not None else None
 
+    async def list_by_project(self, project_id: str, limit: int = 10) -> list[dict]:
+        """按项目列最近 runs（updated_at 倒序，默认 10 条）：F5 重挂载用轻量列表
+        找回「本项目还有进行中/可重试的 run」。命中 0006 建好的
+        pipeline_runs_project_idx(project_id, updated_at) 索引。"""
+        rows = await self._client().fetch(
+            "SELECT * FROM pipeline_runs WHERE project_id = $1"
+            " ORDER BY updated_at DESC LIMIT $2",
+            project_id, limit,
+        )
+        return [self._row(r) for r in rows]
+
+    async def sweep_interrupted(self) -> int:
+        """重启清扫（fastfollow Task 2）：running 状态的 run 没有驱动任务——
+        PipelineRunner._tasks 随进程消亡，这行永远停在原地——启动时统一转
+        failed 并追加 findings，让用户可以重试。gated 是 parked 状态（不需要
+        任务驱动），保留给重挂载后的批准流程（确认门红线：清扫不碰 gated）。
+
+        无脏数据：只写 status / updated_at / findings（jsonb 追加不覆盖），
+        stage_status 阶段账本与 novel_text 原样不动。返回被扫的行数。
+        """
+        n = await self._client().execute(
+            "UPDATE pipeline_runs SET status = 'failed',"
+            " updated_at = extract(epoch from now()),"
+            " findings = COALESCE(findings, '[]'::jsonb) || $1::jsonb"
+            " WHERE status = 'running'",
+            json.dumps([{"gate": "runtime",
+                         "detail": "服务器重启中断本次运行，可重试"}],
+                       ensure_ascii=False),
+        )
+        return int(n.split()[-1])
+
     async def update_stage(self, run_id: str, stage: str, patch: dict) -> None:
         """合并一条阶段状态进 stage_status 并把 stage 列指向该阶段。
 

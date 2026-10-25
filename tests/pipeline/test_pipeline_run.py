@@ -306,6 +306,67 @@ def test_store_crud_approve_guard_and_feedback(pipeline_test_database):
     _run_scenario(scenario)
 
 
+def test_list_by_project_orders_and_filters(pipeline_test_database):
+    """fastfollow Task 2：F5 重挂载的数据源——按项目过滤、updated_at 倒序。"""
+    async def scenario(database) -> None:
+        store = RunStore(database)
+        rid_a1 = (await store.create("p-list-a", "正文 A1"))["run_id"]
+        await store.create("p-list-b", "正文 B")  # 别的项目：不得串进来
+        rid_a2 = (await store.create("p-list-a", "正文 A2"))["run_id"]
+        # 同批 INSERT 的 updated_at 可能落在同一微秒；把 a1 显式推到未来，
+        # 排序断言才完全确定（a1 变成"最新的"）。
+        await database.pool.execute(
+            "UPDATE pipeline_runs SET updated_at = extract(epoch from now()) + 30"
+            " WHERE run_id = $1",
+            rid_a1,
+        )
+
+        rows = await store.list_by_project("p-list-a")
+        assert [r["run_id"] for r in rows] == [rid_a1, rid_a2]  # 新的在前
+        assert all(r["project_id"] == "p-list-a" for r in rows)
+        assert await store.list_by_project("p-list-none") == []
+        assert len(await store.list_by_project("p-list-a", limit=1)) == 1  # limit 生效
+
+    _run_scenario(scenario)
+
+
+def test_sweep_interrupted_fails_only_running(pipeline_test_database):
+    """fastfollow Task 2：重启清扫——running（进程没了驱动任务）→ failed 可重试；
+    gated 是 parked 状态（确认门红线，批准流程还要用）绝不碰；done 同样原状。"""
+    async def scenario(database) -> None:
+        store = RunStore(database)
+        running = await store.create("p-sweep", "正文 running")
+        gated = await store.create("p-sweep", "正文 gated")
+        done = await store.create("p-sweep", "正文 done")
+        await store.set_status(gated["run_id"], "gated")
+        await store.set_status(done["run_id"], "done", stage="storyboard")
+        # running 行带历史 findings 与阶段账本：清扫只追加 findings，绝不碰账本
+        old = [{"gate": "x", "detail": "历史 finding"}]
+        await store.set_status(running["run_id"], "failed", stage="outline", findings=old)
+        await store.update_stage(running["run_id"], "outline",
+                                 {"status": "done", "attempts": 2, "gate_runs": 1, "findings": []})
+        # 最后再摆回 running/script（update_stage 会把 stage 列指向所写阶段，故先写账本）：
+        # 等价"服务器重启时正在跑 script"的落库形态；findings=None 保留
+        await store.set_status(running["run_id"], "running", stage="script")
+
+        assert await store.sweep_interrupted() == 1  # 只有 running 一行被扫
+
+        row = await store.get(running["run_id"])
+        assert row["status"] == "failed"
+        assert row["findings"] == old + [{"gate": "runtime",
+                                          "detail": "服务器重启中断本次运行，可重试"}]
+        # 无脏数据红线：stage_status / stage / novel_text 原样
+        assert row["stage_status"]["outline"] == {
+            "status": "done", "attempts": 2, "gate_runs": 1, "findings": [],
+        }
+        assert row["stage"] == "script"
+        assert row["novel_text"] == "正文 running"
+        assert (await store.get(gated["run_id"]))["status"] == "gated"   # 确认门红线
+        assert (await store.get(done["run_id"]))["status"] == "done"
+
+    _run_scenario(scenario)
+
+
 def test_broker_fanout_unsubscribe_and_isolation() -> None:
     async def scenario() -> None:
         broker = EventBroker()
