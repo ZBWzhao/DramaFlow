@@ -268,6 +268,23 @@ def test_art_to_rows_maps_summary_only():
     }
 
 
+def test_art_to_rows_clips_name_and_description():
+    """fastfollow-2：art 行与 characters 同一套截断（name 60 / description 500），
+    超长场景名/summary 不再原样进画布写路径。"""
+    from server.pipeline_assets import art_to_rows
+
+    content = {
+        "scenes": [{"name": "景" * 70, "summary": "意" * 600}],
+        "props": [{"name": "物" * 70, "summary": "述" * 600}, {"name": ""}],
+    }
+    rows = art_to_rows(content)
+    assert rows["scenes"][0]["name"] == "景" * 60
+    assert len(rows["scenes"][0]["description"]) == 500
+    assert rows["props"][0]["name"] == "物" * 60
+    assert len(rows["props"][0]["description"]) == 500
+    assert len(rows["props"]) == 1  # 无名行照旧跳过
+
+
 # ---------------------------------------------------------------------------
 # 错误形态：未知类型 / 缺产物 / 缺画布 → 404；file 后端 → 503；空行 → added 0
 # ---------------------------------------------------------------------------

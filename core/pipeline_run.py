@@ -324,6 +324,18 @@ class PipelineRunner:
         except asyncio.CancelledError:
             raise
         except Exception as exc:  # noqa: BLE001
+            # stage 哨兵（fastfollow-2，Task 3 遗留）：失败事件的 stage 不再发
+            # 空串——消费端会把 "" 当未知阶段。从 stage_status 取最后一个已落账
+            # 的阶段（STAGE_ORDER 序倒着找第一个出现过的）；run 行不存在或账本
+            # 读不到则 None（前端本有未知 fallback）。set_status 不带 stage：
+            # 账本是唯一事实来源。
+            last_stage: str | None = None
+            try:
+                row = await self.store.get(run_id)
+                stage_status = row["stage_status"] if row else {}
+                last_stage = next((s for s in reversed(STAGE_ORDER) if s in stage_status), None)
+            except Exception:  # noqa: BLE001  账本读不到：哨兵只能 None
+                pass
             try:
                 await self.store.set_status(
                     run_id, "failed",
@@ -332,7 +344,8 @@ class PipelineRunner:
             except Exception:  # noqa: BLE001  存储也炸了：只剩广播可用
                 pass
             self.broker.publish(
-                run_id, {"type": "failed", "stage": "", "error": f"{type(exc).__name__}: {exc}"}
+                run_id, {"type": "failed", "stage": last_stage,
+                         "error": f"{type(exc).__name__}: {exc}"}
             )
         finally:
             if self._tasks.get(run_id) is asyncio.current_task():

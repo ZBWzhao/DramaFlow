@@ -18,8 +18,10 @@
 工厂 build_pipeline_runs(db, llm) 供 server/app.py 装配；file 后端（无 DB）句柄为
 None，全部路由 503。SSE 端点仿 server/studio.py story_analysis_run 的
 StreamingResponse 模式：先订阅再查行（不漏 subscribe 与 get 之间的事件），生成器
-finally 反注册队列；done/failed 为终态收流，gate 非终态——approve 后同一连接
-继续收后续进度。事件丢失兜底：hello 首帧带运行快照（status/stage），晚连上的
+finally 反注册队列；收流口径：hello 对订阅时已是 done/cancelled 的运行即收流
+（终态、不会再有事件），failed 保持打开等 retry 事件——运行中则以 done/failed
+事件为终态收流，gate 非终态，approve 后同一连接继续收后续进度。事件丢失兜底：
+hello 首帧带运行快照（status/stage），晚连上的
 客户端至少能从快照同步状态（broker 是 fire-and-forget，不回放历史）。
 """
 

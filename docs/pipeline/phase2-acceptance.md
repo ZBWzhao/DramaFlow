@@ -51,6 +51,21 @@ script 阶段收敛策略进快速跟进（见第四节第 8 条）。outline �
 
 复冒烟口径说明：smoke CLI 硬编码连 `pipeline_test` 库，原 `smoke-outline-final` 的 outline 行已不在库中（早前冒烟产物被库清理）；本次从 dramaflow 库 `phase1-acceptance`（同小说《最后一单》真模型 outline，3 集 × 90s）种子移植恢复上游前提。与上轮失败基线（10 集 × 120s）**不是同一份 outline**，script 收敛对比是修复口径生效的证据，非严格同基线对照。
 
+**2026-10-25 复冒烟 II（phase2-fastfollow-2：chain_repair 结构保证 + 小队列批次落地后；deepseek-chat，本次约 ¥0.08）**：
+
+| 阶段 | 结果 | 证据 |
+|---|---|---|
+| characters | ❌ 仍未落库（失败安全保持） | 2 轮 / 1 次门运行；**结构保证无误伤**：模型 r1 产全 4 键（source/lang/summary/characters）、r2 才 finish——键全合法放行，未发生缺键拒绝（半成品修复问题未再出现）。门在 r2 末运行报 8 违规（5×voice.prompt 403~475 字超 400 上限 + 3×引文非逐字），修复消息已注入但**轮界（min(20,2)+0 拒绝=2）已到，修复轮从未运行**。失败形态从上轮「半成品修复（6 违规）」变为「产稿跨轮占满轮界、修复轮零预算」——deepseek-chat 对 characters 体量无法一轮内产稿+finish，预算按门计救不了轮界先耗尽。候选 a（预算 2→3）待拍板：本次 8 违规全部可修（压 5 段 voice.prompt + 补 3 条逐字引文），若修复轮存在大概率过 |
+| 冒烟入口本身 | ✅ 队列 10 实证 | 首跑即被上游快失败拦截（pipeline_test 库 outline 缺失）：「上游产物 outline 不存在——先跑它的阶段冒烟，别空烧 LLM」，**零 LLM 调用退出**；种子移植 outline 后重跑才进入模型循环 |
+
+**2026-10-25 复冒烟 III（预算 2→3 批准落地 9659bb7 后；deepseek-chat，本次约 ¥0.18）**：
+
+| 阶段 | 结果 | 证据 |
+|---|---|---|
+| characters | ❌ 仍未落库，但**修复机制完全生效** | **3 轮 / 3 次门全用满**：r1 产 4 键+finish 同轮（模型 variance，本轮做到）→ 门 1 多违规；r2 修复轮真跑但 write_draft 把数组编码成 JSON 字符串被工具打回 → 门 2 只剩 1 违规；r3 修正数组+finish → 门 3 同一条依旧。**违规 8 → 1**，预算 3 买到了 2 个真实修复轮（复冒烟 II 的修复轮零预算问题解决）。残留 1 条是**引文保真**（模型 paraphrase 原文当逐字引，两轮修复未自察）——预算买不到的内容口径问题，转队列 11，不再自动重试 |
+
+测试与冒烟共用 pipeline_test 库的操作注记：pytest 各用例 TRUNCATE pipeline_artifacts，跑过测试后移植的 outline 即消失——smoke 前先重移植（快失败会拦截，零成本提醒）。
+
 **gated run 整页刷新重挂载（零成本 CDP 验证，worktree :8001 + 真 Postgres）**：手动插入 `status='gated'` run 行后打开管线页——run 卡 + 「确认，开写剧本」可见 ✅；真实整页刷新后 run 卡仍在（runs-list 重挂载生效，未点击放行）✅。实测注：hash 路由下 Page.navigate 到同一 URL 是同文档导航，F5 语义用 Page.reload 完成并经 window 标记验证确为整页重载。
 
 ### 第 3 层：真实全链（真正的"全自动出片"验收）
@@ -58,7 +73,7 @@ script 阶段收敛策略进快速跟进（见第四节第 8 条）。outline �
 **已具备全链条件**：零成本层 ScriptedLLM 八阶段端到端全绿；真模型单阶段 outline/script 均已过门落库（script 在修复指令折算化后单调收敛）；确认门不可跳过、失败不落库可重试、服务器重启清扫 interrupted run、整页刷新 run 卡重挂载——代码 + 测试 + 浏览器验证齐备。全链骨架（novel→outline→⛔确认→script→characters→art→staging→storyboard）机器侧成立。
 
 **剩余风险（真实 LLM 全链的已知缺口，均不阻塞骨架）**：
-1. chain_repair 两轮预算对真模型不足——大 JSON 产稿跨轮后修复轮形同虚设（characters 实证，见第四节第 9 条）；未修前，characters/art 真实全链会在首跑大概率停在"产稿重、修复轻"上；
+1. chain_repair 预算问题已解决（结构保证 65ad27c + 预算 3 经批准 9659bb7，复冒烟 III 修复轮真跑、违规 8→1）；残留 characters 引文保真口径（队列 11）与 art/staging/storyboard 真模型单阶段证据缺位——真实全链首跑 characters 仍可能停在引文保真上；
 2. art/staging/storyboard 缺真模型单阶段证据（本轮停在首败未跑）；
 3. router-view 无 `:key`：跨项目同组件导航会复用视图实例，正文可能短暂滞后（顶栏项目名已如实，0a5db07）；其余 cosmetic 小项见队列 7。
 
@@ -99,8 +114,9 @@ script 阶段收敛策略进快速跟进（见第四节第 8 条）。outline �
 6. 同项目换小说重跑保留旧剧本/角色卡（merge 语义正确、UX 未定；DELETE 产物接口是手动出口）
 7. 小项：retry 按钮无 in-flight 防抖——已实现（0a5db07），待浏览器复验；非 script apply 无体检门（可加 UI 提示）、`_sessions` 无上限、桥接 art 行文本未截断、重复 import 期 `_RouterLLM()` 实例
 8. **script 时长门真模型收敛策略**（2026-10-25 冒烟实证：deepseek-chat 20 轮未收敛，10 集目标 120s 持续欠 1.3~27.6s）。候选方向：a) 修复轮指令只针对最欠的集做定向加长而非全量重写；b) SKILL.md 补"动作行也算时长"的加长技巧提示；c) outline 阶段加"目标秒数 × 集数 ≤ 源材料可支撑量"的可行性预警；d) 时长门对最后 1-2 轮的边际收敛给部分通过（±15% 放宽到 ±20% 需产品决策）——**已按 a+折算口径落地（e5e56b6），2026-10-25 复冒烟 12 轮 6 门收敛落库，本条关闭**
-9. **chain_repair 两轮预算对真模型不足**（2026-10-25 characters 冒烟实证）：大 JSON 产稿跨 2 轮（finish 落在第 2 轮）→ 门报 6 违规（5×voice.prompt 超 400 字上限、1×引文非逐字）→ 修复轮无预算可跑，ok=False 未落库（失败安全保持）。候选：预算 2→3 轮；或要求产稿与 finish 同轮完成（write_draft 分节后当轮 finish）；或门失败后带满预算自动重试一次（设成本上限）。另：voice.prompt 400 字上限被 5/5 角色系统性写超，SKILL.md 的字数口径提示值得前置到产稿指令
-10. **smoke CLI 上游缺失快速失败**：冒烟入口对 gate_needs 先查 pipeline_artifacts，缺上游直接报错退出——2026-10-25 实证缺失时 20 轮对门 ENOENT 空转烧了 ¥0.05（skill_executor.py 硬编码 pipeline_test 库，库被清理后上游静默消失）
+9. **chain_repair 两轮预算对真模型不足**（2026-10-25 characters 冒烟实证）：大 JSON 产稿跨 2 轮（finish 落在第 2 轮）→ 门报 6 违规（5×voice.prompt 超 400 字上限、1×引文非逐字）→ 修复轮无预算可跑，ok=False 未落库（失败安全保持）。候选：预算 2→3 轮；或要求产稿与 finish 同轮完成（write_draft 分节后当轮 finish）；或门失败后带满预算自动重试一次（设成本上限）。另：voice.prompt 400 字上限被 5/5 角色系统性写超，SKILL.md 的字数口径提示值得前置到产稿指令——**已关闭：b+ 结构保证落地（65ad27c）→ 复冒烟 II 证明还需预算 → 用户批准候选 a，预算 2→3 落地（9659bb7）→ 复冒烟 III：3 门全用、2 修复轮真跑、违规 8→1（见第 2 层复冒烟 III）。残留引文保真问题转队列 11**
+10. **smoke CLI 上游缺失快速失败**：冒烟入口对 gate_needs 先查 pipeline_artifacts，缺上游直接报错退出——2026-10-25 实证缺失时 20 轮对门 ENOENT 空转烧了 ¥0.05（skill_executor.py 硬编码 pipeline_test 库，库被清理后上游静默消失）——**已落地（d2c7807）并在复冒烟 II 实证：首跑即被拦截，零 LLM 调用退出，本条关闭**
+11. **characters 引文保真**（2026-10-25 复冒烟 III 实证）：模型把 paraphrase 当逐字引文（「但车库进出口走的是独立线路…」非原文片段），2 个修复轮未自察。候选：a) 执行器侧 characters repair_note：「引文必须是小说原文连续逐字片段，找不到就删 quote 字段或换能逐字找到的句子」；b) 门侧模糊匹配放宽（产品决策，涉及阈值红线）。voice.prompt 系统性超长的产稿口径提示（见第 9 条历史注记）可与 a 一并做
 
 ## 五、浏览器验证记录（2026-10-25，headless Edge + CDP）
 

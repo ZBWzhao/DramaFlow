@@ -71,16 +71,22 @@ def characters_to_rows(content: dict) -> list[dict]:
 
 
 def art_to_rows(content: dict) -> dict[str, list[dict]]:
-    """art.json → 场景/道具行（merge_asset_tables 的 scenes/props 消费形状）。"""
+    """art.json → 场景/道具行（merge_asset_tables 的 scenes/props 消费形状）。
+
+    name 截 60、description 截 500：与 characters_to_rows 同一套上限（60/500/1500
+    的前两档；场景/道具行没有 bio 栏，1500 档用不上），让校验在写画布之前就先过，
+    避免超长 summary 把整次同步卡在校验上。
+    """
     def _plain(items: Any) -> list[dict]:
         rows = []
         for item in items or []:
             if not isinstance(item, dict):
                 continue
-            name = str(item.get("name") or "").strip()
+            name = str(item.get("name") or "").strip()[:60]
             if not name:
                 continue
-            rows.append({"name": name, "description": str(item.get("summary") or "")})
+            rows.append({"name": name,
+                         "description": _clip(str(item.get("summary") or "").strip(), 500)})
         return rows
 
     return {
