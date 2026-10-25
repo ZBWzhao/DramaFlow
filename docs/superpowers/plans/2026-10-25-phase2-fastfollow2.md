@@ -31,7 +31,7 @@
 
 背景（2026-10-25 真模型实证）：deepseek-chat 跑 characters 时把产稿拆两轮，r2 的"修复轮"拿到半成品（6 处违规：含 voice.prompt 超长等），预算烧光未落库。方案 b 单独不够：补全后门仍可能挂、还需修复轮。因此预算必须按"权威门运行次数"计，组装轮免费。
 
-- [ ] **Step 1: 写失败测试**
+- [x] **Step 1: 写失败测试**
 
 ```python
 def test_chain_repair_finish_rejected_until_assembly_complete():
@@ -48,9 +48,9 @@ def test_chain_repair_budget_counts_gates_not_rounds():
 
 （替身写法沿用文件内既有 ScriptedLLM 多轮模式；「finish 被拒」消息的到达断言参照既有 repair-message-reaches-model 测试。）
 
-- [ ] **Step 2: 跑失败** → `AssertionError`（现 finish 无条件接受）
+- [x] **Step 2: 跑失败** → `AssertionError`（现 finish 无条件接受）
 
-- [ ] **Step 3: 实现**
+- [x] **Step 3: 实现**
 
 dispatch finish 分支（替换 line 317-319）：
 
@@ -73,7 +73,7 @@ run_stage 预算语义（clamp ~line 528-529 与循环 ~line 548）：chain_repa
 `bound = min(max_iterations, 2) + state.get("finish_rejections", 0)`；
 dispatch 拒绝 finish 时 `state["finish_rejections"] += 1`（toolbox 需能写这个计数——state dict 已共享，直接 `self.state["finish_rejections"]`）。agent 政策循环不变（bound = max_iterations）。while 化或每轮重算 bound 均可，以最小改动为准。
 
-- [ ] **Step 4: 全套测试 + 提交**
+- [x] **Step 4: 全套测试 + 提交**
 
 Run: `python -m pytest tests/ -q` → 269+ 全绿（既有 chain_repair 预算锁测试 `test_characters_chain_repair_budget_locked_at_two_rounds` 若因语义变化需更新断言——更新为"总门数 ≤ 2"而非"总轮数 ≤ 2"，在报告中说明）
 
@@ -95,7 +95,7 @@ git commit -m "feat: chain_repair finish assembly check; budget counts authorita
 
 **Interfaces:** Consumes `pipeline_import.prepare(...)`（返回 `(content, warnings)`——Task 5 时被 `content, _ =` 丢弃，本任务恢复）；smoke CLI 的 gate_needs 上游循环（~line 22 `inputs[need] = row["content"]`）。Produces 无新接口。
 
-- [ ] **Step 1: 五处实现**（每处独立可验证，一次提交）
+- [x] **Step 1: 五处实现**（每处独立可验证，一次提交）
 
 1. **冒烟 CLI fast-fail（队列 10）**：`__main__` 里 gate_needs 循环处，`row is None` 时立刻 print 明确错误（「上游产物 {need} 不存在——先跑它的阶段冒烟，别空烧 LLM」）并 `return 1`，在任何 LLM 调用之前。
 2. **prepare 警告入账（Task 5 M1）**：save 分支 `content, _ = pipeline_import.prepare(...)` 改为接收 warnings，追加进返回的 StageResult.findings：`[{"gate": "import", "detail": w} for w in warnings]`——ok=True 时 findings 也可以非空（runner 落 JSONB 已兼容）。补一个测试：构造触发 contract warning 的合并（库内 existing 含无法识别的集数组），断言 findings 非空且 detail 含警示文本。
@@ -103,7 +103,7 @@ git commit -m "feat: chain_repair finish assembly check; budget counts authorita
 4. **art 行截断**：`server/pipeline_assets.py` art_to_rows 的 scene/prop name/description 加与 characters 相同的截断（60/500/1500——读该文件 characters 侧的现值照抄）。
 5. **docstring**：`server/pipeline_runs.py:21` 「done/failed 为终态收流」改为准确表述（hello 对 done/cancelled 收流；failed 保持打开等 retry 事件）。
 
-- [ ] **Step 2: 全套测试 + 提交**
+- [x] **Step 2: 全套测试 + 提交**
 
 Run: `python -m pytest tests/ -q` 全绿
 
@@ -122,7 +122,7 @@ git commit -m "fix: smoke upstream fast-fail, import warnings to findings, stage
 
 **Interfaces:** Consumes Task 1 的执行器行为；冒烟 CLI（worktree 本体运行——本分支自带全部代码与 vendored 技能）；`phase1-acceptance` 项目的 outline（3×90s，dramaflow 库，上次 characters 失败的同一基线）。
 
-- [ ] **Step 1: 余额核对 + characters 复冒烟（上限 ¥0.5）**
+- [x] **Step 1: 余额核对 + characters 复冒烟（上限 ¥0.5）**
 
 ```bash
 # 余额前置检查；然后从 WORKTREE 跑（无需 Desktop 补丁——分支自带代码）：
@@ -134,7 +134,7 @@ CANVAS_STORE_BACKEND=postgres DATABASE_URL=postgresql://postgres:postgres@localh
 
 判定：ok=True 落库 → 队列 9 关闭（方案 b+ 生效，记 iterations/门数）；仍失败 → 对比上轮 6 violations（是组装问题消失只剩内容问题，还是依旧）→ 上升产品决策（候选 a 预算 2→3），不再自动重试。
 
-- [ ] **Step 2: 文档 + 提交**
+- [x] **Step 2: 文档 + 提交**
 
 验收文档第 2 层表格补 characters 行；队列 9 标注「已按 b+ 裁决落地（本提交），复冒烟结果 X」。
 
@@ -143,14 +143,14 @@ git add docs/pipeline/phase2-acceptance.md
 git commit -m "docs: characters re-smoke under chain_repair structural guarantee"
 ```
 
-- [ ] **Step 3: 集成（controller 执行，不在本任务内）**——合并回 feat/frontend-redesign、重启 Desktop 后端、CDP 浏览器复验队列 0/7（顶栏标题、retry 防抖）。
+- [x] **Step 3: 集成（controller 执行，不在本任务内）**——合并回 feat/frontend-redesign、重启 Desktop 后端、CDP 浏览器复验队列 0/7（顶栏标题、retry 防抖）。
 
 ---
 
 ## 验收清单
 
-- [ ] 全套 pytest ≥ 272 全绿（269 + Task 1 两条 + Task 2 至少一条）
-- [ ] chain_repair：不完整 finish 被拒并点名缺键；被拒轮不消耗 2 门预算；总门数 ≤ 2 有测试锁定
-- [ ] characters 真模型复冒烟收敛落库（或带证据上升产品决策）
-- [ ] 冒烟 CLI 上游缺失时零 LLM 调用即退出
-- [ ] 红线文件零触碰；门阈值未动
+- [x] 全套 pytest ≥ 272 全绿（269 + Task 1 两条 + Task 2 至少一条）
+- [x] chain_repair：不完整 finish 被拒并点名缺键；被拒轮不消耗 2 门预算；总门数 ≤ 2 有测试锁定
+- [x] characters 真模型复冒烟收敛落库（或带证据上升产品决策）
+- [x] 冒烟 CLI 上游缺失时零 LLM 调用即退出
+- [x] 红线文件零触碰；门阈值未动

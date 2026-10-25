@@ -576,9 +576,13 @@ async def run_stage(
     ]
     findings: list[dict] = []
     # while 化（原 for range）：chain_repair 的上界 = min(max_iterations, 3) +
-    # finish_rejections，拒绝发生在轮内，必须每轮重算；agent 型上界恒定。
+    # min(finish_rejections, 3)，拒绝发生在轮内，必须每轮重算；agent 型上界恒定。
+    # rejection 买的轮数至多 +3——write_draft 不校验 section 名，模型持续写错名
+    # 后 finish 会被无限打回，clamp 是这条死循环的护栏；3 次拒绝后仍组装不全
+    # 是系统性问题，不是轮数问题。in-round 恢复银行免费轮的行为保留不改
+    # （有界、只帮不害；不做逐轮追踪）。
     rnd = 0
-    while rnd < (base_iterations + state["finish_rejections"]
+    while rnd < (base_iterations + min(state["finish_rejections"], 3)
                  if chain_repair else base_iterations):
         rnd += 1
         resp = await llm.complete(messages, tools=box.specs())

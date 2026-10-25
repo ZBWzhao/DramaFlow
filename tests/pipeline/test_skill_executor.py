@@ -806,3 +806,40 @@ def test_chain_repair_rejections_buy_no_extra_gates(pipeline_test_database):
         assert await pipeline_repository.get(database, "proj-cast-cap2", "characters") is None
 
     _run_scenario(scenario, pipeline_test_database)
+
+
+def test_chain_repair_rejection_rounds_clamped_at_plus3(pipeline_test_database):
+    """轮上界 clamp（终审 Important）：write_draft 不校验 section 名，模型若每轮
+    都写错名 section 再 finish（组装检查永远打回），rejection 项曾无上界——循环
+    无限抬高、纯烧 LLM 调用。clamp 后 rejection 买的轮数至多 +3：3 + 3 = 6 轮
+    必终止，ok=False、零权威门（被拒不触发门）、绝不落库；脚本多备的轮次证明
+    循环是自己停的，不是剧本耗尽。"""
+    cast = _load("cast.json")
+
+    async def scenario(database) -> None:
+        def _doomed_turn():
+            # 错名 section：write_draft 只回错误串不落草稿，finish 必因缺键被拒
+            return [{"name": "write_draft", "args": {"section": "不是合法键", "data": []}},
+                    {"name": "finish", "args": {}}]
+
+        llm = ScriptedLLM([_doomed_turn() for _ in range(8)])   # 备 8 轮 > 上界 6
+        events: list[dict] = []
+        result = await run_stage(database, "proj-cast-clamp", "characters",
+                                 {"novel_text": NOVEL_TEXT, "outline": _load("outline.json")},
+                                 llm=llm, on_event=events.append, max_iterations=9)
+        assert not result.ok and result.findings
+        assert result.iterations == 6                        # base 3 + clamp 3，恰停在上界
+        assert len(llm.calls) == 6                           # 第 7 轮不存在（剧本还剩 2 轮）
+        assert len(result.gate_log) == 0                     # 被拒不触发权威门
+        assert [e for e in events if e["type"] == "gate"] == []
+        assert events[-1] == {"type": "done", "ok": False}
+        # 每轮都被拒：快照在 complete() 时取，第 k 份含前 k-1 轮的拒绝回执——
+        # 逐份 +1 的阶梯（0..5）证明 6 轮每轮各被拒一次，rejection 计数已越过
+        # clamp 值 3 却买不动第 7 轮
+        per_snapshot = [sum(1 for m in turn
+                            if m.get("role") == "tool" and "finish 被拒绝" in m["content"])
+                        for turn in llm.calls]
+        assert per_snapshot == [0, 1, 2, 3, 4, 5]
+        assert await pipeline_repository.get(database, "proj-cast-clamp", "characters") is None
+
+    _run_scenario(scenario, pipeline_test_database)
