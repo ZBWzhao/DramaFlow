@@ -780,7 +780,7 @@ export async function retryRun(stage) {
   _openRunStream();
 }
 
-/** 追加一条人工意见（确认前的「带意见重写」留言；门不会因此自动放行）。 */
+/** 追加一条人工意见（确认前的「记录意见」留言，随运行留档；门不会因此自动放行）。 */
 export async function sendRunFeedback(text) {
   const trimmed = String(text || "").trim();
   if (!trimmed) throw new Error("意见内容不能为空");

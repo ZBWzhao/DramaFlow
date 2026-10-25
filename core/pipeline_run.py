@@ -127,7 +127,7 @@ class RunStore:
         return updated is not None
 
     async def append_feedback(self, run_id: str, text: str) -> None:
-        """追加一条人工意见（换行连接）；approve 前的「带意见重写」走这里。"""
+        """追加一条人工意见（换行连接）；确认前的「记录意见」走这里。"""
         await self._client().execute(
             "UPDATE pipeline_runs SET"
             " feedback = CASE WHEN feedback = '' THEN $2 ELSE feedback || chr(10) || $2 END,"

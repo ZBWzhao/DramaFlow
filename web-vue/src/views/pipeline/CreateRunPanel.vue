@@ -129,7 +129,7 @@ async function confirmApprove() {
   }
 }
 
-async function rewriteWithFeedback() {
+async function recordFeedback() {
   const text = feedback.value.trim();
   if (!text || sendingFeedback.value) return;
   sendingFeedback.value = true;
@@ -137,7 +137,7 @@ async function rewriteWithFeedback() {
   try {
     await sendRunFeedback(text);
     feedback.value = "";
-    ElMessage.success("意见已记录；确认门不会自动放行，确认仍需你点击");
+    ElMessage.success("意见已随本次运行记录，后续改稿可见；不会触发自动重写，确认仍需你点击");
   } catch (err) {
     gateError.value = errorText(err);
   } finally {
@@ -196,7 +196,7 @@ function scrollToOutline() {
       <!-- 确认门（红线）：gate 之后停在这里，放行只有一个入口 -->
       <div v-if="run.status === 'gated'" class="gate">
         <div class="gate-cap">「{{ stageLabel(run.stage) }}」已通过质量门，等你确认</div>
-        <p class="tip">确认后才会继续写剧本；确认门不可跳过，也不会自动放行。对大纲有意见可以先留言再确认。</p>
+        <p class="tip">确认后才会继续写剧本；确认门不可跳过，也不会自动放行。对大纲有意见可以先记录意见——意见随本次运行留档、供后续改稿参考，不会触发自动重写。</p>
         <div v-if="gateError" class="err">{{ gateError }}</div>
         <div class="acts">
           <button class="btn" type="button" @click="scrollToOutline">查看大纲并确认</button>
@@ -211,10 +211,10 @@ function scrollToOutline() {
             type="text"
             placeholder="对大纲的意见，如：第一集节奏太慢、主角出场再提前……"
             :disabled="sendingFeedback"
-            @keyup.enter="rewriteWithFeedback"
+            @keyup.enter="recordFeedback"
           />
-          <button class="btn" type="button" :disabled="!feedback.trim() || sendingFeedback" @click="rewriteWithFeedback">
-            {{ sendingFeedback ? "记录中…" : "带意见重写" }}
+          <button class="btn" type="button" :disabled="!feedback.trim() || sendingFeedback" @click="recordFeedback">
+            {{ sendingFeedback ? "记录中…" : "记录意见" }}
           </button>
         </div>
       </div>
