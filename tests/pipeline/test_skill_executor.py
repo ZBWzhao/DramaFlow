@@ -517,11 +517,12 @@ def test_characters_chain_repair_gate_fail_repairs_exactly_once(pipeline_test_da
     _run_scenario(scenario, pipeline_test_database)
 
 
-def test_characters_chain_repair_budget_locked_at_two_gates(pipeline_test_database):
-    """chain_repair 的预算锁（fastfollow-2 语义）：调用方给 max_iterations=9 也不
-    放宽——不变量是「总权威门运行次数 ≤ 2」，不再表述为「总轮数 ≤ 2」（被拒的
-    组装轮不消耗门预算、也不计入门数）。门级失败 fixture 必须是组装完整的稿：
-    空 characters 数组现在会被 finish 组装检查拦在门之前，进不了门。"""
+def test_characters_chain_repair_budget_locked_at_three_gates(pipeline_test_database):
+    """chain_repair 的预算锁（fastfollow-2 语义；2026-10-25 修正预算 2→3）：调用方
+    给 max_iterations=9 也不放宽——不变量是「总权威门运行次数 ≤ 3」，不再表述为
+    「总轮数 ≤ 3」（被拒的组装轮不消耗门预算、也不计入门数）。门级失败 fixture
+    必须是组装完整的稿：空 characters 数组现在会被 finish 组装检查拦在门之前，
+    进不了门。"""
     cast = _load("cast.json")
 
     async def scenario(database) -> None:
@@ -533,15 +534,46 @@ def test_characters_chain_repair_budget_locked_at_two_gates(pipeline_test_databa
                                                      "data": _gate_fail_characters(cast)}},  # 引文非逐字，门必拦
                     {"name": "finish", "args": {}}]
 
-        llm = ScriptedLLM([_turn() for _ in range(4)])    # 修复轮也不修：门拦满 2 次即到顶
+        llm = ScriptedLLM([_turn() for _ in range(4)])    # 修复轮也不修：门拦满 3 次即到顶
         result = await run_stage(database, "proj-cast-cap", "characters",
                                  {"novel_text": NOVEL_TEXT, "outline": _load("outline.json")},
                                  llm=llm, max_iterations=9)
         assert not result.ok and result.findings
-        assert result.iterations == 2                     # 无拒绝时轮数 = 门数 = 2
-        assert len(result.gate_log) == 2                  # 总权威门 ≤ 2（新不变量）
-        assert len(llm.calls) == 2                        # 第 3 轮不存在
+        assert result.iterations == 3                     # 无拒绝时轮数 = 门数 = 3
+        assert len(result.gate_log) == 3                  # 总权威门 ≤ 3（新不变量）
+        assert len(llm.calls) == 3                        # 第 4 轮不存在
         assert await pipeline_repository.get(database, "proj-cast-cap", "characters") is None
+
+    _run_scenario(scenario, pipeline_test_database)
+
+
+def test_characters_chain_repair_budget_three_gates_allow_second_repair(pipeline_test_database):
+    """预算 3（2026-10-25 修正，复冒烟 II：deepseek-chat 产稿跨轮使轮界先于门预算
+    耗尽）：两次门级失败仍能出第三次门——r1 产+finish 门败、r2 修+finish 仍败、
+    r3 修+finish 门过落库；总门数 = 3（1 产 + 2 修），预算 2 时代此路必断。"""
+    cast = _load("cast.json")
+
+    async def scenario(database) -> None:
+        def _turn(characters):
+            return [{"name": "write_draft", "args": {"section": "source", "data": cast["source"]}},
+                    {"name": "write_draft", "args": {"section": "lang", "data": cast["lang"]}},
+                    {"name": "write_draft", "args": {"section": "summary", "data": cast["summary"]}},
+                    {"name": "write_draft", "args": {"section": "characters", "data": characters}},
+                    {"name": "finish", "args": {}}]
+
+        turns = [_turn(_gate_fail_characters(cast)),     # r1 产稿：引文非逐字，门败
+                 _turn(_gate_fail_characters(cast)),     # r2 修复未修对：门再败
+                 _turn(cast["characters"])]              # r3 修复到位：第 3 次门过
+        llm = ScriptedLLM(turns)
+        events: list[dict] = []
+        result = await run_stage(database, "proj-cast-3gates", "characters",
+                                 {"novel_text": NOVEL_TEXT, "outline": _load("outline.json")},
+                                 llm=llm, on_event=events.append, max_iterations=9)
+        assert result.ok and result.iterations == 3       # 1 产 + 2 修，恰好用满预算
+        assert len(result.gate_log) == 3                  # 权威门 3 次：1 产 + 2 修复
+        assert [e["ok"] for e in events if e["type"] == "gate"] == [False, False, True]
+        saved = await pipeline_repository.get(database, "proj-cast-3gates", "characters")
+        assert saved["content"]["characters"] == cast["characters"]
 
     _run_scenario(scenario, pipeline_test_database)
 
@@ -626,8 +658,8 @@ def test_agent_repair_tail_demands_self_gate(pipeline_test_database):
 
 
 def test_chain_repair_repair_tail_skips_self_gate(pipeline_test_database):
-    """chain_repair（characters）：修复尾禁止自检——预算锁 2 轮，自检等于白烧一半，
-    修完同轮立刻 finish（与 _compose_system 的 chain_repair 纪律同口径）。"""
+    """chain_repair（characters）：修复尾禁止自检——预算锁 3 次权威门，自检等于
+    白烧三分之一，修完同轮立刻 finish（与 _compose_system 的 chain_repair 纪律同口径）。"""
     cast = _load("cast.json")
 
     async def scenario(database) -> None:
@@ -714,9 +746,9 @@ def test_chain_repair_finish_rejected_until_assembly_complete(pipeline_test_data
 
 
 def test_chain_repair_budget_counts_gates_not_rounds(pipeline_test_database):
-    """预算语义 = 权威门运行次数：被拒的组装轮不消耗门预算（round 1 被拒后
-    仍有完整的 1 产 + 1 修复两次门），max_iterations=9 传入也被 clamp——
-    权威门恰 2 次，总门数永远 ≤ 2。"""
+    """预算语义 = 权威门运行次数：被拒的组装轮不消耗门预算（round 1 被拒后仍有
+    完整的 1 产 + 至多 2 修三次门预算），max_iterations=9 传入也被 clamp——
+    本例只用到前两次门（1 产 + 1 修复），总门数永远 ≤ 3。"""
     cast = _load("cast.json")
 
     async def scenario(database) -> None:
@@ -748,8 +780,8 @@ def test_chain_repair_budget_counts_gates_not_rounds(pipeline_test_database):
 
 
 def test_chain_repair_rejections_buy_no_extra_gates(pipeline_test_database):
-    """对照组：反复被拒也买不来越过 2 的门——finish_rejections 只抬轮数上界，
-    权威门总数仍锁 2；脚本多备的轮次永远轮不到。"""
+    """对照组：反复被拒也买不来越过 3 的门——finish_rejections 只抬轮数上界，
+    权威门总数仍锁 3；脚本多备的轮次永远轮不到。"""
     cast = _load("cast.json")
 
     async def scenario(database) -> None:
@@ -761,16 +793,16 @@ def test_chain_repair_rejections_buy_no_extra_gates(pipeline_test_database):
                     {"name": "finish", "args": {}}]
 
         turns = ([[{"name": "write_draft", "args": {"section": "summary", "data": cast["summary"]}},
-                   {"name": "finish", "args": {}}]]           # r1 被拒：rejections=1 → 上界 3
-                 + [_bad_turn() for _ in range(4)])           # 门级失败稿若干：最多只该跑 2 次门
+                   {"name": "finish", "args": {}}]]           # r1 被拒：rejections=1 → 上界 4
+                 + [_bad_turn() for _ in range(4)])           # 门级失败稿若干：最多只该跑 3 次门
         llm = ScriptedLLM(turns)
         result = await run_stage(database, "proj-cast-cap2", "characters",
                                  {"novel_text": NOVEL_TEXT, "outline": _load("outline.json")},
                                  llm=llm, max_iterations=9)
         assert not result.ok and result.findings
-        assert result.iterations == 3                        # 1 被拒 + 2 次门轮，到此为止
-        assert len(result.gate_log) == 2                     # 总门数 ≤ 2：拒绝买不来第 3 次门
-        assert len(llm.calls) == 3                           # 第 4 轮不存在
+        assert result.iterations == 4                        # 1 被拒 + 3 次门轮，到此为止
+        assert len(result.gate_log) == 3                     # 总门数 ≤ 3：拒绝买不来第 4 次门
+        assert len(llm.calls) == 4                           # 第 5 轮不存在
         assert await pipeline_repository.get(database, "proj-cast-cap2", "characters") is None
 
     _run_scenario(scenario, pipeline_test_database)

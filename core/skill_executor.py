@@ -10,8 +10,8 @@
 红线约束落点：
 - 门只经 node 子进程（唯一可执行文件），timeout 120s，每阶段一次 tempfile.mkdtemp；
 - 迭代上限默认 5，超限 = StageResult(ok=False, findings=...)，无脏数据；
-  填表型（policy="chain_repair"：characters/art）按权威门运行次数锁 2 次——产全文
-  + 恰好一轮修复，被拒的组装轮不消耗门预算（finish 组装检查，fastfollow-2）；
+  填表型（policy="chain_repair"：characters/art）按权威门运行次数锁 3 次——产全文
+  + 至多两轮修复，被拒的组装轮不消耗门预算（finish 组装检查，fastfollow-2）；
 - 产物写入只有 pipeline_repository.save 一个口；
 - LLM 经 LLMPort 协议注入，本模块不绑任何 SDK——真链路用 _RouterLLM
   （core/llm.LLM 的响应整形），Task 3 起 runner 注入。
@@ -51,7 +51,7 @@ FINDING_TAIL = 800            # findings 里带的病灶尾部（进 pipeline_ru
 # 的元数据键，同 outline 口径——不写死进产物拼装逻辑）；merge_sections（write_draft
 # 按 key 分批并入而非覆盖）；save_merge（落库按 data-contract 分批合并，缺省
 # latest-wins 整行替换）；policy（"agent"=多轮 gated loop；"chain_repair"=填表型，
-# 单次产全文 + 恰好一轮修复）。
+# 单次产全文 + 至多两轮修复）。
 STAGE_SPECS: dict[str, dict] = {
     "outline": {
         "skill": "novel-outline", "artifact": "outline", "policy": "agent",
@@ -106,8 +106,8 @@ STAGE_SPECS: dict[str, dict] = {
     },
     # ---------------------------------------------------------------------
     # Task 6：制片四层。填表型（characters/art）policy="chain_repair"：单次
-    # complete 产全文 → 权威门 → 未过恰好一轮修复（规格 8.1，预算按权威门计、
-    # 锁 2 次，fastfollow-2 起 finish 前置组装检查）；
+    # complete 产全文 → 权威门 → 未过至多两轮修复（规格 8.1，预算按权威门计、
+    # 锁 3 次，fastfollow-2 起 finish 前置组装检查）；
     # 创作型（staging/storyboard）policy="agent"：与 outline/script 同一条
     # gated agent loop。gate 实参按各技能 SKILL.md 的 validate 用法抄写
     # （brief 初稿与技能文档不一致处以文档为准）：文件名取自
@@ -484,15 +484,16 @@ def _compose_system(spec: dict) -> str:
     sections = [*meta, *spec["sections"]]
     artifact_file = pipeline_artifacts.get(spec["artifact"]).filename
     if spec.get("policy") == "chain_repair":
-        # 填表型纪律（规格 8.1）：一轮产全文 → finish 触发权威门 → 恰好一轮修复。
-        # 不设自检轮（run_quality_gate）——预算只有 2 次权威门，自检等于白烧一半。
+        # 填表型纪律（规格 8.1）：一轮产全文 → finish 触发权威门 → 至多两轮修复。
+        # 不设自检轮（run_quality_gate）——预算只有 3 次权威门，自检等于白烧三分之一。
         steps = f"""2. 第一轮就并行发齐全部 write_draft，把 {len(sections)} 个顶层键一次写全：{'、'.join(sections)}。
    data 严格符合上面 schema.md 对应节的字段定义，一次写到位，不留空壳占位；写全后
    同一轮立即调用 finish 触发权威质量门（门就是自检，不必也不应先 run_quality_gate）。
    {spec.get("notes", "")}
    write_draft 的 data 必须是该键的 JSON 数据本体（数组/对象/字符串），
    绝不能是再编码过的 JSON 字符串。
-3. 权威门未过时你会收到一份带门报告的 user 消息——这是唯一一轮修复机会：只重调
+3. 权威门未过时你会收到一份带门报告的 user 消息——这是你的修复机会（预算
+   3 次权威门：1 产 + 至多 2 修，尽量一轮修完）：只重调
    write_draft 覆盖报告点名的键，data 给该键的完整数据（数组键必须整组重发全部条目，
    别只发单条），修完同一轮立刻再 finish。不点名的键一律不动。{spec.get("repair_note", "")}
 4. 每一轮都必须发出至少一个工具调用——没有工具调用的一轮就是白白消耗一轮预算。
@@ -546,15 +547,15 @@ async def run_stage(
     （自检门只是预演），失败则 findings 留档、重置 finished 让模型继续修。
     chain_repair（填表型）的 finish 前置组装检查：缺键/空键直接打回、不置
     finished，被拒组装轮不消耗门预算（循环上界随 finish_rejections 动态抬高）；
-    预算语义 = 权威门运行次数，锁 2 次。
+    预算语义 = 权威门运行次数，锁 3 次。
     """
     spec = STAGE_SPECS[stage]
-    # chain_repair（填表型，规格 8.1）：单次产全文 + 恰好一轮修复——预算按"权威门
-    # 运行次数"计、锁 2 次（调用方给更大的 max_iterations 也不放宽）。被拒的组装
-    # 轮不消耗门预算：循环上界随 finish_rejections 动态抬高（每轮重算，见下）。
-    # agent 型才吃调用方预算。
+    # chain_repair（填表型，规格 8.1）：单次产全文 + 至多两轮修复——预算按"权威门
+    # 运行次数"计、锁 3 次 = 1 产 + 至多 2 修（调用方给更大的 max_iterations 也不
+    # 放宽）。被拒的组装轮不消耗门预算：循环上界随 finish_rejections 动态抬高
+    # （每轮重算，见下）。agent 型才吃调用方预算。
     chain_repair = spec.get("policy") == "chain_repair"
-    base_iterations = min(max_iterations, 2) if chain_repair else max_iterations
+    base_iterations = min(max_iterations, 3) if chain_repair else max_iterations
     workdir = Path(tempfile.mkdtemp(prefix=f"stage-{stage}-"))   # 每阶段一次，门的 cwd
     state: dict = {"draft": {}, "finished": False, "gate_log": [], "last_gate": None,
                    "finish_rejections": 0}
@@ -574,7 +575,7 @@ async def run_stage(
         {"role": "user", "content": user_content},
     ]
     findings: list[dict] = []
-    # while 化（原 for range）：chain_repair 的上界 = min(max_iterations, 2) +
+    # while 化（原 for range）：chain_repair 的上界 = min(max_iterations, 3) +
     # finish_rejections，拒绝发生在轮内，必须每轮重算；agent 型上界恒定。
     rnd = 0
     while rnd < (base_iterations + state["finish_rejections"]
@@ -648,9 +649,9 @@ async def run_stage(
         # 修复指令要具体到"覆盖哪个键、整组重发"——首冒烟里模型曾反复只改第 1 集
         # 和无关的 scenes，对报告点名的 warnings 视而不见，预算烧光也没修对。
         # 尾巴按策略分支（与 _compose_system 两个分支的自检口径一致）：agent 型
-        # 多轮预算下自检不亏，修完先 run_quality_gate；chain_repair 预算锁 2 次
-        # 权威门，自检等于白烧一半——修完同轮立刻 finish（门即自检）。
-        tail = ("修完同一轮立刻再 finish，不要先 run_quality_gate（预算只有 2 次权威门，自检等于白烧）。"
+        # 多轮预算下自检不亏，修完先 run_quality_gate；chain_repair 预算锁 3 次
+        # 权威门，自检等于白烧三分之一——修完同轮立刻 finish（门即自检）。
+        tail = ("修完同一轮立刻再 finish，不要先 run_quality_gate（预算只有 3 次权威门，自检等于白烧）。"
                 if spec.get("policy") == "chain_repair"
                 else "修完 run_quality_gate，报告全过就立刻 finish。")
         messages.append({"role": "user",

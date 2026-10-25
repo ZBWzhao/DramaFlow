@@ -159,6 +159,7 @@
 - 求职定位确认为 **Agent 开发**。纯"状态机+确定性链"是 workflow 工程，不构成 Agent 作品集；纯 agent loop 跑生产管线则贵、慢、不可复现。
 - 裁决：**编排层保持确定性状态机；创作类阶段执行器升级为 gated agent loop**——编剧 Agent 带工具集（`read_novel` / `read_upstream_artifacts` / `write_draft_section` / `run_quality_gate` / `read_gate_report` / `finish`）在质量门约束下自主迭代，终止条件 = 门全过，或迭代上限（默认 5 轮）后带失败报告交编排层处置（重试/修复 agent/人工）。
 - 填表型阶段（characters/art 的表格部分）用"链 + 一次修复"控制成本；创作型阶段（outline/script/staging/storyboard）上完整 loop。
+  > 2026-10-25 修正：复冒烟 II 证明产稿跨轮使轮界先于门预算耗尽，经用户批准预算 2→3（门语义不变）。
 - 评测叙事：门即环境反馈的 tool-grounded self-correction；每次 run 的迭代数/门通过率/单阶段成本经既有 `invocation_store`（调用账本）聚合，前端运行详情可见。
 
 ### 8.2 三套脑合并（先于执行器开工）
