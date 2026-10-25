@@ -622,20 +622,26 @@ async def run_stage(
         on_event and on_event({"type": "gate", "ok": ok, "round": rnd})
         if ok:
             content = _finalize_draft(spec, state)
+            import_findings: list[dict] = []
             if spec.get("save_merge"):
                 # data-contract「script 分批合并」：按集号并入已落库产物，批次外的
                 # 集保留——重跑/重试不吞既有集（outline 无 save_merge，latest-wins
                 # 整行替换）。合并整形唯一出口 pipeline_import.prepare，不另起灶。
                 existing = await pipeline_repository.get(db, project_id, spec["artifact"])
-                content, _ = pipeline_import.prepare(
+                content, warnings = pipeline_import.prepare(
                     pipeline_artifacts.get(spec["artifact"]),
                     content, existing["content"] if existing else None,
                 )
+                # 合并告警入账（fastfollow-2，恢复 Task 5 被 `content, _` 丢掉的
+                # 第二返回值）：库内 existing 形状异常时的契约告警（整行替换等）
+                # 不再静默，落进 StageResult.findings 留档。ok=True 的 findings
+                # 也可以非空——runner 落 JSONB 已兼容。
+                import_findings = [{"gate": "import", "detail": w} for w in warnings]
             await pipeline_repository.save(db, project_id, spec["artifact"],
                                            content,
                                            source_run_id=f"stage:{stage}")
             on_event and on_event({"type": "done", "ok": True})
-            return StageResult(True, spec["artifact"], rnd, gate_log, [])
+            return StageResult(True, spec["artifact"], rnd, gate_log, import_findings)
         findings = [{"gate": "validate", "detail": output[-FINDING_TAIL:]}]
         state["finished"] = False
         # 失败必须把报告喂回对话，模型才知道修哪里（gate_log 只留给调用方）；
@@ -764,12 +770,15 @@ async def _smoke(args: argparse.Namespace) -> int:
             print(f"[event] {json.dumps(event, ensure_ascii=False)}", flush=True)
 
         # 上游产物按 gate_needs 注入（与 runner._upstream 同口径）：script 冒烟
-        # 依赖同项目已落库的 outline，缺了只带 novel_text（门会因缺 outline.json 失败）。
+        # 依赖同项目已落库的 outline。缺上游立刻失败退出（fastfollow-2 队列 10）：
+        # 旧行为缺了只带 novel_text，必然失败的尝试照样烧满 20 轮 LLM 才死在门上。
         inputs: dict = {"novel_text": novel_text}
         for need in STAGE_SPECS[args.stage].get("gate_needs") or []:
             row = await pipeline_repository.get(database, args.project, need)
-            if row is not None:
-                inputs[need] = row["content"]
+            if row is None:
+                print(f"上游产物 {need} 不存在——先跑它的阶段冒烟，别空烧 LLM", flush=True)
+                return 1
+            inputs[need] = row["content"]
 
         print(f"== smoke: stage={args.stage} project={args.project} "
               f"provider={provider} model={settings.model} max_iterations={args.max_iterations}",

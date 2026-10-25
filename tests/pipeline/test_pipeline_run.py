@@ -205,9 +205,70 @@ def test_infrastructure_exception_becomes_failed_run(pipeline_test_database):
         assert state["findings"][0]["gate"] == "infrastructure"
         assert "RuntimeError" in state["findings"][0]["detail"]
         assert state["stage_status"]["outline"]["status"] == "failed"
-        types = [e["type"] for e in _drain(events)]
-        assert types[-1] == "failed"
+        drained = _drain(events)
+        assert drained[-1]["type"] == "failed"
+        # 执行器异常在 _drive_inner 内被拦：失败事件带真实阶段（非 ""）
+        assert drained[-1]["stage"] == "outline"
         assert await pipeline_repository.get(database, "p-boom", "outline") is None
+
+    _run_scenario(scenario)
+
+
+class _BrokenLedgerStore(RunStore):
+    """update_stage 永远炸的账本：模拟 stage_status 写库级基建失败。执行器异常
+    在 _drive_inner 内就被拦下，只有这种 store/broker 级意外才逃得进 _drive
+    外壳——外层失败事件的 stage 哨兵只有这条路径能验证。"""
+
+    async def update_stage(self, run_id: str, stage: str, patch: dict) -> None:
+        raise RuntimeError("stage_status 写库炸了")
+
+
+def test_outer_shell_failure_stage_sentinel_is_last_known_stage(pipeline_test_database):
+    """stage 哨兵（fastfollow-2）：外层外壳失败事件的 stage 不再发 ""，取
+    stage_status 里最后一个已落账阶段（此处账本只有 outline，script 起跑即炸）。"""
+
+    async def scenario(database) -> None:
+        good = RunStore(database)
+        run = await good.create("p-boom-outer", "小说正文……")
+        # 账本预置 outline 已 done、run 从 script 续跑（确认门已批准过的形态）
+        await good.update_stage(run["run_id"], "outline",
+                                {"status": "done", "attempts": 1, "gate_runs": 1, "findings": []})
+        await good.set_status(run["run_id"], "running", stage="script")
+
+        store = _BrokenLedgerStore(database)
+        broker = EventBroker()
+        runner = PipelineRunner(store, database, executor=FakeExecutor(), broker=broker)
+        events = broker.subscribe(run["run_id"])
+
+        await runner.start(run["run_id"])
+        await runner.wait_idle()  # 不上抛
+        failed = [e for e in _drain(events) if e["type"] == "failed"]
+        assert failed and failed[-1]["stage"] == "outline"   # 最后已知阶段，不是 ""
+        assert "RuntimeError" in failed[-1]["error"]
+        state = await good.get(run["run_id"])
+        assert state["status"] == "failed"
+        assert state["findings"][0]["gate"] == "runner"
+
+    _run_scenario(scenario)
+
+
+def test_outer_shell_failure_stage_sentinel_none_without_ledger(pipeline_test_database):
+    """stage 哨兵的空账本分支：stage_status 无任何已落账阶段（update_stage 一炸
+    账本就永远是空的）时，失败事件 stage 是 None 而非 ""——消费端按未知 fallback。"""
+
+    async def scenario(database) -> None:
+        store = _BrokenLedgerStore(database)
+        broker = EventBroker()
+        runner = PipelineRunner(store, database, executor=FakeExecutor(), broker=broker)
+        run = await store.create("p-boom-none", "小说正文……")
+        await store.set_status(run["run_id"], "running")   # stage 列默认 outline，账本仍空
+        events = broker.subscribe(run["run_id"])
+
+        await runner.start(run["run_id"])
+        await runner.wait_idle()
+        failed = [e for e in _drain(events) if e["type"] == "failed"]
+        assert failed and failed[-1]["stage"] is None
+        assert "RuntimeError" in failed[-1]["error"]
 
     _run_scenario(scenario)
 

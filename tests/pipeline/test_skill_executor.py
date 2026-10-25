@@ -305,6 +305,37 @@ def test_script_save_merges_by_ep_preserving_other_episodes(pipeline_test_databa
     _run_scenario(scenario, pipeline_test_database)
 
 
+def test_script_save_merge_contract_warning_lands_in_findings(pipeline_test_database):
+    """fastfollow-2：save 分支不再丢弃 pipeline_import.prepare 的告警——库内
+    existing 含无法识别的集数组（契约口径：整行替换并记录告警，不拒收）时，
+    ok=True 的 StageResult.findings 也要非空（gate="import"，detail 带警示文本），
+    落库照常。"""
+    outline = _trim_outline(_load("outline.json"), [1, 2])
+    script = _trim_script(_load("script.json"), [1, 2])
+
+    async def scenario(database) -> None:
+        # 库内既有 episodes 不是数组：prepare 按契约整行替换并记告警
+        await pipeline_repository.save(database, "proj-warn", "script",
+                                       {"source": "旧稿", "episodes": {"1": "不是数组"}},
+                                       source_run_id="import:broken")
+        turns = ([_script_meta_round(script["source"])]
+                 + [[{"name": "write_draft", "args": {"section": "episodes",
+                                                      "data": script["episodes"]}}]]
+                 + [[{"name": "finish", "args": {}}]])
+        result = await run_stage(database, "proj-warn", "script",
+                                 {"novel_text": NOVEL_TEXT, "outline": outline},
+                                 llm=ScriptedLLM(turns))
+        assert result.ok                                     # 告警不拦落库
+        assert result.findings                               # ok=True 的 findings 可以非空
+        assert result.findings[0]["gate"] == "import"
+        assert "无法识别集数组" in result.findings[0]["detail"]
+        saved = await pipeline_repository.get(database, "proj-warn", "script")
+        assert saved["content"]["episodes"] == script["episodes"]   # 整行替换生效
+        assert saved["content"]["source"] == script["source"]
+
+    _run_scenario(scenario, pipeline_test_database)
+
+
 def test_script_gate_audits_seeded_outline(pipeline_test_database):
     """gate_needs 落盘是真门输入：剧本引用大纲没有的角色，refs-characters 门必须
     点名——outline.json 没被写进工作目录时，这条对账只会 ENOENT 崩溃或整体跳过。"""
