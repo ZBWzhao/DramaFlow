@@ -60,9 +60,13 @@ async def save(
 
 
 async def get(db: PostgresDatabase, project_id: str, art_type: str) -> dict | None:
-    """读单行；无则 None。返回 {"content", "schema_version", "updated_at"}。"""
+    """读单行；无则 None。返回 {"content", "schema_version", "source_run_id", "updated_at"}。
+
+    source_run_id（Task 8 起带出）：改稿脑 apply 的回滚要按旧 provenance 原样写回，
+    调用方（skill_executor / pipeline_run / 导入路由）只用 content，多出的键是加法。
+    """
     row = await db.client().fetchrow(
-        "SELECT content, schema_version, updated_at FROM pipeline_artifacts"
+        "SELECT content, schema_version, source_run_id, updated_at FROM pipeline_artifacts"
         " WHERE project_id=$1 AND artifact_type=$2",
         project_id, art_type,
     )
@@ -71,6 +75,7 @@ async def get(db: PostgresDatabase, project_id: str, art_type: str) -> dict | No
     return {
         "content": _decode_content(row["content"]),
         "schema_version": str(row["schema_version"]),
+        "source_run_id": str(row["source_run_id"]),
         "updated_at": float(row["updated_at"]),
     }
 

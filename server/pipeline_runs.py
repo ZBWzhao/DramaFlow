@@ -7,6 +7,12 @@
 - POST /runs/{run_id}/retry  {stage}         重置失败阶段重跑（仅 failed → 否则 409）
 - POST /runs/{run_id}/feedback {text}        追加人工意见（approve 前带意见重写用）
 
+改稿脑（阶段 2 Task 8）：
+- GET  /runs/{run_id}/stats                  运行详情聚合（iterations/gate_passes/stages）
+- GET  /projects/{canvas}/editor/pending     改稿提案流水（审批卡数据源）
+- POST /projects/{canvas}/editor/apply       审批落稿 + script 自动体检 + 门不过回滚
+- POST /projects/{canvas}/editor/reject      驳回提案（产物不动）
+
 装配模式照 server/pipeline.py：模块级句柄 + configure() 注入（不反向 import app），
 工厂 build_pipeline_runs(db, llm) 供 server/app.py 装配；file 后端（无 DB）句柄为
 None，全部路由 503。SSE 端点仿 server/studio.py story_analysis_run 的
@@ -22,10 +28,11 @@ import json
 from typing import Any
 
 from fastapi import APIRouter, HTTPException
-from fastapi.responses import StreamingResponse
+from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel
 
-from core.pipeline_run import EventBroker, PipelineRunner, RunStore
+from core import pipeline_editor
+from core.pipeline_run import EventBroker, PipelineRunner, RunStore, STAGE_ORDER
 
 router = APIRouter(prefix="/api/pipeline", tags=["pipeline-runs"])
 
@@ -197,3 +204,90 @@ async def post_feedback(run_id: str, body: FeedbackBody) -> dict:
         raise HTTPException(status_code=404, detail=f"运行不存在：{run_id}")
     await store.append_feedback(run_id, text)
     return {"ok": True, "run_id": run_id}
+
+
+# ---------------------------------------------------------------------------
+# 运行详情（阶段 2 Task 8）：按权威账本聚合的运行统计
+#
+# 计数口径与 runner 的 stage_status bookkeeping 同源（Task 2 review 定案）：
+# attempts = StageResult.iterations、gate_runs = len(StageResult.gate_log)，
+# 一律读 pipeline_runs.stage_status 这份唯一持久账本，绝不从 SSE gate 行里数
+# （broker 的 gate 事件混着自检门与 read_gate_report 重跑，不作数）。
+# gate_passes = 权威门通过并落库的阶段数（stage_status.status == "done"）——
+# stage_status 里没有逐次门事件的通过位，"阶段 done" 是唯一可信的通过事实。
+# ---------------------------------------------------------------------------
+
+def aggregate_run_stats(run: dict) -> dict:
+    """从一行运行记录聚合统计（纯函数；测试直接喂 store.get 的结果）。"""
+    stages: dict[str, dict] = {}
+    for stage in STAGE_ORDER:
+        entry = run["stage_status"].get(stage)
+        if not entry:
+            continue
+        stages[stage] = {
+            "attempts": int(entry.get("attempts") or 0),
+            "gate_runs": int(entry.get("gate_runs") or 0),
+            "ok": entry.get("status") == "done",
+        }
+    return {
+        "run_id": run["run_id"],
+        "status": run["status"],
+        "stage": run["stage"],
+        "iterations": sum(s["attempts"] for s in stages.values()),
+        "gate_passes": sum(1 for s in stages.values() if s["ok"]),
+        "stages": stages,
+    }
+
+
+@router.get("/runs/{run_id}/stats")
+async def run_stats(run_id: str) -> dict:
+    store, _runner, _broker = await _deps()
+    run = await store.get(run_id)
+    if run is None:
+        raise HTTPException(status_code=404, detail=f"运行不存在：{run_id}")
+    return aggregate_run_stats(run)
+
+
+# ---------------------------------------------------------------------------
+# 改稿脑审批端点（阶段 2 Task 8）：提案 → 审批 → 自动体检
+# 落稿唯一入口是 apply（先落库、script 再重跑真门、门不过回滚）——
+# agent 工具环里没有 apply，模型永远写不了产物。
+# ---------------------------------------------------------------------------
+
+class ApplyEditBody(BaseModel):
+    edit_id: str
+
+
+class RejectEditBody(BaseModel):
+    edit_id: str
+
+
+@router.get("/projects/{canvas}/editor/pending")
+async def list_editor_pending(canvas: str) -> dict:
+    await _deps()
+    return {"edits": pipeline_editor.list_edits(canvas)}
+
+
+@router.post("/projects/{canvas}/editor/apply")
+async def apply_editor_edit(canvas: str, body: ApplyEditBody):
+    store, _runner, _broker = await _deps()
+    try:
+        result = await pipeline_editor.apply_pending_edit(store.db, canvas, body.edit_id)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    if not result.get("ok") and result.get("message"):
+        # 结构非法（import 拒收、未落库）走管线 422 契约 {message, findings}；
+        # 门不过已回滚的结果是"体检如实执行"的 200（ok=false + rolled_back=true），
+        # 前端据此渲染「已回滚」而不是把它当请求错误。
+        return JSONResponse(status_code=422, content=result)
+    return result
+
+
+@router.post("/projects/{canvas}/editor/reject")
+async def reject_editor_edit(canvas: str, body: RejectEditBody) -> dict:
+    await _deps()
+    try:
+        edit = pipeline_editor.reject(canvas, body.edit_id)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    return {"ok": True, "edit_id": edit["edit_id"], "status": edit["status"]}

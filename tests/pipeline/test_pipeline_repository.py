@@ -98,9 +98,11 @@ def test_save_get_roundtrip_preserves_jsonb(pipeline_test_database):
         assert isinstance(saved["updated_at"], float) and saved["updated_at"] > 0
 
         row = await get(database, "proj-1", "outline")
+        # Task 8 起 get() 带出 source_run_id（改稿脑回滚要按旧 provenance 原样写回）
         assert row == {
             "content": SAMPLE_OUTLINE,
             "schema_version": "",
+            "source_run_id": "",
             "updated_at": saved["updated_at"],
         }
 

@@ -786,3 +786,38 @@ export async function sendRunFeedback(text) {
   if (!trimmed) throw new Error("意见内容不能为空");
   return postJSON(`/api/pipeline/runs/${studio.run.id}/feedback`, { text: trimmed });
 }
+
+/** 单次运行的权威统计（阶段 2 Task 8 运行详情抽屉）：{iterations, gate_passes, stages}。
+ * 服务端从 pipeline_runs.stage_status（StageResult 账本）聚合，与推进记账同源。 */
+export async function fetchRunStats(runId) {
+  return getJSON(`/api/pipeline/runs/${runId}/stats`);
+}
+
+/* ── 改稿脑（阶段 2 Task 8）：提案 → 审批 → 自动体检 ─────────────────
+ * 服务端契约（server/pipeline_runs.py + core/pipeline_editor.py）：
+ * - GET  /api/pipeline/projects/{canvas}/editor/pending → {edits: [{edit_id,
+ *   artifact_type, summary, status: pending|applying|applied|rejected|failed|expired,
+ *   proposed_at, findings, preview, content_chars}]}
+ * - POST …/editor/apply  {edit_id} → 落稿 + script 自动重跑质量门；422 = 门不过已回滚
+ * - POST …/editor/reject {edit_id} → 驳回，产物不动
+ * 应用成功后强制重拉产物缓存（剧本页/制片台面板立刻看到新内容）。
+ */
+export async function fetchEditorProposals() {
+  return getJSON(`/api/pipeline/projects/${encodeURIComponent(studio.canvas)}/editor/pending`);
+}
+
+export async function applyEditorProposal(editId) {
+  const data = await postJSON(
+    `/api/pipeline/projects/${encodeURIComponent(studio.canvas)}/editor/apply`,
+    { edit_id: editId },
+  );
+  await loadPipeline(true);
+  return data;
+}
+
+export async function rejectEditorProposal(editId) {
+  return postJSON(
+    `/api/pipeline/projects/${encodeURIComponent(studio.canvas)}/editor/reject`,
+    { edit_id: editId },
+  );
+}

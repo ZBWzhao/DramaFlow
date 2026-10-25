@@ -15,6 +15,7 @@ import { errorText, getJSON } from "../api.js";
 import { hasPipelineScript, importScript, loadAll, loadAssets, loadPipeline, loadScript, loadSegments, pollProduceJob, startProduce, studio, syncPipelineAssets } from "../studio/studioStore.js";
 import CastPanel from "./pipeline/CastPanel.vue";
 import ArtPanel from "./pipeline/ArtPanel.vue";
+import EditorProposals from "./pipeline/EditorProposals.vue";
 import PipelineOutlinePanel from "./script/PipelineOutlinePanel.vue";
 
 const route = useRoute();
@@ -74,6 +75,31 @@ const producing = computed(() => ["queued", "running"].includes(studio.produceJo
 
 /* 管线大纲 tab 开关：导入了 outline 产物才出现，画布老项目零变化 */
 const hasPipelineOutline = computed(() => Boolean(studio.pipeline?.detail?.outline));
+
+/* 开始制作按钮（阶段 2 Task 8）：有画布剧本走原 produce；管线-only 项目（画布
+ * 无剧本、但管线大纲/投产包已在库）按钮换成「去制片台」——分镜投产包已在库，
+ * 制作入口从制片台进。两者皆无 → 按钮置灰。 */
+const pipelineOutlineReady = computed(() => Boolean(studio.pipeline?.artifacts?.outline));
+const pipelineOnly = computed(() => !script.value?.script && pipelineOutlineReady.value);
+function onProduceClick() {
+  if (pipelineOnly.value) {
+    router.push(`/project/${route.params.name}/pipeline`);
+    return;
+  }
+  produceOpen.value = true;
+}
+
+/* 停靠助手语义（阶段 2 Task 8）：管线剧本在手 → 改稿脑（只读 + 提案，落稿过
+ * 审批卡）；否则维持剧本页只读问答。提案卡随助手工具事件刷新（pulse 自增）。 */
+const assistantMode = computed(() => (usePipelineScript.value ? "pipeline_editor" : "script_qa"));
+const assistantChips = computed(() => (assistantMode.value === "pipeline_editor"
+  ? ["把第一集的节奏改紧凑一点", "给大纲第一集加一个更强的钩子", "检查角色卡是否缺人", "总结当前有哪些待审批提案"]
+  : ["概括本剧的故事梗概", "细化林小满的人物小传", "把世界观改得更黑暗", "分析本集对白节奏"]));
+const editorPulse = ref(0);
+function onAssistantChanged() {
+  if (assistantMode.value === "pipeline_editor") editorPulse.value += 1;
+  refresh();
+}
 
 /* 角色设定 / 美术设定（Task 7 换源）：内容 = characters / art 产物详情。
  * 缺产物 → null，面板位置给空态 + 同步按钮置灰；同步按钮把产物经
@@ -498,8 +524,12 @@ onMounted(refresh);
         </template>
         <template v-else>
           <button class="btn sm" @click="startEdit">编辑剧本</button>
-          <button class="btn sm" :disabled="busy || producing || !script?.script" @click="produceOpen = true">
-            {{ producing ? (producePct == null ? "Agent 制作中…" : `Agent 制作中… ${producePct}%`) : "开始制作" }}
+          <button
+            class="btn sm"
+            :disabled="busy || producing || (!script?.script && !pipelineOutlineReady)"
+            @click="onProduceClick"
+          >
+            {{ producing ? (producePct == null ? "Agent 制作中…" : `Agent 制作中… ${producePct}%`) : (pipelineOnly ? "去制片台" : "开始制作") }}
           </button>
           <span v-if="notice" class="notice">{{ notice }}</span>
           <span style="flex: 1"></span>
@@ -511,16 +541,19 @@ onMounted(refresh);
     <!-- 列宽拖拽把手（右） -->
     <span class="drag-col" aria-hidden="true" @pointerdown.prevent="startColDrag('right')"></span>
 
-    <!-- ── 右：停靠 AI ── -->
-    <AiPanel
-      ref="aiPanel"
-      class="dock"
-      mode="dock"
-      assistant-mode="script_qa"
-      :canvas="String(route.params.name)"
-      :chips="['概括本剧的故事梗概', '细化林小满的人物小传', '把世界观改得更黑暗', '分析本集对白节奏']"
-      @canvas-changed="refresh"
-    />
+    <!-- ── 右：停靠 AI（管线剧本项目 = 改稿脑 + 提案审批卡）── -->
+    <div class="dock">
+      <EditorProposals v-if="assistantMode === 'pipeline_editor'" class="proposals" :pulse="editorPulse" />
+      <AiPanel
+        ref="aiPanel"
+        class="dock-panel"
+        mode="dock"
+        :assistant-mode="assistantMode"
+        :canvas="String(route.params.name)"
+        :chips="assistantChips"
+        @canvas-changed="onAssistantChanged"
+      />
+    </div>
 
     <!-- ── 开始制作确认 ── -->
     <div v-if="produceOpen" class="mask" @click.self="produceOpen = false">
@@ -643,8 +676,10 @@ onMounted(refresh);
 .btn.sm { padding: 6px 14px; font-size: var(--fs-13); }
 .btn:disabled { opacity: .5; pointer-events: none; }
 
-/* AI 停靠栏（AiPanel 自带内部样式，这里只定格子位置） */
-.dock { border-left: 1px solid var(--line); min-height: 0; }
+/* AI 停靠栏（AiPanel 自带内部样式，这里只定格子位置；改稿脑项目上方是提案审批卡） */
+.dock { border-left: 1px solid var(--line); min-height: 0; display: flex; flex-direction: column; }
+.dock-panel { flex: 1; min-height: 0; }
+.proposals { flex: none; max-height: 45%; overflow-y: auto; }
 
 /* 制作确认弹窗 */
 .mask { position: fixed; inset: 0; background: rgba(5, 4, 3, .7); z-index: 50; display: grid; place-items: center; }

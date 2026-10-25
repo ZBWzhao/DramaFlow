@@ -162,7 +162,9 @@ class ChatRequest(BaseModel):
     # 用户切换的对话模型（"" = 服务端默认，如 deepseek-chat；deepseek-reasoner = 深度思考）
     llm_model: str = ""
     # 剧本页只读问答：script_qa 时零工具 + 项目概要提示块；默认 canvas 行为不变。
-    mode: Literal["canvas", "script_qa"] = "canvas"
+    # 改稿脑（阶段 2 Task 8）：pipeline_editor 不走本会话的 agent——分支直接进
+    # PipelineEditor 的工具环（只读 + 提案，落稿必须过审批端点）。
+    mode: Literal["canvas", "script_qa", "pipeline_editor"] = "canvas"
 
 
 class CancelRequest(BaseModel):
@@ -647,6 +649,55 @@ async def list_llm_models() -> dict[str, Any]:
     return {"default": default_model, "models": models}
 
 
+# ---------------------------------------------------------------------------
+# 改稿脑（阶段 2 Task 8）：mode="pipeline_editor" 的 NDJSON 聊天分支。
+# 仿 script_qa 的特殊分支思路，但不走 registry 会话/工具集——直接进
+# PipelineEditor 的工具环（read_artifact / propose_edit / finish，无 apply），
+# 落稿只有审批端点一个口。事件映射成 AiPanel 已认识的 NDJSON 形状。
+# ---------------------------------------------------------------------------
+_pipeline_editor: Any = None   # app.py 装配段注入（Postgres 后端才有）；测试可 monkeypatch
+
+
+def configure_pipeline_editor(editor: Any) -> None:
+    global _pipeline_editor
+    _pipeline_editor = editor
+
+
+def _pipeline_editor_chat(req: ChatRequest) -> StreamingResponse:
+    if _pipeline_editor is None:
+        raise HTTPException(status_code=503, detail="改稿脑需要 Postgres 后端（compose.postgres.yml）")
+    session_id = str(req.session_id or "")
+
+    async def gen():
+        # session 帧先发：AiPanel 的流消费者用它对齐会话 id
+        yield _line({"type": "session", "session_id": session_id})
+        try:
+            async for event in _pipeline_editor.chat_stream(req.canvas, session_id, req.prompt):
+                kind = event.get("type")
+                if kind == "tool_start":
+                    yield _line({"type": "tool_execution_start",
+                                 "tool_call_id": event.get("tool_call_id"),
+                                 "tool": event.get("name"),
+                                 "args": event.get("args") or {}})
+                elif kind == "tool_end":
+                    yield _line({"type": "tool_execution_end",
+                                 "tool_call_id": event.get("tool_call_id"),
+                                 "isError": not event.get("ok", True),
+                                 "result": event.get("result_tail") or "",
+                                 "duration_ms": event.get("ms") or 0})
+                elif kind == "assistant_text":
+                    yield _line({"type": "message_update", "delta": event.get("text") or ""})
+        except Exception as exc:  # noqa: BLE001  LLM/网络级失败对前端是可见错误帧
+            yield _line({"type": "error", "message": f"{type(exc).__name__}: {exc}"})
+        yield _line({"type": "done", "session_id": session_id, "status": "done"})
+
+    return StreamingResponse(
+        gen(),
+        media_type="application/x-ndjson",
+        headers={"X-Session-ID": session_id},
+    )
+
+
 async def _script_qa_block(canvas_name: str) -> str:
     """script_qa（剧本页只读问答）的系统提示附加块。
 
@@ -686,6 +737,11 @@ async def _script_qa_block(canvas_name: str) -> str:
 
 @app.post("/api/agent")
 async def chat(req: ChatRequest) -> StreamingResponse:
+    # 改稿脑分支（阶段 2 Task 8）：不走 registry 会话/工具集，直接进编辑器工具环；
+    # 后续 registry.bind_canvas / begin_persisted_run 均不适用（editor 的会话记忆
+    # 与 pending 提案都在 PipelineEditor/审批账本里，见 core/pipeline_editor.py）。
+    if req.mode == "pipeline_editor":
+        return _pipeline_editor_chat(req)
     try:
         live = registry.get_or_create(req.session_id)
     except ValueError as exc:
@@ -2793,6 +2849,16 @@ if _runs_db is not None:
     )
     pipeline_runs_api.configure(store=_runs_store, runner=_runs_runner, broker=_runs_broker)
 app.include_router(pipeline_runs_api.router)
+
+# ---------------------------------------------------------------------------
+# 改稿脑（阶段 2 Task 8）：与 runs 同源的 DB 句柄 + _RouterLLM；file 后端不装配，
+# mode="pipeline_editor" 返回 503。审批端点（apply/pending/reject）挂在
+# pipeline_runs 路由上，落稿与体检都在 core/pipeline_editor.apply_pending_edit。
+# ---------------------------------------------------------------------------
+from core.pipeline_editor import PipelineEditor  # noqa: E402
+
+if _runs_db is not None:
+    configure_pipeline_editor(PipelineEditor(_runs_db, llm=_RouterLLM()))
 
 # ---------------------------------------------------------------------------
 # 管线 → 资产库 同步桥（阶段 2 Task 7）：cast.json / art.json 入库，只增不改不删。

@@ -14,11 +14,11 @@
  * 与 CreateRunPanel 同口径（run.project_id === canvas）：A 项目的运行绝不驱动
  * B 项目页面上的面板状态。
  */
-import { computed, onMounted, ref } from "vue";
+import { computed, onMounted, ref, watch } from "vue";
 import { ElMessage } from "element-plus";
 import { useRoute } from "vue-router";
 import { errorText } from "../api.js";
-import { loadPipeline, retryRun, studio } from "../studio/studioStore.js";
+import { fetchRunStats, loadPipeline, retryRun, studio } from "../studio/studioStore.js";
 import CastPanel from "./pipeline/CastPanel.vue";
 import ArtPanel from "./pipeline/ArtPanel.vue";
 import StagingPanel from "./pipeline/StagingPanel.vue";
@@ -119,6 +119,33 @@ async function retryStage() {
   }
 }
 
+/* ── 运行详情抽屉（阶段 2 Task 8）：GET /runs/{id}/stats 的可视化 ──
+ * 数据是服务端从 pipeline_runs.stage_status（StageResult 权威账本）聚合的
+ * iterations / gate_passes / 逐阶段 attempts·gate_runs·ok，与推进记账同源。 */
+const statsOpen = ref(false);
+const statsLoading = ref(false);
+const statsError = ref("");
+const stats = ref(null);
+
+async function loadStats() {
+  if (!runActiveHere.value) return;
+  statsLoading.value = true;
+  statsError.value = "";
+  try {
+    stats.value = await fetchRunStats(run.value.id);
+  } catch (err) {
+    statsError.value = errorText(err);
+    stats.value = null;
+  } finally {
+    statsLoading.value = false;
+  }
+}
+watch(statsOpen, (open) => {
+  if (open) void loadStats();
+});
+const statStages = computed(() => Object.entries(stats.value?.stages || {}));
+const STATUS_TEXT = { running: "运行中", gated: "待确认", failed: "失败", done: "已完成", cancelled: "已取消" };
+
 onMounted(async () => {
   const name = String(route.params.name || "");
   if (name && studio.canvas !== name) studio.canvas = name;
@@ -132,6 +159,9 @@ onMounted(async () => {
       <div class="pv-head">
         管线产物
         <span class="sub">来自管线导入，只读 · 修订走重导入</span>
+        <button v-if="runActiveHere" class="btn stats" type="button" @click="statsOpen = true">
+          运行详情
+        </button>
       </div>
 
       <!-- 创作入口：无产物常驻（从小说开始），有产物只跟随本项目的活动 run -->
@@ -178,6 +208,39 @@ onMounted(async () => {
         <span v-if="!imported" class="tip">——在管线导入流程写入 characters / art / staging / storyboard 产物后这里会显示（需 Postgres 后端）</span>
       </div>
     </div>
+
+    <!-- 运行详情抽屉（Task 8）：单次运行的权威统计 -->
+    <el-drawer v-model="statsOpen" title="运行详情" size="440px">
+      <div class="stats">
+        <div v-if="statsLoading" class="s-tip">加载中…</div>
+        <template v-else-if="stats">
+          <div class="s-head num">
+            run {{ String(run.id).slice(0, 8) }} · {{ STATUS_TEXT[stats.status] || stats.status || "?" }}
+            <button class="btn stats refresh" type="button" :disabled="statsLoading" @click="loadStats">刷新</button>
+          </div>
+          <div class="s-totals">
+            <div class="s-total"><b class="num">{{ stats.iterations }}</b><span>总轮次（attempts）</span></div>
+            <div class="s-total"><b class="num">{{ stats.gate_passes }}</b><span>过门阶段数（gate_passes）</span></div>
+          </div>
+          <table class="s-table">
+            <thead>
+              <tr><th>阶段</th><th class="num">轮次</th><th class="num">门执行</th><th>结果</th></tr>
+            </thead>
+            <tbody>
+              <tr v-for="[stage, s] in statStages" :key="stage">
+                <td>{{ STAGE_LABELS[stage] || stage }}</td>
+                <td class="num">{{ s.attempts }}</td>
+                <td class="num">{{ s.gate_runs }}</td>
+                <td :class="s.ok ? 'ok' : 'bad'">{{ s.ok ? "通过并落库" : "未通过" }}</td>
+              </tr>
+            </tbody>
+          </table>
+          <p class="s-note">轮次/门执行来自执行器 StageResult 权威账本（stage_status），与推进记账同源；「门执行」含自检与重跑，不等于通过数。</p>
+        </template>
+        <div v-else-if="statsError" class="s-tip err">{{ statsError }}</div>
+        <div v-else class="s-tip">暂无数据</div>
+      </div>
+    </el-drawer>
   </div>
 </template>
 
@@ -185,8 +248,29 @@ onMounted(async () => {
 .pv { overflow-y: auto; flex: 1; height: 100%; }
 .pv, .pv * { box-sizing: border-box; }
 .pv-in { max-width: 980px; margin: 0 auto; padding: var(--sp-6) var(--sp-6) 96px; }
-.pv-head { font-family: var(--serif); font-size: var(--fs-20); font-weight: 600; padding-bottom: var(--sp-4); }
-.pv-head .sub { font-family: var(--sans); font-size: var(--fs-12); color: var(--text-3); font-weight: 400; margin-left: 12px; }
+.pv-head { display: flex; align-items: baseline; gap: 12px; font-family: var(--serif); font-size: var(--fs-20); font-weight: 600; padding-bottom: var(--sp-4); }
+.pv-head .sub { font-family: var(--sans); font-size: var(--fs-12); color: var(--text-3); font-weight: 400; }
+.btn.stats { margin-left: auto; align-self: center; padding: 4px 14px; font-size: var(--fs-12); border: 1px solid var(--line-2); border-radius: var(--r-1); background: none; color: var(--text-2); cursor: pointer; }
+.btn.stats:hover { color: var(--text); background: var(--card-2); }
+.btn.stats:disabled { opacity: .5; pointer-events: none; }
+
+/* 运行详情抽屉 */
+.stats { font-size: var(--fs-13); }
+.s-tip { color: var(--text-3); }
+.s-tip.err { color: var(--danger); }
+.s-head { display: flex; align-items: center; gap: 10px; color: var(--text-3); font-size: var(--fs-12); padding-bottom: var(--sp-3); }
+.btn.stats.refresh { margin-left: auto; border: none; background: none; }
+.s-totals { display: flex; gap: 12px; padding-bottom: var(--sp-3); }
+.s-total { flex: 1; border: 1px dashed var(--line-2); border-radius: var(--r-2); padding: 10px 12px; display: flex; flex-direction: column; gap: 2px; }
+.s-total b { font-size: var(--fs-20); font-family: var(--serif); }
+.s-total span { font-size: var(--fs-11); color: var(--text-3); }
+.s-table { width: 100%; border-collapse: collapse; }
+.s-table th, .s-table td { text-align: left; padding: 6px 8px; border-bottom: 1px solid var(--line); font-size: var(--fs-13); }
+.s-table th { color: var(--text-3); font-size: var(--fs-11); font-weight: 400; }
+.s-table td.num, .s-table th.num { text-align: right; }
+.s-table td.ok { color: var(--ok); }
+.s-table td.bad { color: var(--danger); }
+.s-note { margin-top: var(--sp-3); color: var(--text-3); font-size: var(--fs-11); line-height: 1.8; }
 
 .pv-tabs { display: flex; gap: var(--sp-1); border-bottom: 1px solid var(--line-2); }
 .pt {

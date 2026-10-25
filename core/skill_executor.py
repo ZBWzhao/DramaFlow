@@ -25,6 +25,7 @@ import argparse
 import asyncio
 import json
 import os
+import shutil
 import sys
 import tempfile
 from dataclasses import dataclass, field
@@ -409,6 +410,36 @@ async def _run_gate(spec: dict, workdir: Path) -> tuple[bool, str]:
     output = (stdout.decode("utf-8", errors="replace")
               + "\n" + stderr.decode("utf-8", errors="replace")).strip()
     return proc.returncode == 0, output
+
+
+async def run_gate_only(artifact_type: str, content: dict, upstreams: dict) -> tuple[bool, str]:
+    """模块级公开门入口（Task 8）：改稿脑 apply 的自动体检用。
+
+    与阶段执行器同一条真门（node 子进程）、同一条组装与落盘规则
+    （content 按产物注册表文件名落盘、upstreams 按 gate_needs/gate_files 落盘），
+    但只判不落——落库永远是调用方（审批端点）的事，本函数对库零写入。
+
+    artifact_type 从 STAGE_SPECS 反查阶段规格（六类创作产物各有一个 spec）；
+    upstreams 键 = gate_needs 的产物名（outline/cast/...），缺了的门自会报缺文件。
+    注意 gate_files（characters 的 book.txt←novel_text）依赖的小说原文不在产物库，
+    这里没有小说原文可给——该类门会跳过逐字引文对账（brief 只要求 script 体检，
+    characters 的体检需回填原文后另行放开）。
+    """
+    stage = next((s for s, spec in STAGE_SPECS.items() if spec["artifact"] == artifact_type), None)
+    if stage is None:
+        raise KeyError(f"未知产物类型：{artifact_type}（STAGE_SPECS 无对应阶段）")
+    spec = STAGE_SPECS[stage]
+    workdir = Path(tempfile.mkdtemp(prefix=f"gate-only-{artifact_type}-"))
+    try:
+        (workdir / pipeline_artifacts.get(artifact_type).filename).write_text(
+            json.dumps(content, ensure_ascii=False, indent=2), encoding="utf-8"
+        )
+        # _ToolBox 的构造副作用即 gate_needs/gate_files 落盘——与 run_stage 共用
+        # 这一段，保证「模型看到的」与「门对账的」是同一份事实（不另起灶）。
+        _ToolBox(spec, workdir, dict(upstreams), {"draft": {}})
+        return await _run_gate(spec, workdir)
+    finally:
+        shutil.rmtree(workdir, ignore_errors=True)
 
 
 # ---------------------------------------------------------------------------
