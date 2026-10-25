@@ -540,7 +540,7 @@ def art_to_look_rows(content: dict) -> list[dict]:
 - Consumes: Task 2 loop 骨架；`ChatRequest.mode`（app.py 既有 Literal）；`invocation_store` 账本。
 - Produces: `mode="pipeline_editor"`（带工具改稿，写入过审批）；`GET /api/pipeline/runs/{id}/stats → {"iterations": n, "gate_passes": n, "stages": {...}}`；验收测试全链。
 
-- [ ] **Step 1: 改稿脑核心**——`core/pipeline_editor.py` 自带工具环（复用 `skill_executor` 的 loop 与 LLMPort）：
+- [x] **Step 1: 改稿脑核心**（已落 `core/pipeline_editor.py`；`run_gate_only` 提升于 `core/skill_executor.py`；apply/pending/reject 端点在 `server/pipeline_runs.py`；TTL 600s）——`core/pipeline_editor.py` 自带工具环（复用 `skill_executor` 的 loop 与 LLMPort）：
 
 ```python
 EDITOR_TOOLS = ("read_artifact", "propose_edit", "finish")
@@ -551,10 +551,10 @@ EDITOR_TOOLS = ("read_artifact", "propose_edit", "finish")
 
 审批落稿端点（`server/pipeline_runs.py`）：`POST /api/pipeline/projects/{canvas}/editor/apply {edit_id}` → 校验 pending 存在 → `pipeline_repository.save(source_run_id="editor")` → 若 type==script 则对该产物重跑 10 道门（`skill_executor.run_gate_only(artifact_type, content, upstreams)`——Task 2 的 `_run_gate` 提升为模块级公开函数）→ 返回门结果；门不过则回滚（重写旧 content）并返回 findings。pending_edits 带 10 分钟 TTL。
 
-- [ ] **Step 2: ChatRequest 分支**——mode Literal 增 `"pipeline_editor"`；app.py 聊天分支仿 script_qa：不走 registry，改调 `pipeline_editor.chat(project_id, history)`（内部 loop 把工具结果续进 messages）；系统提示声明只读+提案边界。script_qa 既有字节锁定测试不动，新增 editor 分支测试：propose 产生 pending、未 apply 前产物不变、apply 后产物更新且门过、apply 门不过回滚。
-- [ ] **Step 3: produce 按钮**——`ScriptView.vue:454` 的 `:disabled` 改为 `busy || producing || (!script?.script && !pipelineOutlineReady)`；点击 handler：有 canvas 剧本走原 produce；否则 `router.push` 到本项目制片台（分镜投产包已在库，制作入口从制片台进）。按钮文案 pipeline-only 时显示「去制片台」。
-- [ ] **Step 4: 运行详情**——`GET /runs/{id}/stats`：从 invocation_store 按 `source_run_id`/run 标签聚合（读 `core/invocation_store.py` 选既有查询口径；若无聚合查询则按 run 标签过滤后内存聚合）：`{"iterations": ..., "gate_passes": ..., "stages": {stage: {"attempts": n, "ok": bool}}}`。PipelineView 加「运行详情」抽屉展示。
-- [ ] **Step 5: 端到端验收测试**——`tests/pipeline/test_phase2_acceptance.py`：
+- [x] **Step 2: ChatRequest 分支**（mode 三值；分支 `_pipeline_editor_chat` 不走 registry；script_qa 字节锁定测试未动；editor 测试 11 例见 tests/pipeline/test_pipeline_editor.py）——mode Literal 增 `"pipeline_editor"`；app.py 聊天分支仿 script_qa：不走 registry，改调 `pipeline_editor.chat(project_id, history)`（内部 loop 把工具结果续进 messages）；系统提示声明只读+提案边界。script_qa 既有字节锁定测试不动，新增 editor 分支测试：propose 产生 pending、未 apply 前产物不变、apply 后产物更新且门过、apply 门不过回滚。
+- [x] **Step 3: produce 按钮**（disabled 表达式按 brief 逐字；pipeline-only 路由到 /project/:name/pipeline；AiPanel assistant-mode 动态 script_qa↔pipeline_editor；提案审批卡 EditorProposals.vue）——`ScriptView.vue:454` 的 `:disabled` 改为 `busy || producing || (!script?.script && !pipelineOutlineReady)`；点击 handler：有 canvas 剧本走原 produce；否则 `router.push` 到本项目制片台（分镜投产包已在库，制作入口从制片台进）。按钮文案 pipeline-only 时显示「去制片台」。
+- [x] **Step 4: 运行详情**（括注：实现时校正——invocation_store 无管线阶段数据，stats 改从 pipeline_runs.stage_status 权威账本聚合，即 StageResult.iterations/gate_log 同源，符合 runner 计数裁定；PipelineView 运行详情抽屉）——`GET /runs/{id}/stats`：从 invocation_store 按 `source_run_id`/run 标签聚合（读 `core/invocation_store.py` 选既有查询口径；若无聚合查询则按 run 标签过滤后内存聚合）：`{"iterations": ..., "gate_passes": ..., "stages": {stage: {"attempts": n, "ok": bool}}}`。PipelineView 加「运行详情」抽屉展示。
+- [x] **Step 5: 端到端验收测试**（tests/pipeline/test_phase2_acceptance.py：全链 gated→approve→done+stats、staging 五轮挂无脏数据、改稿脑三拍含门不过回滚；仓库无 pytest-asyncio，按仓库惯例 asyncio.run 直调端点生成器，未用 client.stream）——`tests/pipeline/test_phase2_acceptance.py`：
 
 ```python
 @pytest.mark.asyncio
@@ -581,8 +581,8 @@ async def test_stage_failure_leaves_no_dirty_data(fake_db, sample_novel):
         assert (await pipeline_repository.get(fake_db, "acc-2", t))["content"]  # 上游完好
 ```
 
-- [ ] **Step 6: 浏览器手工验收（记录进 spec 勾选括注）**——起服务（Postgres 后端），真实小说粘贴→大纲→确认→全链，四层面板点亮、改稿脑提案→审批→体检一轮、失败重试一次。
-- [ ] **Step 7: 全绿 + 提交**——`git commit -m "feat: pipeline editor agent, produce wiring, run stats, phase-2 acceptance"`
+- [ ] **Step 6: 浏览器手工验收（记录进 spec 勾选括注）**（自动化代理无法起真服务+真 LLM 手工浏览器过一轮——留给用户；测试级等价覆盖与操作步骤清单见 .superpowers/sdd/2026-10-25-phase2-gated-agent/task-8-report.md）——起服务（Postgres 后端），真实小说粘贴→大纲→确认→全链，四层面板点亮、改稿脑提案→审批→体检一轮、失败重试一次。
+- [x] **Step 7: 全绿 + 提交**（260 passed + npm run build 零错误；见 task-8-report.md）——`git commit -m "feat: pipeline editor agent, produce wiring, run stats, phase-2 acceptance"`
 
 ---
 

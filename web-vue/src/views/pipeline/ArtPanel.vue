@@ -8,7 +8,12 @@
  */
 import { computed } from "vue";
 
-const props = defineProps({ content: { type: Object, default: null } });
+const props = defineProps({
+  content: { type: Object, default: null },
+  // 面板状态（Task 6，容器 PipelineView 传入）：idle/running/done/failed；
+  // "" = 无活动 run 的纯只读现状。running 时内容是上一版，降透明度示意。
+  state: { type: String, default: "" },
+});
 
 const c = computed(() => (props.content && typeof props.content === "object" ? props.content : {}));
 const scenes = computed(() => (Array.isArray(c.value.scenes) ? c.value.scenes : []));
@@ -27,7 +32,7 @@ const anchorTitle = (a) =>
 </script>
 
 <template>
-  <div class="ap">
+  <div class="ap" :class="{ stale: state === 'running' }">
     <!-- ── 场景设定 ── -->
     <section class="ap-card">
       <div class="ap-cap">场景设定<span class="cnt num">{{ scenes.length }} 处（主场景 {{ scenes.filter((s) => s?.primary).length }}）</span></div>
@@ -76,6 +81,8 @@ const anchorTitle = (a) =>
 </template>
 
 <style scoped>
+/* running：显示的是上一版产物，压暗示意（状态条在容器上） */
+.stale { opacity: .55; transition: opacity .2s; }
 .ap { display: flex; flex-direction: column; gap: var(--sp-3); margin-top: var(--sp-3); }
 .ap-card { border: 1px solid var(--line); border-radius: var(--r-2); background: var(--card); padding: var(--sp-3) var(--sp-4); }
 .ap-cap { font-family: var(--serif); font-size: var(--fs-14); margin-bottom: var(--sp-2); display: flex; align-items: baseline; gap: 8px; }

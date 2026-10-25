@@ -1196,6 +1196,54 @@ class SyncRequest(BaseModel):
     canvas: str
 
 
+def _apply_asset_sync_plan(graph: Canvas, plan: dict[str, Any]) -> dict[str, int]:
+    """merge 计划的执行半区：create_assets / add_looks / fill_fields 落到画布资产节点。
+
+    从 sync_asset_tables 的 mutate 闭包里提出：草稿表同步与管线→资产库桥
+    （server/pipeline_assets.py）共用这一个落库入口——资产库的写路径只有一条，
+    桥不是第二条。meta.asset_tables 的同步簿记（synced_at/synced_state）属于
+    草稿表语义，留在调用方。
+    """
+    created_assets = created_looks = 0
+    for item in plan["create_assets"]:
+        data: dict[str, Any] = {
+            "kind": item["kind"],
+            "name": item["name"],
+            "description": str(item.get("description") or ""),
+        }
+        if item.get("bio"):
+            data["bio"] = str(item["bio"])
+        node_new = graph.add_node("asset", item["name"], data=data)
+        looks = []
+        for index, look in enumerate(item.get("looks", []), 1):
+            looks.append({"id": f"look_{node_new.id}_{index}", "name": look["name"], "prompt": ""})
+            created_looks += 1
+        if looks:
+            # add_node 对 data 是浅拷贝：回写必须落在返回的 node 上，不能写回局部 dict
+            node_new.data["looks"] = looks
+            node_new.data["active_look_id"] = looks[0]["id"]
+        created_assets += 1
+    for item in plan["add_looks"]:
+        target = graph.nodes.get(item["node_id"])
+        if target is None or target.type != "asset":
+            continue
+        looks = target.data.get("looks")
+        if not isinstance(looks, list):
+            looks = []
+        looks.append({"id": f"look_{target.id}_{len(looks) + 1}", "name": item["look"]["name"], "prompt": ""})
+        target.data["looks"] = looks
+        created_looks += 1
+    for item in plan["fill_fields"]:
+        target = graph.nodes.get(item["node_id"])
+        if target is None or target.type != "asset":
+            continue
+        if item["field"] == "bio" and not str(target.data.get("bio") or "").strip():
+            target.data["bio"] = str(item["value"])
+        elif item["field"] == "description" and not str(target.data.get("description") or "").strip():
+            target.data["description"] = str(item["value"])
+    return {"created_assets": created_assets, "created_looks": created_looks}
+
+
 @router.post("/asset-tables/sync")
 async def sync_asset_tables(body: SyncRequest) -> dict[str, Any]:
     """表 → 库：幂等合并（只增不改不删），报告可见。"""
@@ -1215,51 +1263,13 @@ async def sync_asset_tables(body: SyncRequest) -> dict[str, Any]:
     }
 
     def mutate(graph: Canvas) -> bool:
-        created_assets = created_looks = 0
-        for item in plan["create_assets"]:
-            data: dict[str, Any] = {
-                "kind": item["kind"],
-                "name": item["name"],
-                "description": str(item.get("description") or ""),
-            }
-            if item.get("bio"):
-                data["bio"] = str(item["bio"])
-            node_new = graph.add_node("asset", item["name"], data=data)
-            looks = []
-            for index, look in enumerate(item.get("looks", []), 1):
-                looks.append({"id": f"look_{node_new.id}_{index}", "name": look["name"], "prompt": ""})
-                created_looks += 1
-            if looks:
-                # add_node 对 data 是浅拷贝：回写必须落在返回的 node 上，不能写回局部 dict
-                node_new.data["looks"] = looks
-                node_new.data["active_look_id"] = looks[0]["id"]
-            created_assets += 1
-        for item in plan["add_looks"]:
-            target = graph.nodes.get(item["node_id"])
-            if target is None or target.type != "asset":
-                continue
-            looks = target.data.get("looks")
-            if not isinstance(looks, list):
-                looks = []
-            looks.append({"id": f"look_{target.id}_{len(looks) + 1}", "name": item["look"]["name"], "prompt": ""})
-            target.data["looks"] = looks
-            created_looks += 1
-        for item in plan["fill_fields"]:
-            target = graph.nodes.get(item["node_id"])
-            if target is None or target.type != "asset":
-                continue
-            if item["field"] == "bio" and not str(target.data.get("bio") or "").strip():
-                target.data["bio"] = str(item["value"])
-            elif item["field"] == "description" and not str(target.data.get("description") or "").strip():
-                target.data["description"] = str(item["value"])
+        report.update(_apply_asset_sync_plan(graph, plan))
         meta = dict(graph.meta or {})
         tables_meta = dict(meta.get("asset_tables") or {})
         tables_meta["synced_at"] = report["synced_at"]
         tables_meta["synced_state"] = report["synced_state"]
         meta["asset_tables"] = AssetTables(**tables_meta).model_dump()
         graph.meta = meta
-        report["created_assets"] = created_assets
-        report["created_looks"] = created_looks
         return True
 
     await mutate_canvas_with_retry(_registry.canvas_repository, body.canvas, mutate)

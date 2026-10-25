@@ -382,3 +382,32 @@ def test_reimport_batch_replaces_local_edit_of_imported_episode(api_client):
     assert "上游批次改写：新的冷开场动作。" in by_ep[1]["text"]  # fresh upstream content
     assert by_ep[2]["text"] == "本地改稿二"  # 批次外的集：本地编辑保留
     assert by_ep[2]["edited"] is True
+
+
+# ---------------------------------------------------------------------------
+# 阶段 2 Task 1：删除路由 DELETE /projects/{canvas}/artifacts/{type}
+# ---------------------------------------------------------------------------
+
+
+def test_delete_artifact_roundtrip(api_client):
+    """导入 → 删除 → 列表归空（repo 层 delete 阶段 0 已有，本路由消费）。"""
+    client = api_client.client
+    post = client.post(f"{BASE}/outline", json={"content": _fixture("outline.json")})
+    assert post.status_code == 200
+    dele = client.delete(f"{BASE}/outline")
+    assert dele.status_code == 200, dele.text
+    assert dele.json() == {"message": "已删除 proj-api/outline"}
+    got = client.get(BASE)
+    assert got.json()["artifacts"] == []
+
+
+def test_delete_unknown_artifact_type_404(api_client):
+    client = api_client.client
+    assert client.delete(f"{BASE}/nonexistent").status_code == 404
+
+
+def test_delete_without_database_503(api_client_no_db):
+    client = api_client_no_db.client
+    response = client.delete(f"{BASE}/outline")
+    assert response.status_code == 503
+    assert response.json() == {"message": NO_DB_MESSAGE}

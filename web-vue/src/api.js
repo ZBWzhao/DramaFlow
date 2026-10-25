@@ -31,6 +31,11 @@ async function toError(res) {
   } catch {
     /* 非 JSON 响应就用状态行 */
   }
+  // 管线 API 的错误/提示契约是顶层 {message, findings?}（不经 detail 包裹）
+  if (payload && typeof payload === "object" && payload.message) {
+    const findings = Array.isArray(payload.findings) ? `（${payload.findings.length} 条 findings）` : "";
+    return new Error(`${payload.message}${findings}`);
+  }
   const error = new Error(detailText(detail) || detail);
   error.status = res.status;
   error.code = payload?.code || "";

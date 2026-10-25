@@ -1,4 +1,4 @@
-"""管线产物导入·查询·导出路由（/api/pipeline）。
+"""管线产物导入·查询·导出·删除路由（/api/pipeline）。
 
 路由契约（阶段 1 Task 3 dispatch 定稿，Task 4-8 依赖）：
 - POST /projects/{canvas}/artifacts/{artifact_type}  导入：prepare 合并整形后落库
@@ -7,17 +7,18 @@
                                                      script 另附逐集正文视图 episodes[]）
 - GET  /projects/{canvas}/artifacts/{type}/export    附件导出（文件名 = 注册表 filename）
 - PUT  /projects/{canvas}/artifacts/script/episodes/{no}  集级编辑落库（edited_text）
+- DELETE /projects/{canvas}/artifacts/{type}         删除单行产物（阶段 2 Task 1）
 
 schema_version 的唯一写者在本路由：请求体显式给出（非空串）优先，否则从产出技能
-pipeline_skills/<skill>/SKILL.md frontmatter 的 `version:` 行推导（进程内缓存）；
+pipeline_skills/<skill>/SKILL.md frontmatter 的 `version:` 行推导（进程内缓存，
+解析函数在 core.pipeline_artifacts.resolve_schema_version）；
 两者都拿不到记空串并附告警 finding。DB 句柄取自 registry.canvas_repository
 （Postgres 后端才有 `.database`）；file 后端无 DB，路由一律 503。
 """
 
 from __future__ import annotations
 
-import re
-from pathlib import Path
+import asyncio
 from typing import Any
 
 from fastapi import APIRouter
@@ -25,7 +26,7 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
 from core import pipeline_artifacts, pipeline_import, pipeline_repository
-from core.pipeline_artifacts import ArtifactType
+from core.pipeline_artifacts import resolve_schema_version
 from core.pipeline_import import (
     SCRIPT_EPISODE_FIELD,
     SCRIPT_EPISODES_FIELD,
@@ -35,19 +36,14 @@ from core.pipeline_import import (
 
 router = APIRouter(prefix="/api/pipeline", tags=["pipeline"])
 
+# 兼容别名：阶段 1 命名保留（测试与潜在调用方按 _resolve_schema_version 引用不破）。
+_resolve_schema_version = resolve_schema_version
+
 # 由 server/app.py 在装配阶段注入，避免反向 import app 造成循环依赖
 # （照 server/studio.py 的 configure 模式）。PostgresDatabase | None。
 _database: Any = None
 
 NO_DB_MESSAGE = "pipeline artifacts 需要 Postgres（compose.postgres.yml）"
-
-_SKILLS_ROOT = Path(__file__).resolve().parent.parent / "pipeline_skills"
-# frontmatter version 进程内缓存：技能文件运行期不变，含不可读的空串结果也缓存，
-# 避免每次导入重复读盘。清空即失效（仅测试需要）。
-_VERSION_CACHE: dict[str, str] = {}
-
-# version: 可在 frontmatter 顶层，也可缩进在 metadata: 下，故匹配任意缩进。
-_VERSION_LINE = re.compile(r"^\s*version:\s*(\S+)\s*$", re.MULTILINE)
 
 
 class ImportBody(BaseModel):
@@ -68,17 +64,47 @@ def _database_from_registry(registry: Any) -> Any:
     return getattr(repo, "database", None)
 
 
+# 建池锁 + 它所属的事件循环：asyncio.Lock 绑定首个使用它的事件循环，而
+# TestClient 每个用例都是新循环，跨循环复用旧锁会 RuntimeError。锁本就只
+# 护栏同一循环内的并发首请求，故按运行中的循环重建即可。
+_pool_lock: asyncio.Lock | None = None
+_pool_lock_loop: asyncio.AbstractEventLoop | None = None
+
+
+def _pool_lock_for_loop() -> asyncio.Lock:
+    global _pool_lock, _pool_lock_loop
+    loop = asyncio.get_running_loop()
+    if _pool_lock is None or _pool_lock_loop is not loop:
+        _pool_lock = asyncio.Lock()
+        _pool_lock_loop = loop
+    return _pool_lock
+
+
+async def startup() -> None:
+    """lifespan 调用：服务启动时建好管线数据库池（幂等）。
+
+    惰性建池仍保留为兜底，但正常路径不再有"首个请求承担建池"的竞态窗口。
+    """
+    await ensure_started()
+
+
 async def ensure_started() -> bool:
     """惰性启动共享池；无 DB 配置或启动失败返回 False。
 
-    asyncpg pool 绑定事件循环，而本模块在 import 阶段装配、首个请求才真正建池，
-    此时已在请求所在的服务循环里，TestClient 场景同样成立。
+    asyncpg pool 绑定事件循环，而本模块在 import 阶段装配，TestClient 场景下
+    每个用例都是新循环，故建池必须发生在请求所在的服务循环里。正常路径是
+    lifespan startup 已建好（pool 就位直接返回）；兜底路径用模块级
+    asyncio.Lock 串行化并在锁内双重检查，两个并发首请求不会都见 pool is None
+    而重复 start（PostgresDatabase._users 会多计，导致收池时不归零）。
     """
     db = _database
     if db is None:
         return False
-    if db.pool is None:
-        await db.start()
+    if db.pool is not None:
+        return True
+    async with _pool_lock_for_loop():
+        if db.pool is None:
+            await db.start()
     return True
 
 
@@ -103,31 +129,6 @@ def _missing(artifact_type: str) -> JSONResponse:
     return JSONResponse(
         status_code=404, content={"message": f"产物不存在：{artifact_type}"}
     )
-
-
-def _resolve_schema_version(art: ArtifactType, requested: str) -> tuple[str, list[str]]:
-    """显式非空优先；否则 frontmatter `version:` 推导；不可读 → ("", 告警 finding)。"""
-    explicit = (requested or "").strip()
-    if explicit:
-        return explicit, []
-    version = _VERSION_CACHE.get(art.skill)
-    if version is None:
-        version = ""
-        try:
-            text = (_SKILLS_ROOT / art.skill / "SKILL.md").read_text(encoding="utf-8")
-            frontmatter = text.split("---", 2)[1] if text.startswith("---") else ""
-            match = _VERSION_LINE.search(frontmatter)
-            if match:
-                version = match.group(1)
-        except (OSError, IndexError):
-            pass
-        _VERSION_CACHE[art.skill] = version
-    if version:
-        return version, []
-    return "", [
-        f"{art.name}: 未能从技能 {art.skill}/SKILL.md frontmatter 读取 version，"
-        "schema_version 记为空串"
-    ]
 
 
 @router.post("/projects/{canvas}/artifacts/{artifact_type}")
@@ -307,3 +308,17 @@ async def export_artifact(canvas: str, artifact_type: str):
         media_type="application/json",
         headers={"Content-Disposition": f"attachment; filename={art.filename}"},
     )
+
+
+@router.delete("/projects/{canvas}/artifacts/{artifact_type}")
+async def delete_artifact(canvas: str, artifact_type: str):
+    """删除单行产物（阶段 2 Task 1）：管线重跑前清槽用，repo 层删不到也返回成功。"""
+    try:
+        art = pipeline_artifacts.get(artifact_type)  # 未知类型沿用 _unknown_type 404
+    except KeyError:
+        return _unknown_type(artifact_type)
+    db = await _db_or_none()
+    if db is None:
+        return _no_db()
+    await pipeline_repository.delete(db, canvas, art.name)
+    return {"message": f"已删除 {canvas}/{art.name}"}
