@@ -29,9 +29,17 @@ python -m core.skill_executor characters <小说.txt> --project smoke1 --provide
 
 - 写入 `pipeline_test` 库，不碰真实项目数据；
 - `--provider auto`：TF_ROUTER 配额不足自动回退 DeepSeek 直连；
-- `--max-iterations` 默认 20（真模型大纲实测 12 轮过门，16 勉强）；
-- **判断标准**：每阶段产物 JSON 落库 + 门报告全过 + gate_log 里能看到工具调用轮数。单阶段几毛钱，六个阶段全冒烟 ≈ 2-3 元级。
+- `--max-iterations` 默认 20；
 - 已知风险（终审标记）：真模型在 chain_repair 两轮纪律下能否一轮产全字段+finish，只有冒烟能证明；art 产物缺 `dynasty` 字段是否影响下游，冒烟时顺带看一眼。
+
+**2026-10-25 实测结果**（样例《最后一单》2764 字，deepseek-chat，余额耗约 ¥2）：
+
+| 阶段 | 结果 | 证据 |
+|---|---|---|
+| outline | ✅ 过门落库 | 18 轮 / 7 次门运行；含一次工具误用（data 传成 JSON 字符串）被工具报错纠正的完整自我修正闭环。**组装预算因此从 16 提到 20**（41d6097） |
+| script | ❌ 预算内未收敛，**未落库（无脏数据红线保持）** | 20 轮 / 18 次门运行；时长门持续不过：10 集目标 120s，模型持续欠时长（最多 -27.6s/集）。真模型的**时长欠移偏差**是真实缺陷，非 harness 问题 |
+
+script 阶段收敛策略进快速跟进（见第四节第 8 条）。outline 冒烟证明：门即环境反馈的自我修正 + 失败安全（不过门不落库）在真模型上成立——这是作品集的核心叙事，两条都已有一手证据。
 
 ### 第 3 层：真实全链（真正的"全自动出片"验收，成本可控）
 
@@ -71,6 +79,7 @@ python -m core.skill_executor characters <小说.txt> --project smoke1 --provide
 5. 四卡退役半程：UI 已切管线产物，冻结区 chat 工具仍写 canvas meta（留待清扫）；studioStore 死导出
 6. 同项目换小说重跑保留旧剧本/角色卡（merge 语义正确、UX 未定；DELETE 产物接口是手动出口）
 7. 小项：retry 按钮无 in-flight 防抖、非 script apply 无体检门（可加 UI 提示）、`_sessions` 无上限、桥接 art 行文本未截断、重复 import 期 `_RouterLLM()` 实例
+8. **script 时长门真模型收敛策略**（2026-10-25 冒烟实证：deepseek-chat 20 轮未收敛，10 集目标 120s 持续欠 1.3~27.6s）。候选方向：a) 修复轮指令只针对最欠的集做定向加长而非全量重写；b) SKILL.md 补"动作行也算时长"的加长技巧提示；c) outline 阶段加"目标秒数 × 集数 ≤ 源材料可支撑量"的可行性预警；d) 时长门对最后 1-2 轮的边际收敛给部分通过（±15% 放宽到 ±20% 需产品决策）
 
 ## 五、浏览器验证记录（2026-10-25，headless Edge + CDP）
 
