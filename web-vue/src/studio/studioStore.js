@@ -46,6 +46,9 @@ export const studio = reactive({
   // 画布老项目没有导入产物 → 列表为空，剧本页零变化。canvas = 缓存归属的项目，
   // loadPipeline 换项目先清缓存（SPA 内不重建 store，防串项目）。
   pipeline: { loaded: false, canvas: "", artifacts: {}, detail: {} },
+
+  // 管线运行（阶段 2 Task 4）：id 为空 = 没有活动运行。状态机与 SSE 消费见文件尾「管线运行」节。
+  run: { id: "", status: "", stage: "", stages: {}, events: [], link: "" },
 });
 
 const qs = () => {
@@ -585,12 +588,12 @@ export async function cancelJob(jobId) {
  * A 的产物摆在 B 的名字下）；空列表/读取失败不落锁——导入后回到本页、或
  * 下次进页面，都能重新拉到。
  */
-export async function loadPipeline() {
+export async function loadPipeline(force = false) {
   if (!studio.canvas) return;
   if (studio.pipeline.canvas !== studio.canvas) {
     studio.pipeline = { loaded: false, canvas: studio.canvas, artifacts: {}, detail: {} };
   }
-  if (studio.pipeline.loaded) return;
+  if (studio.pipeline.loaded && !force) return;
   studio.pipeline.loaded = true;
   try {
     const base = `/api/pipeline/projects/${encodeURIComponent(studio.canvas)}/artifacts`;
@@ -636,4 +639,130 @@ export async function savePipelineEpisode(no, text) {
   );
   studio.pipeline.detail.script = data;
   return data;
+}
+
+/* ── 管线运行（阶段 2 Task 4）：粘贴小说 → SSE 直播 → 大纲确认门 ─────
+ * 服务端契约：server/pipeline_runs.py 六端点 + SSE。run.status 同 0006 CHECK：
+ * running / gated / failed / done / cancelled；run.id 为空 = 没有活动运行。
+ * events 存 SSE 原始帧：hello / stage / tool / tool_result / stage_gate /
+ * stage_done / gate（run 级确认门）/ failed / done / retry——注意执行器内部的
+ * gate/done 已被服务端重标为 stage_gate/stage_done，这里的 gate/done 只属于
+ * run 级语义。stages[stage] = {status, gate_ok, round} 是面板友好的阶段摘要。
+ * link 是 SSE 连接态：'' / connecting / open / reconnecting / lost。EventSource
+ * 断线自动重连，重连后的 hello 首帧带运行快照（broker 不回放历史），状态以
+ * 快照为准——approve/retry 重开流、或开流晚于 gated，都靠它追平，否则按钮
+ * 态会停在旧状态。
+ */
+let runStream = null; // 当前运行的 EventSource（模块级单例，不进 reactive）
+
+export async function startRun(projectId, novel) {
+  const data = await postJSON(`/api/pipeline/runs`, { project_id: projectId, novel_text: novel });
+  studio.run = {
+    id: data.run_id,
+    status: data.status || "running",
+    stage: data.stage || "",
+    stages: {},
+    events: [],
+    link: "connecting",
+  };
+  _openRunStream();
+  return data;
+}
+
+function _openRunStream() {
+  closeRunStream();
+  studio.run.link = "connecting";
+  const es = new EventSource(`/api/pipeline/runs/${studio.run.id}/events`);
+  es.onmessage = (e) => {
+    let msg;
+    try {
+      msg = JSON.parse(e.data);
+    } catch {
+      return; // 坏帧跳过，不断流
+    }
+    studio.run.link = "open";
+    studio.run.events.push(msg);
+    if (msg.type === "hello") {
+      // 快照同步：hello 的 {status, stage} 是晚连上/重连后的唯一事实来源
+      if (msg.status) studio.run.status = msg.status;
+      if (msg.stage) studio.run.stage = msg.stage;
+      if (msg.status === "done" || msg.status === "cancelled") {
+        // 终态运行的服务端流在 hello 后即收，客户端同步关闭；产物可能有新，强制重拉
+        void loadPipeline(true);
+        closeRunStream();
+      }
+      return;
+    }
+    if (msg.type === "stage") {
+      studio.run.stage = msg.stage;
+      studio.run.stages[msg.stage] = { ...studio.run.stages[msg.stage], status: msg.status };
+    }
+    if (msg.type === "stage_gate") {
+      // 阶段级质量门（含自检重跑），不是确认门——别把 gated 打开
+      const s = studio.run.stages[msg.stage] || (studio.run.stages[msg.stage] = {});
+      s.gate_ok = Boolean(msg.ok);
+      s.round = msg.round;
+    }
+    if (msg.type === "stage_done") {
+      const s = studio.run.stages[msg.stage] || (studio.run.stages[msg.stage] = {});
+      if (msg.ok) s.status = "done";
+    }
+    if (msg.type === "gate") {
+      // run 级确认门（红线）：停在 gated 等人工；大纲产物落库了，强制重拉供确认对话框展示
+      studio.run.status = "gated";
+      studio.run.stage = msg.stage;
+      void loadPipeline(true);
+    }
+    if (msg.type === "done") {
+      studio.run.status = "done";
+      void loadPipeline(true);
+      closeRunStream(); // 服务端已收流；不主动关会触发 onerror 重连
+    }
+    if (msg.type === "failed") {
+      studio.run.status = "failed";
+      if (msg.stage) {
+        studio.run.stage = msg.stage;
+        studio.run.stages[msg.stage] = { ...studio.run.stages[msg.stage], status: "failed" };
+      }
+      closeRunStream(); // failed 是终态事件，服务端同样收流
+    }
+  };
+  es.onerror = () => {
+    // 终态分支已主动 close，走到这里的多半是网络抖动：EventSource 自动重连，
+    // 成功后 hello 快照把状态追平。readyState=CLOSED 才是真断（服务不在了）。
+    studio.run.link = es.readyState === EventSource.CLOSED ? "lost" : "reconnecting";
+  };
+  runStream = es;
+}
+
+/** 关闭直播连接（终态收尾/组件侧显式止损用；运行本身在服务端继续）。 */
+export function closeRunStream() {
+  if (runStream) {
+    runStream.close();
+    runStream = null;
+  }
+  if (studio.run) studio.run.link = "";
+}
+
+/** 确认门放行：大纲过人工确认后继续后续阶段。门不可跳过——非 gated 会被
+ * 服务端 409 拒绝（"确认门不可跳过"），错误文案原样透给面板。 */
+export async function approveRun() {
+  await postJSON(`/api/pipeline/runs/${studio.run.id}/approve`, {});
+  studio.run.status = "running";
+  _openRunStream(); // resume 可能在新流 hello 之前就跑完——终态由快照兜底
+}
+
+/** 重置失败阶段重跑（仅 failed；其余状态服务端 409）。注意重试确认门阶段
+ * 过门后会再次停在 gated——确认卡的可见性完全跟随 status，门后依旧等人工。 */
+export async function retryRun(stage) {
+  await postJSON(`/api/pipeline/runs/${studio.run.id}/retry`, { stage });
+  studio.run.status = "running";
+  _openRunStream();
+}
+
+/** 追加一条人工意见（确认前的「带意见重写」留言；门不会因此自动放行）。 */
+export async function sendRunFeedback(text) {
+  const trimmed = String(text || "").trim();
+  if (!trimmed) throw new Error("意见内容不能为空");
+  return postJSON(`/api/pipeline/runs/${studio.run.id}/feedback`, { text: trimmed });
 }

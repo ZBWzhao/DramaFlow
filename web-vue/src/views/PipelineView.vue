@@ -15,6 +15,7 @@ import CastPanel from "./pipeline/CastPanel.vue";
 import ArtPanel from "./pipeline/ArtPanel.vue";
 import StagingPanel from "./pipeline/StagingPanel.vue";
 import StoryboardPanel from "./pipeline/StoryboardPanel.vue";
+import CreateRunPanel from "./pipeline/CreateRunPanel.vue";
 
 const route = useRoute();
 
@@ -47,6 +48,10 @@ const meta = computed(() => {
 
 const imported = computed(() => Boolean(studio.pipeline?.artifacts?.[cur.value.type]));
 
+/* 创作入口的占位开关（阶段 2 Task 4）：项目还没有任何管线产物 → 常驻入口；
+ * 已有产物 → 只在存在活动 run 时才显示运行卡，平时不占位。 */
+const hasArtifacts = computed(() => Object.keys(studio.pipeline?.artifacts || {}).length > 0);
+
 onMounted(async () => {
   const name = String(route.params.name || "");
   if (name && studio.canvas !== name) studio.canvas = name;
@@ -61,6 +66,9 @@ onMounted(async () => {
         管线产物
         <span class="sub">来自管线导入，只读 · 修订走重导入</span>
       </div>
+
+      <!-- 创作入口：无产物常驻（从小说开始），有产物只跟随活动 run -->
+      <CreateRunPanel v-if="!hasArtifacts || studio.run.id" />
 
       <div class="pv-tabs">
         <button
