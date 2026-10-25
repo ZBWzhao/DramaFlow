@@ -116,6 +116,8 @@ async def lifespan(_: FastAPI) -> AsyncIterator[None]:
             await media_worker.close()
             media_worker = None
         await media_jobs.close()
+        from server import pipeline_runs as pipeline_runs_api  # noqa: E402  底部装配，收尾取消运行任务
+        await pipeline_runs_api.shutdown()
         await registry.aclose()
 
 
@@ -2773,6 +2775,24 @@ from server import pipeline as pipeline_api  # noqa: E402
 
 pipeline_api.configure(registry=registry)
 app.include_router(pipeline_api.router)
+
+# ---------------------------------------------------------------------------
+# 管线运行（pipeline runs）：状态机 + 确认门 + SSE（阶段 2 Task 3）
+#
+# 同样必须注册在下面的静态目录挂载之前。DB 句柄与 artifacts 路由同源
+# （Postgres 后端 registry.canvas_repository 才有 .database）；file 后端不装配，
+# 路由照常挂载但一律 503。LLM 用 Task 2 的 _RouterLLM（LLMPort 真链路适配）。
+# ---------------------------------------------------------------------------
+from core.skill_executor import _RouterLLM  # noqa: E402
+from server import pipeline_runs as pipeline_runs_api  # noqa: E402
+
+_runs_db = getattr(getattr(registry, "canvas_repository", None), "database", None)
+if _runs_db is not None:
+    _runs_store, _runs_broker, _runs_runner = pipeline_runs_api.build_pipeline_runs(
+        _runs_db, _RouterLLM()
+    )
+    pipeline_runs_api.configure(store=_runs_store, runner=_runs_runner, broker=_runs_broker)
+app.include_router(pipeline_runs_api.router)
 
 # 产物目录：前端用 <img src="/assets/generated/xxx.png"> 直接显示生成的图
 (WORKSPACE / "assets").mkdir(parents=True, exist_ok=True)
