@@ -6,6 +6,7 @@
 - POST /runs/{run_id}/approve                确认门放行（仅 gated，不可跳过 → 否则 409）
 - POST /runs/{run_id}/retry  {stage}         重置失败阶段重跑（仅 failed → 否则 409）
 - POST /runs/{run_id}/feedback {text}        追加人工意见（确认前「记录意见」，随运行留档，供后续改稿参考）
+- GET  /projects/{canvas}/runs               按项目列最近 runs（fastfollow Task 2：F5 重挂载恢复运行卡）
 
 改稿脑（阶段 2 Task 8）：
 - GET  /runs/{run_id}/stats                  运行详情聚合（iterations/gate_passes/stages）
@@ -25,6 +26,7 @@ finally 反注册队列；done/failed 为终态收流，gate 非终态——appr
 from __future__ import annotations
 
 import json
+import logging
 from typing import Any
 
 from fastapi import APIRouter, HTTPException
@@ -76,6 +78,23 @@ async def shutdown() -> None:
         _broker.close()
 
 
+async def sweep_interrupted_runs() -> int:
+    """lifespan 启动清扫（fastfollow Task 2）：服务器重启后 running 的 run 已
+    没有驱动任务，统一转 failed 让用户可重试（gated parked 不碰）。未装配 DB
+    （file 后端）时 no-op 返回 0。清扫失败只记告警不拦启动——它欠的是「下次
+    重启再扫一遍」，漏扫的行下次启动还在 running，仍会被同一语句收走。"""
+    if _store is None:
+        return 0
+    try:
+        return await _store.sweep_interrupted()
+    except Exception as exc:  # noqa: BLE001  池未就绪/库暂时连不上：启动优先
+        logging.getLogger("toonflow.pipeline_runs").warning(
+            "启动清扫 interrupted runs 失败（下次重启会再试）：%s: %s",
+            type(exc).__name__, exc,
+        )
+        return 0
+
+
 async def _deps() -> tuple[RunStore, PipelineRunner, EventBroker]:
     if _store is None or _runner is None or _broker is None:
         raise HTTPException(status_code=503, detail=NO_DB_MESSAGE)
@@ -121,6 +140,20 @@ async def read_run(run_id: str) -> dict:
         raise HTTPException(status_code=404, detail=f"运行不存在：{run_id}")
     run["history"] = await store.stage_history(run_id)
     return run
+
+
+@router.get("/projects/{canvas}/runs")
+async def list_runs(canvas: str) -> dict:
+    """按项目列最近 runs（updated_at 倒序，limit 10；fastfollow Task 2）。
+
+    F5 重挂载的恢复数据源：前端只需 run_id/status/stage/updated_at 四个轻量
+    字段找回运行卡，novel_text/stage_status 等重字段走单条 GET，不进列表。
+    """
+    store, _runner, _broker = await _deps()
+    runs = await store.list_by_project(canvas)
+    return {"runs": [{"run_id": r["run_id"], "status": r["status"],
+                      "stage": r["stage"], "updated_at": r["updated_at"]}
+                     for r in runs]}
 
 
 def _sse(payload: dict) -> str:
