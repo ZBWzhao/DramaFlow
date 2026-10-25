@@ -5,7 +5,7 @@
 - GET  /runs/{run_id}/events                 SSE 进度直播（text/event-stream）
 - POST /runs/{run_id}/approve                确认门放行（仅 gated，不可跳过 → 否则 409）
 - POST /runs/{run_id}/retry  {stage}         重置失败阶段重跑（仅 failed → 否则 409）
-- POST /runs/{run_id}/feedback {text}        追加人工意见（approve 前带意见重写用）
+- POST /runs/{run_id}/feedback {text}        追加人工意见（确认前「记录意见」，随运行留档，供后续改稿参考）
 
 改稿脑（阶段 2 Task 8）：
 - GET  /runs/{run_id}/stats                  运行详情聚合（iterations/gate_passes/stages）
@@ -53,7 +53,11 @@ def build_pipeline_runs(db: Any, llm: Any = None) -> tuple[RunStore, EventBroker
     """lifespan/装配用工厂：真链路 executor = skill_executor.run_stage（Task 2）。"""
     store = RunStore(db)
     broker = EventBroker()
-    runner = PipelineRunner(store, db, broker=broker, llm=llm or _default_llm())
+    # 装配级预算调优：真模型冒烟（skill_executor.__main__，--max-iterations 默认 20）
+    # 首过 outline 用了 12 轮、2-3 类违规时 16 轮刚好差一口气，默认 5 几乎必耗尽。
+    # 只在此装配点放宽；run_stage/PipelineRunner 的保守默认 5 按台账裁定保持不动。
+    runner = PipelineRunner(store, db, broker=broker, llm=llm or _default_llm(),
+                            max_iterations=16)
     return store, broker, runner
 
 
