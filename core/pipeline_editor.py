@@ -181,7 +181,9 @@ async def apply_pending_edit(db, project_id: str, edit_id: str) -> dict:
 
     if art.name == "script":
         # 自动体检：真门（node 子进程）对刚落库的 content 全量重查。
-        ok, output = await skill_executor.run_gate_only(
+        # 第三元 rules（哨兵规则清单）体检端暂不消费——分级判定只在阶段执行器
+        # 生效，体检维持「ok 驱动回滚」的全 blocking 语义。
+        ok, output, _rules = await skill_executor.run_gate_only(
             art.name, prepared, await _gate_upstreams(db, project_id, art.name))
         if not ok:
             if baseline is None:

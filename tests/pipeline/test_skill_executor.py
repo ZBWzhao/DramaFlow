@@ -20,10 +20,11 @@ from types import SimpleNamespace
 import asyncpg
 import pytest
 
-from core import pipeline_repository
+from core import pipeline_repository, skill_executor
 from core.pipeline_run import EventBroker, PipelineRunner, RunStore
 from core.postgres import PostgresDatabase
 from core.skill_executor import STAGE_SPECS, run_stage
+from test_gate_sentinel import CHARACTERS_ADVISORY_IDS
 from test_pipeline_repository import pipeline_test_database  # noqa: F401  session 级库装配
 
 ROOT_DIR = Path(__file__).resolve().parents[2]
@@ -496,7 +497,7 @@ def test_characters_chain_repair_gate_fail_repairs_exactly_once(pipeline_test_da
                     {"name": "write_draft", "args": {"section": "characters", "data": characters}},
                     {"name": "finish", "args": {}}]
 
-        # 第一轮组装完整但引文非逐字（门必拦）→ 恰好一轮修复 → 过门落库
+        # 第一轮组装完整但提示词雷同（cast-structure，blocking 门必拦）→ 恰好一轮修复 → 过门落库
         # （fastfollow-2 起 round 1 不再靠"漏 summary"拦门——组装不完整会被
         # finish 组装检查拒在门之前，门级失败 fixture 必须是完整稿）
         turns = [_turn(_gate_fail_characters(cast)), _turn(cast["characters"])]
@@ -531,7 +532,7 @@ def test_characters_chain_repair_budget_locked_at_three_gates(pipeline_test_data
                     {"name": "write_draft", "args": {"section": "lang", "data": cast["lang"]}},
                     {"name": "write_draft", "args": {"section": "summary", "data": cast["summary"]}},
                     {"name": "write_draft", "args": {"section": "characters",
-                                                     "data": _gate_fail_characters(cast)}},  # 引文非逐字，门必拦
+                                                     "data": _gate_fail_characters(cast)}},  # 提示词雷同（blocking），门必拦
                     {"name": "finish", "args": {}}]
 
         llm = ScriptedLLM([_turn() for _ in range(4)])    # 修复轮也不修：门拦满 3 次即到顶
@@ -561,7 +562,7 @@ def test_characters_chain_repair_budget_three_gates_allow_second_repair(pipeline
                     {"name": "write_draft", "args": {"section": "characters", "data": characters}},
                     {"name": "finish", "args": {}}]
 
-        turns = [_turn(_gate_fail_characters(cast)),     # r1 产稿：引文非逐字，门败
+        turns = [_turn(_gate_fail_characters(cast)),     # r1 产稿：提示词雷同（blocking），门败
                  _turn(_gate_fail_characters(cast)),     # r2 修复未修对：门再败
                  _turn(cast["characters"])]              # r3 修复到位：第 3 次门过
         llm = ScriptedLLM(turns)
@@ -689,7 +690,7 @@ def test_chain_repair_repair_tail_skips_self_gate(pipeline_test_database):
                     {"name": "write_draft", "args": {"section": "characters", "data": characters}},
                     {"name": "finish", "args": {}}]
 
-        # 第一轮组装完整但引文非逐字（门必拦）→ 恰好一轮修复 → 过门落库
+        # 第一轮组装完整但提示词雷同（cast-structure，blocking 门必拦）→ 恰好一轮修复 → 过门落库
         # （同 budget-lock 测试：门级失败 fixture 必须是完整稿，见 fastfollow-2）
         turns = [_turn(_gate_fail_characters(cast)), _turn(cast["characters"])]
         llm = ScriptedLLM(turns)
@@ -712,12 +713,13 @@ def test_chain_repair_repair_tail_skips_self_gate(pipeline_test_database):
 # ---------------------------------------------------------------------------
 
 def _gate_fail_characters(cast: dict) -> list:
-    """组装完整但门必拦的 characters：末位卡的引文改成非原文逐字片段——
-    novel-characters 门做逐字对账（validateCast 的 evidence 检查）必点名。
-    （fastfollow-2 起空 characters 数组会被 finish 组装检查拦在门之前，
-    门级失败 fixture 必须是组装完整的稿。）"""
+    """组装完整但门必拦的 characters：末位卡的 image.prompt 与首卡逐字相同——
+    相似度门（Jaccard ≥ 0.75）点名「雷同」，归 cast-structure（blocking 汇总项）。
+    （gate severity tiers 起，引文逐字 / voice.prompt 长度两条已降级 advisory——
+    带标记过阶段、不拦落库，不能再当门级失败 fixture 用；同理 fastfollow-2 起
+    空 characters 数组会被 finish 组装检查拦在门之前。）"""
     broken = json.loads(json.dumps(cast["characters"], ensure_ascii=False))
-    broken[-1]["persona"]["evidence"][0] = "这句引文在小说原文里并不存在，逐字对账必拦。"
+    broken[-1]["image"]["prompt"] = broken[0]["image"]["prompt"]
     return broken
 
 
@@ -775,7 +777,7 @@ def test_chain_repair_budget_counts_gates_not_rounds(pipeline_test_database):
             # r1 只写 summary 就 finish → 被拒（组装轮：不进门、不消耗预算）
             [{"name": "write_draft", "args": {"section": "summary", "data": cast["summary"]}},
              {"name": "finish", "args": {}}],
-            # r2 产全（引文非逐字）+ finish → 权威门第 1 次：拦
+            # r2 产全（提示词雷同，blocking）+ finish → 权威门第 1 次：拦
             [{"name": "write_draft", "args": {"section": "source", "data": cast["source"]}},
              {"name": "write_draft", "args": {"section": "lang", "data": cast["lang"]}},
              {"name": "write_draft", "args": {"section": "characters", "data": _gate_fail_characters(cast)}},
@@ -933,5 +935,139 @@ def test_stage_result_carries_draft_on_failure(pipeline_test_database):
         assert result.draft["summary"] == cast["summary"]
         assert result.draft["characters"] == _gate_fail_characters(cast)  # 模型写过的键原样带回
         assert await pipeline_repository.get(database, "proj-fail-draft", "characters") is None
+
+    _run_scenario(scenario, pipeline_test_database)
+
+
+# ---------------------------------------------------------------------------
+# gate severity tiers（Task 2）：哨兵解析 + advisory 白名单 + run_stage 分级判定
+# （分级逻辑用确定性 monkeypatch 锁定，不把 advisory 失败硬塞给真 node 门——
+#   真门哨兵链路由 test_gate_sentinel 的 subprocess 测试覆盖。）
+# ---------------------------------------------------------------------------
+
+def test_stage_specs_advisory_whitelist_v1():
+    """advisory 白名单 v1（spec §4）：outline 1 条 / script 3 条 / characters 2 条；
+    art/staging/storyboard 不设键 = 缺省全 blocking。characters 侧三元锁：
+    spec 表 == skill_executor 硬编码常量 == test_gate_sentinel.CHARACTERS_ADVISORY_IDS
+    （生产侧硬编码后没有动态单一事实源，漂移只能靠这条链拦——任何一侧单改必红）。"""
+    assert STAGE_SPECS["outline"]["advisory_rules"] == frozenset({"risk-flag"})
+    assert STAGE_SPECS["script"]["advisory_rules"] == frozenset({"line-length", "speaker", "beats-claimed"})
+    assert STAGE_SPECS["characters"]["advisory_rules"] == skill_executor.CHARACTERS_ADVISORY_IDS
+    assert skill_executor.CHARACTERS_ADVISORY_IDS == CHARACTERS_ADVISORY_IDS
+    for stage in ("art", "staging", "storyboard"):
+        assert "advisory_rules" not in STAGE_SPECS[stage]
+
+
+def test_split_gate_rules_parses_sentinel_and_strips():
+    split = skill_executor._split_gate_rules
+    human = "✗ 1 处违规：\n  第 2 集缺「雨戏」预警"
+    rules = [{"id": "risk-flag", "ok": False, "detail": "第 2 集缺「雨戏」预警"},
+             {"id": "scene-cap", "ok": True, "detail": "12/20"}]
+    # 门全绿路径：哨兵是输出末行 → 净文本无哨兵、rules 带 id/ok/detail
+    out = human + "\n<<GATE-RULES>>" + json.dumps(rules, ensure_ascii=False)
+    assert split(out) == (human, rules)
+    # 门失败路径：违规清单走 stderr、拼进 output 后哨兵不在末尾——同样要剥除
+    out_fail = "<<GATE-RULES>>" + json.dumps(rules, ensure_ascii=False) + "\n" + human
+    assert split(out_fail) == (human, rules)
+    # 无哨兵输入 →（原文本, None）
+    assert split(human) == (human, None)
+    # 哨兵 JSON 坏 →（原文本含哨兵行, None）——退化全 blocking
+    bad = human + "\n<<GATE-RULES>>[{oops"
+    assert split(bad) == (bad, None)
+    # 形状不对（id 空 / ok 非布尔）→ 同样退化
+    malformed = human + "\n<<GATE-RULES>>" + json.dumps([{"id": ""}, {"id": "x", "ok": 1}])
+    assert split(malformed) == (malformed, None)
+
+
+def test_grade_gate_splits_by_whitelist():
+    grade = skill_executor._grade_gate
+    # 仅 advisory 挂（outline 白名单 {risk-flag}）→ blocking 空表
+    rules = [{"id": "risk-flag", "ok": False, "detail": "d1"},
+             {"id": "scene-cap", "ok": True, "detail": "d2"}]
+    assert grade(rules, STAGE_SPECS["outline"]) == ([], [rules[0]])
+    # advisory + blocking 同挂 → 两桶各得其所
+    mixed = [{"id": "ep-fields", "ok": False, "detail": "d0"}, rules[0]]
+    assert grade(mixed, STAGE_SPECS["outline"]) == ([mixed[0]], [rules[0]])
+    # rules=None（无哨兵/坏哨兵）→ 两空表——退化旧行为
+    assert grade(None, STAGE_SPECS["outline"]) == ([], [])
+    # script 白名单：line-length 进 advisory，duration 照旧 blocking
+    s_rules = [{"id": "line-length", "ok": False, "detail": "d"},
+               {"id": "duration", "ok": False, "detail": "d"}]
+    assert grade(s_rules, STAGE_SPECS["script"]) == ([s_rules[1]], [s_rules[0]])
+    # 无白名单阶段（art 缺省全 blocking）
+    art_rules = [{"id": "anchors", "ok": False, "detail": "d"}]
+    assert grade(art_rules, STAGE_SPECS["art"]) == (art_rules, [])
+
+
+def _static_gate(result: tuple):
+    """_run_gate 替身工厂：分级判定不依赖真门输出，按剧本返回 (ok, output, rules)。"""
+    async def _fake(spec, workdir):
+        return result
+    return _fake
+
+
+def test_run_stage_advisory_only_failure_passes_with_markers(pipeline_test_database, monkeypatch):
+    """advisory-only：门 exit 非零但失败项全在白名单 → 阶段照过——产物落库、
+    findings 携带 advisory 标记、事件流 gate ok=False 带 advisory 计数，
+    **没有修复轮**（LLM 调用次数 = 写稿 + finish 即止）。"""
+    good_outline = _load("outline.json")
+    output = "✗ 1 处违规（advisory）：\n  第 2 集缺「雨戏」预警"
+    rules = [{"id": "risk-flag", "ok": False, "detail": "第 2 集缺「雨戏」预警"},
+             {"id": "scene-cap", "ok": True, "detail": "12/20"}]
+    monkeypatch.setattr(skill_executor, "_run_gate", _static_gate((False, output, rules)))
+
+    async def scenario(database) -> None:
+        turns = (_write_rounds(good_outline, [4, 3, 2])
+                 + [[{"name": "finish", "args": {}}]])
+        llm = ScriptedLLM(turns)
+        events: list[dict] = []
+        result = await run_stage(database, "proj-advisory", "outline",
+                                 {"novel_text": NOVEL_TEXT}, llm=llm, on_event=events.append)
+        assert result.ok is True and result.iterations == 4
+        # findings 携带 advisory 标记（outline 无 save_merge → 没有 import findings）
+        assert result.findings == [{"gate": "validate", "rule": "risk-flag",
+                                    "severity": "advisory", "detail": "第 2 集缺「雨戏」预警"}]
+        # 产物已落库，内容与稿一致
+        saved = await pipeline_repository.get(database, "proj-advisory", "outline")
+        assert saved["content"]["episodes"] == good_outline["episodes"]
+        # 事件流：门 ok=False 但带 advisory 计数；收尾 done ok=True
+        assert [e for e in events if e["type"] == "gate"] == [
+            {"type": "gate", "ok": False, "round": 4, "advisory": 1}]
+        assert events[-1] == {"type": "done", "ok": True}
+        # 没有修复轮：全程恰好 4 次 complete()，没有任何一轮收到「质量门未过」
+        assert len(llm.calls) == 4
+        assert not any(m.get("role") == "user" and m["content"].startswith("质量门未过")
+                       for turn in llm.calls for m in turn)
+
+    _run_scenario(scenario, pipeline_test_database)
+
+
+def test_run_stage_mixed_failure_still_fails(pipeline_test_database, monkeypatch):
+    """advisory + blocking 同挂 → 既有失败路径原样：ok=False、findings 带全部输出
+    （含 advisory 行，喂回修复）、产物未落库、draft 带回。"""
+    output = "✗ 2 处违规：\n  params.episodes=5 与集数 3 不一致\n  第 2 集缺「雨戏」预警"
+    rules = [{"id": "ep-fields", "ok": False, "detail": "params.episodes=5 与集数 3 不一致"},
+             {"id": "risk-flag", "ok": False, "detail": "第 2 集缺「雨戏」预警"}]
+    monkeypatch.setattr(skill_executor, "_run_gate", _static_gate((False, output, rules)))
+    good_outline = _load("outline.json")
+
+    async def scenario(database) -> None:
+        turns = (_write_rounds(good_outline, [9])
+                 + [[{"name": "finish", "args": {}}]])
+        llm = ScriptedLLM(turns)
+        events: list[dict] = []
+        result = await run_stage(database, "proj-mixed", "outline",
+                                 {"novel_text": NOVEL_TEXT}, llm=llm, on_event=events.append,
+                                 max_iterations=2)
+        assert result.ok is False and result.iterations == 2
+        assert result.findings[0]["gate"] == "validate"
+        # findings 文本含全部输出（含 advisory 行）——喂回修复的口径不变
+        assert "params.episodes=5" in result.findings[0]["detail"]
+        assert "雨戏" in result.findings[0]["detail"]
+        assert await pipeline_repository.get(database, "proj-mixed", "outline") is None
+        # advisory 计数照报（=1），但门事件仍是失败
+        assert [e for e in events if e["type"] == "gate"] == [
+            {"type": "gate", "ok": False, "round": 2, "advisory": 1}]
+        assert result.draft is not None   # 失败带回草稿（既有契约）
 
     _run_scenario(scenario, pipeline_test_database)

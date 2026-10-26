@@ -39,6 +39,14 @@ from . import pipeline_artifacts, pipeline_import, pipeline_repository
 ROOT_DIR = Path(__file__).resolve().parents[1]
 _SKILLS_ROOT = ROOT_DIR / "pipeline_skills"
 
+# characters 门 advisory 白名单（gate severity tiers spec §4：引文逐字 + voice.prompt
+# 长度不拦落库，cast-structure 等结构违规照旧 blocking）。生产侧硬编码：生产不得
+# 依赖 tests/ 的存在或某个测试文件的顶层纯净性（曾按文件路径 importlib 加载
+# test_gate_sentinel——测试文件一旦出现生产环境不可用的顶层导入就拖死整个服务）。
+# 单一事实源由 test_stage_specs_advisory_whitelist_v1 锁定：spec 表 == 本常量 ==
+# test_gate_sentinel.CHARACTERS_ADVISORY_IDS，任何一侧单改必红。
+CHARACTERS_ADVISORY_IDS = frozenset({"quote-verbatim", "voice-prompt-length"})
+
 MAX_GATE_TIMEOUT = 120        # 门超时（秒）：node 子进程的唯一预算
 GATE_TAIL = 2000              # run_quality_gate 回给模型的输出尾部
 FINDING_TAIL = 800            # findings 里带的病灶尾部（进 pipeline_runs.findings）
@@ -63,6 +71,9 @@ STAGE_SPECS: dict[str, dict] = {
         "meta_sections": ["source", "lang", "params"],
         "gate": ["scripts/novel-outline.mjs", "validate", "outline.json", "--stage", "full"],
         "gate_needs": [],   # 无上游文件
+        # advisory 白名单 v1（spec §4）：仅体量预警不拦落库，其余违规照旧 blocking。
+        # 执行器按哨兵 rule id 分级，见 _grade_gate。
+        "advisory_rules": frozenset({"risk-flag"}),
         "task": "按 playbook 把用户小说改编为短剧大纲五件套，写全六节后跑质量门，全过才 finish。",
         # 阶段专属口径（_compose_system 原样带进执行器纪律，不进通用模板——
         # outline 自己定集数，script 等下游阶段的集数以上游产物为事实）。
@@ -95,6 +106,9 @@ STAGE_SPECS: dict[str, dict] = {
         "save_merge": True,
         "gate": ["scripts/novel-script.mjs", "validate", "script.json", "--outline", "outline.json"],
         "gate_needs": ["outline"],
+        # advisory 白名单 v1（spec §4）：文案类三条不拦落库；时长/钩子/对账等
+        # 硬门照旧 blocking。
+        "advisory_rules": frozenset({"line-length", "speaker", "beats-claimed"}),
         "task": "按 playbook 把大纲落成分集剧本（结构化节拍流），逐集写 episodes 后跑质量门，全过才 finish。",
         # 集数/时长/钩子/爽点全部是上游大纲的既有事实（seed 的确定性搬运口径；
         # 执行器没有 seed 命令，由模型逐集搬运，门逐项对账）。
@@ -132,6 +146,11 @@ STAGE_SPECS: dict[str, dict] = {
         "save_merge": True,
         "gate": ["scripts/novel-characters.mjs", "validate", "cast.json", "book.txt"],
         "gate_needs": ["outline"],
+        # advisory 白名单 v1（spec §4）：引文逐字 + voice.prompt 长度不拦落库；
+        # id 集合 = 模块级 CHARACTERS_ADVISORY_IDS（与 test_gate_sentinel 常量由
+        # lock 测试锁等，漂移必红）。cast-structure（summary 缺失/结构违规等）
+        # 照旧 blocking。
+        "advisory_rules": CHARACTERS_ADVISORY_IDS,
         # 门的非产物输入：逐字引文校验要原文（唯一一个非 JSON 落盘文件）。
         "gate_files": {"book.txt": "novel_text"},
         "task": "从小说与大纲拆角色表（cast.json 形状），过质量门后 finish。",
@@ -325,7 +344,8 @@ class _ToolBox:
             self.state["draft"][section] = data
             return "ok"
         if name in ("run_quality_gate", "read_gate_report"):
-            ok, output = await self.run_gate()
+            # 第三元 rules 只有权威门分级（run_stage）消费——自检回执保持人读文本
+            ok, output, _rules = await self.run_gate()
             self.state["last_gate"] = {"ok": ok, "output": output}
             self.state["gate_log"].append(output[-GATE_TAIL:])
             return output if name == "read_gate_report" else output[-GATE_TAIL:]
@@ -349,7 +369,7 @@ class _ToolBox:
             return "ok"
         return f"未知工具 {name}"
 
-    async def run_gate(self) -> tuple[bool, str]:
+    async def run_gate(self) -> tuple[bool, str, list[dict] | None]:
         """组装当前草稿 → 产物 JSON，然后跑真门。自检与 finish 共用这一条路。"""
         path = self.workdir / pipeline_artifacts.get(self.spec["artifact"]).filename
         path.write_text(
@@ -423,13 +443,68 @@ def _finalize_draft(spec: dict, state: dict) -> dict:
 # 质量门
 # ---------------------------------------------------------------------------
 
-async def _run_gate(spec: dict, workdir: Path) -> tuple[bool, str]:
+# 六门 validate 两条出口路径各打的机器可读规则哨兵（Task 1）：stdout 末行打印
+# `<<GATE-RULES>>` + JSON 数组 [{id, ok, detail}]——失败路径的违规清单走 stderr，
+# 与 stdout 拼接后哨兵位置不定，解析须全文扫描（_split_gate_rules）；分级判定
+# （_grade_gate）据此分桶。
+_GATE_SENTINEL = "<<GATE-RULES>>"
+
+
+def _split_gate_rules(output: str) -> tuple[str, list[dict] | None]:
+    """从门输出剥除哨兵行并解析规则清单。返回（净文本, rules）。
+
+    哨兵行在 stdout，而失败路径的违规清单走 stderr——_run_gate 把两者拼接后
+    哨兵并不总在末尾，所以按行前缀扫全文取最后一条。无哨兵 / JSON 坏 / 形状
+    不对（非数组、或缺 id/ok/detail、或类型不符）→（原文本原样, None）：调用方
+    按全 blocking 退化（旧行为，对未升级的门输出零依赖）；解析成功 →
+    （剥掉哨兵行的净文本, rules），人读文本保持纯净。
+    """
+    lines = output.splitlines()
+    hits = [i for i, line in enumerate(lines) if line.startswith(_GATE_SENTINEL)]
+    if not hits:
+        return output, None
+    try:
+        rules = json.loads(lines[hits[-1]][len(_GATE_SENTINEL):])
+    except ValueError:
+        return output, None
+    if not isinstance(rules, list):
+        return output, None
+    for rule in rules:
+        if (not isinstance(rule, dict)
+                or not isinstance(rule.get("id"), str) or not rule["id"]
+                or not isinstance(rule.get("ok"), bool)
+                or not isinstance(rule.get("detail"), str)):
+            return output, None
+    cleaned = "\n".join(line for i, line in enumerate(lines) if i != hits[-1]).strip()
+    return cleaned, rules
+
+
+def _grade_gate(rules: list[dict] | None, spec: dict) -> tuple[list, list]:
+    """按阶段白名单 spec["advisory_rules"] 把哨兵规则分成 blocking / advisory 两桶。
+
+    返回（blocking_failed, advisory_failed），只收 ok=False 的规则。rules=None
+    （无哨兵/坏哨兵/超时）→ 两空表——调用方把「门失败但无 advisory 命中」按既有
+    失败路径处理，等价退化为全 blocking。白名单缺省空集（art/staging/storyboard
+    全 blocking）；门全绿时两桶自然全空，行为零变化。
+    """
+    if not rules:
+        return [], []
+    whitelist = spec.get("advisory_rules") or frozenset()
+    blocking = [r for r in rules if not r["ok"] and r["id"] not in whitelist]
+    advisory = [r for r in rules if not r["ok"] and r["id"] in whitelist]
+    return blocking, advisory
+
+
+async def _run_gate(spec: dict, workdir: Path) -> tuple[bool, str, list[dict] | None]:
     """质量门 = node 子进程（红线：门只准以这种方式跑）。
 
     sync-vs-async 取舍：这里选 asyncio.create_subprocess_exec 而不是
     subprocess.run——门虽是秒级脚本，但 Task 3 起 run_stage 跑在服务端事件
     循环里（SSE 直播进度、多阶段串行），同步 run 最坏把整个 loop 卡死 120s；
     纯异步 + wait_for 超时 kill 的代价只是几行样板。
+
+    返回（ok, 人读输出, rules）：rules 是哨兵解析出的 [{id, ok, detail}]
+    （分级用），无哨兵/坏哨兵为 None；哨兵行已从输出剥除，输出保持纯人读文本。
     """
     script, *gate_args = spec["gate"]
     cmd = ["node", str(_SKILLS_ROOT / spec["skill"] / script), *gate_args]
@@ -442,18 +517,21 @@ async def _run_gate(spec: dict, workdir: Path) -> tuple[bool, str]:
     except asyncio.TimeoutError:
         proc.kill()
         await proc.wait()
-        return False, f"质量门超时（>{MAX_GATE_TIMEOUT}s），进程已终止"
+        return False, f"质量门超时（>{MAX_GATE_TIMEOUT}s），进程已终止", None
     output = (stdout.decode("utf-8", errors="replace")
               + "\n" + stderr.decode("utf-8", errors="replace")).strip()
-    return proc.returncode == 0, output
+    output, rules = _split_gate_rules(output)
+    return proc.returncode == 0, output, rules
 
 
-async def run_gate_only(artifact_type: str, content: dict, upstreams: dict) -> tuple[bool, str]:
+async def run_gate_only(artifact_type: str, content: dict, upstreams: dict) -> tuple[bool, str, list[dict] | None]:
     """模块级公开门入口（Task 8）：改稿脑 apply 的自动体检用。
 
     与阶段执行器同一条真门（node 子进程）、同一条组装与落盘规则
     （content 按产物注册表文件名落盘、upstreams 按 gate_needs/gate_files 落盘），
     但只判不落——落库永远是调用方（审批端点）的事，本函数对库零写入。
+    返回 (ok, 人读输出, rules)：第三元是哨兵解析的规则清单（None=无哨兵退化），
+    体检端点暂只消费 ok——分级判定目前只在阶段执行器（run_stage）生效。
 
     artifact_type 从 STAGE_SPECS 反查阶段规格（六类创作产物各有一个 spec）；
     upstreams 键 = gate_needs 的产物名（outline/cast/...），缺了的门自会报缺文件。
@@ -656,49 +734,65 @@ async def run_stage(
         # 权威门：唯一能把产物落库的门（自检只是模型的预演，不作数）。
         # 经 box.run_gate() 而非裸 _run_gate——模型可以不 run_quality_gate 直接
         # finish，组装草稿必须在这里自足完成，不能指望工作目录里已有产物。
-        ok, output = await box.run_gate()
+        ok, output, rules = await box.run_gate()
         gate_log.append(output[-GATE_TAIL:])
-        on_event and on_event({"type": "gate", "ok": ok, "round": rnd})
-        if ok:
-            content = _finalize_draft(spec, state)
-            import_findings: list[dict] = []
-            if spec.get("save_merge"):
-                # data-contract「script 分批合并」：按集号并入已落库产物，批次外的
-                # 集保留——重跑/重试不吞既有集（outline 无 save_merge，latest-wins
-                # 整行替换）。合并整形唯一出口 pipeline_import.prepare，不另起灶。
-                existing = await pipeline_repository.get(db, project_id, spec["artifact"])
-                content, warnings = pipeline_import.prepare(
-                    pipeline_artifacts.get(spec["artifact"]),
-                    content, existing["content"] if existing else None,
-                )
-                # 合并告警入账（fastfollow-2，恢复 Task 5 被 `content, _` 丢掉的
-                # 第二返回值）：库内 existing 形状异常时的契约告警（整行替换等）
-                # 不再静默，落进 StageResult.findings 留档。ok=True 的 findings
-                # 也可以非空——runner 落 JSONB 已兼容。
-                import_findings = [{"gate": "import", "detail": w} for w in warnings]
-            await pipeline_repository.save(db, project_id, spec["artifact"],
-                                           content,
-                                           source_run_id=f"stage:{stage}")
-            on_event and on_event({"type": "done", "ok": True})
-            return StageResult(True, spec["artifact"], rnd, gate_log, import_findings,
-                               draft=None)   # 成功即落库：草稿不带回（契约见 StageResult.draft）
-        findings = [{"gate": "validate", "detail": output[-FINDING_TAIL:]}]
-        state["finished"] = False
-        # 失败必须把报告喂回对话，模型才知道修哪里（gate_log 只留给调用方）；
-        # 修复指令要具体到"覆盖哪个键、整组重发"——首冒烟里模型曾反复只改第 1 集
-        # 和无关的 scenes，对报告点名的 warnings 视而不见，预算烧光也没修对。
-        # 尾巴按策略分支（与 _compose_system 两个分支的自检口径一致）：agent 型
-        # 多轮预算下自检不亏，修完先 run_quality_gate；chain_repair 预算锁 3 次
-        # 权威门，自检等于白烧三分之一——修完同轮立刻 finish（门即自检）。
-        tail = ("修完同一轮立刻再 finish，不要先 run_quality_gate（预算只有 3 次权威门，自检等于白烧）。"
-                if spec.get("policy") == "chain_repair"
-                else "修完 run_quality_gate，报告全过就立刻 finish。")
-        messages.append({"role": "user",
-                         "content": f"质量门未过（第 {rnd} 轮），报告如下：\n" + output[-GATE_TAIL:]
-                                    + "\n逐条修复：报告点名哪个键，就重调一次 write_draft 覆盖那个键"
-                                      "的完整数据（数组键整组重发全部条目，别只发单条）。只动点名的键。"
-                                      + (spec.get("repair_note") or "")
-                                      + tail})
+        # 分级（gate severity tiers）：blocking 失败走既有修复环；失败项全在
+        # advisory 白名单 → 带标记过阶段、不进修复环。rules=None（老门/坏哨兵）
+        # 时 _grade_gate 双空表，下面条件退化为「失败即 blocking」的旧行为。
+        blocking_failed, advisory_failed = _grade_gate(rules, spec)
+        on_event and on_event({"type": "gate", "ok": ok, "round": rnd,
+                               "advisory": len(advisory_failed) if not ok else 0})
+        if not ok and (blocking_failed or not advisory_failed):
+            findings = [{"gate": "validate", "detail": output[-FINDING_TAIL:]}]
+            state["finished"] = False
+            # 失败必须把报告喂回对话，模型才知道修哪里（gate_log 只留给调用方）；
+            # 修复指令要具体到"覆盖哪个键、整组重发"——首冒烟里模型曾反复只改第 1 集
+            # 和无关的 scenes，对报告点名的 warnings 视而不见，预算烧光也没修对。
+            # 尾巴按策略分支（与 _compose_system 两个分支的自检口径一致）：agent 型
+            # 多轮预算下自检不亏，修完先 run_quality_gate；chain_repair 预算锁 3 次
+            # 权威门，自检等于白烧三分之一——修完同轮立刻 finish（门即自检）。
+            tail = ("修完同一轮立刻再 finish，不要先 run_quality_gate（预算只有 3 次权威门，自检等于白烧）。"
+                    if spec.get("policy") == "chain_repair"
+                    else "修完 run_quality_gate，报告全过就立刻 finish。")
+            messages.append({"role": "user",
+                             "content": f"质量门未过（第 {rnd} 轮），报告如下：\n" + output[-GATE_TAIL:]
+                                        + "\n逐条修复：报告点名哪个键，就重调一次 write_draft 覆盖那个键"
+                                          "的完整数据（数组键整组重发全部条目，别只发单条）。只动点名的键。"
+                                          + (spec.get("repair_note") or "")
+                                          + tail})
+            continue
+
+        gate_findings: list[dict] = []
+        if not ok:
+            # advisory-only：门 exit 非零但失败项全在白名单——阶段照过、不修复，
+            # 标记随 findings 留档（喂回修复的输出本来就含 advisory 行的全文，
+            # 这里只把结构化标记给调用方；Task 3 起随运行记录落库）。
+            gate_findings = [{"gate": "validate", "rule": r["id"], "severity": "advisory",
+                              "detail": r["detail"]} for r in advisory_failed]
+        content = _finalize_draft(spec, state)
+        import_findings: list[dict] = []
+        if spec.get("save_merge"):
+            # data-contract「script 分批合并」：按集号并入已落库产物，批次外的
+            # 集保留——重跑/重试不吞既有集（outline 无 save_merge，latest-wins
+            # 整行替换）。合并整形唯一出口 pipeline_import.prepare，不另起灶。
+            existing = await pipeline_repository.get(db, project_id, spec["artifact"])
+            content, warnings = pipeline_import.prepare(
+                pipeline_artifacts.get(spec["artifact"]),
+                content, existing["content"] if existing else None,
+            )
+            # 合并告警入账（fastfollow-2，恢复 Task 5 被 `content, _` 丢掉的
+            # 第二返回值）：库内 existing 形状异常时的契约告警（整行替换等）
+            # 不再静默，落进 StageResult.findings 留档。ok=True 的 findings
+            # 也可以非空——runner 落 JSONB 已兼容。
+            import_findings = [{"gate": "import", "detail": w} for w in warnings]
+        await pipeline_repository.save(db, project_id, spec["artifact"],
+                                       content,
+                                       source_run_id=f"stage:{stage}")
+        on_event and on_event({"type": "done", "ok": True})
+        # findings = advisory 标记 + import 告警；门全绿 = 空表（行为零变化）。
+        # 成功即落库：草稿不带回（契约见 StageResult.draft）
+        return StageResult(True, spec["artifact"], rnd, gate_log,
+                           gate_findings + import_findings, draft=None)
 
     # 迭代耗尽：带失败报告退出，绝不落产物（iterations = 实际轮数，含被拒组装轮）
     if not findings:
