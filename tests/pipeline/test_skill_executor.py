@@ -639,6 +639,8 @@ def test_outline_notes_carry_volume_feasibility_cap():
     assert "800" in notes and "90" in notes      # 上限公式：每约 800 字 ≤ 1 集 90 秒
     assert "不得超过" in notes                    # 是硬上限不是建议
     assert "6–12" not in notes                   # 旧口径（几千字短篇 6–12 集）已废除
+    assert "1.5–3" in notes                      # 单位锚定：分钟，短剧单集 1.5–3（90–180 秒）
+    assert "60–120" not in notes                 # 2026-10-26 实证：被当分钟填 90 → 单集目标 5400s
 
 
 def test_characters_repair_note_covers_quote_and_voice():
