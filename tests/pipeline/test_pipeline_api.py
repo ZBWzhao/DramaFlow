@@ -13,12 +13,14 @@ from __future__ import annotations
 
 import copy
 import json
+from functools import partial
 from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
 
 from core.pipeline_artifacts import ARTIFACTS, get as get_artifact
+from core.pipeline_repository import save as repo_save
 from core.postgres import PostgresDatabase
 from test_pipeline_repository import pipeline_test_database  # noqa: F401  Task 2 的 session 级 DB 夹具
 
@@ -81,7 +83,7 @@ def api_client(pipeline_test_database, tmp_path, monkeypatch):
     with _build_client(monkeypatch, tmp_path, database) as client:
         assert client.portal.call(pipeline_module.ensure_started)
         client.portal.call(database.pool.execute, "TRUNCATE pipeline_artifacts")
-        yield SimpleNamespace(client=client)
+        yield SimpleNamespace(client=client, database=database)
         if database.pool is not None:  # 在 app 自己的循环里收池，不留悬挂连接
             client.portal.call(database.close)
 
@@ -119,7 +121,8 @@ def test_import_all_seven_fixtures_then_query_and_export(api_client):
     for row in listed:
         assert row["schema_version"]
         assert isinstance(row["updated_at"], float)
-        assert set(row) == {"artifact_type", "schema_version", "updated_at"}  # 列表不带 content
+        assert row["findings"] == []  # 0008：列表响应带标记（fixture 全绿 → 空）
+        assert set(row) == {"artifact_type", "schema_version", "updated_at", "findings"}
 
     for filename in ALL_SEVEN:
         art_type = FILENAME_TO_TYPE[filename]
@@ -130,13 +133,15 @@ def test_import_all_seven_fixtures_then_query_and_export(api_client):
         got = client.get(f"{BASE}/{art_type}")
         assert got.status_code == 200, got.text
         row = got.json()
-        expected_keys = {"artifact_type", "schema_version", "content", "source_run_id", "updated_at"}
+        expected_keys = {"artifact_type", "schema_version", "content", "source_run_id",
+                         "updated_at", "findings"}
         if art_type == "script":
             # Task 5：剧本详情响应附加逐集正文视图（display-only，不落库 content）
             expected_keys.add("episodes")
         assert set(row) == expected_keys
         assert row["content"] == expected  # 单条查询：content 与落库形状保形
         assert row["source_run_id"] == "run-1"
+        assert row["findings"] == []  # 0008：单条响应带标记（导入路径不产标记）
 
         export = client.get(f"{BASE}/{art_type}/export")
         assert export.status_code == 200, export.text
@@ -411,3 +416,41 @@ def test_delete_without_database_503(api_client_no_db):
     response = client.delete(f"{BASE}/outline")
     assert response.status_code == 503
     assert response.json() == {"message": NO_DB_MESSAGE}
+
+
+# ---------------------------------------------------------------------------
+# 0008（gate severity tiers Task 3）：advisory 标记经单条 GET / 列表读出；
+# 导入路径 save(findings=None) 不误清标记（Task 4 前端面板的数据契约）
+# ---------------------------------------------------------------------------
+
+GATE_MARKERS = [
+    {"gate": "validate", "rule": "risk-flag", "severity": "advisory",
+     "detail": "第 2 集缺「雨戏」预警"},
+]
+
+
+def test_gate_markers_exposed_via_get_and_list_and_survive_reimport(api_client):
+    client = api_client.client
+    # 按 run 阶段通过路径的形态落库：save(findings=...) 携带标记
+    # （portal.call 不收 kwargs，findings 关键字经 functools.partial 绑定）
+    client.portal.call(
+        partial(repo_save, api_client.database, "proj-api", "outline",
+                _fixture("outline.json"), source_run_id="stage:outline",
+                findings=GATE_MARKERS),
+    )
+
+    single = client.get(f"{BASE}/outline")
+    assert single.status_code == 200, single.text
+    assert single.json()["findings"] == GATE_MARKERS
+    listed = client.get(BASE).json()["artifacts"]
+    assert len(listed) == 1
+    assert listed[0]["findings"] == GATE_MARKERS
+
+    # 导入路由走 save 缺省（findings=None）：content/source_run_id 刷新，标记保留
+    reimport = client.post(
+        f"{BASE}/outline", json={"content": _fixture("outline.json"), "source_run_id": "run-2"}
+    )
+    assert reimport.status_code == 200, reimport.text
+    row = client.get(f"{BASE}/outline").json()
+    assert row["source_run_id"] == "run-2"
+    assert row["findings"] == GATE_MARKERS

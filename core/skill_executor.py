@@ -785,9 +785,13 @@ async def run_stage(
             # 不再静默，落进 StageResult.findings 留档。ok=True 的 findings
             # 也可以非空——runner 落 JSONB 已兼容。
             import_findings = [{"gate": "import", "detail": w} for w in warnings]
+        # Task 3（gate severity tiers）：标记随产物落库（migrations/0008 findings 列）
+        # ——advisory 标记 + import 告警一起写入，latest-wins 刷新（新跑无标记即
+        # 清空，语义正确：标记属于最新产物）；导入/集级编辑走 save 缺省不触碰。
         await pipeline_repository.save(db, project_id, spec["artifact"],
                                        content,
-                                       source_run_id=f"stage:{stage}")
+                                       source_run_id=f"stage:{stage}",
+                                       findings=gate_findings + import_findings)
         on_event and on_event({"type": "done", "ok": True})
         # findings = advisory 标记 + import 告警；门全绿 = 空表（行为零变化）。
         # 成功即落库：草稿不带回（契约见 StageResult.draft）

@@ -178,6 +178,7 @@ async def list_artifacts(canvas: str):
             {
                 "artifact_type": row["artifact_type"],
                 "schema_version": row["schema_version"],
+                "findings": row["findings"],  # 0008：分级门标记（Task 4 面板渲染）
                 "updated_at": row["updated_at"],
             }
             for row in rows
@@ -203,6 +204,7 @@ async def read_artifact(canvas: str, artifact_type: str):
         "schema_version": row["schema_version"],
         "content": row["content"],
         "source_run_id": row["source_run_id"],
+        "findings": row["findings"],  # 0008：分级门标记（Task 4 面板渲染）
         "updated_at": row["updated_at"],
     }
     if artifact_type == "script":

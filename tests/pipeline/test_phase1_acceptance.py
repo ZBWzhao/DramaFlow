@@ -188,10 +188,13 @@ def test_phase1_acceptance_end_to_end(api_client):
     script_row = client.get(f"{BASE}/script")
     assert script_row.status_code == 200
     # 详情响应额外带 display-only 的逐集正文视图 episodes（不落库），
-    # content 仍与落库形状保形（契约 script 节 + Task 5 定案）。
+    # content 仍与落库形状保形（契约 script 节 + Task 5 定案）；
+    # 0008 起响应还带分级门标记 findings（Task 3 定案，导入路径为空表）。
     assert set(script_row.json()) == {
-        "artifact_type", "schema_version", "content", "source_run_id", "updated_at", "episodes",
+        "artifact_type", "schema_version", "content", "source_run_id", "updated_at",
+        "episodes", "findings",
     }
+    assert script_row.json()["findings"] == []
     assert script_row.json()["content"] == fixtures["script"]
     assert [e["ep"] for e in script_row.json()["episodes"]] == [1, 2, 3]
 

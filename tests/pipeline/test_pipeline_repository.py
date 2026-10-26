@@ -4,7 +4,8 @@ DB 夹具惯例：本分支 tests/ 此前没有 DB 夹具（tests/p0 走零依�
 这里按阶段 1 约定连 dramaflow-postgres 容器的独立库 `pipeline_test`：
 
 - session 级一次性引导：连 db dramaflow，CREATE DATABASE pipeline_test
-  （DuplicateDatabaseError 视为已存在），再手工执行 migrations/0005_pipeline_artifacts.sql。
+  （DuplicateDatabaseError 视为已存在），再手工执行 migrations/0005_pipeline_artifacts.sql
+  + 0008_gate_markers.sql（0008 起 ADD COLUMN IF NOT EXISTS，重复执行无害）。
   不能走 PostgresDatabase.start() 的全量 migrate——0002/0003 会 ALTER 既有
   canvases/outbox_events 表，全新库上会失败，故 pool 直接装配（等价于 start() 的产物）。
 - 每用例独立 asyncio.run + 独立 pool：asyncpg pool 绑定事件循环，必须与用例体
@@ -28,6 +29,7 @@ from core.pipeline_repository import delete, get, list_all, save
 
 ROOT_DIR = Path(__file__).resolve().parents[2]
 MIGRATION_0005 = ROOT_DIR / "migrations" / "0005_pipeline_artifacts.sql"
+MIGRATION_0008 = ROOT_DIR / "migrations" / "0008_gate_markers.sql"
 
 TEST_DB_NAME = "pipeline_test"
 TEST_DSN = "postgresql://postgres:postgres@127.0.0.1:5432/pipeline_test"
@@ -48,6 +50,7 @@ def _bootstrap_database() -> None:
         connection = await asyncpg.connect(TEST_DSN)
         try:
             await connection.execute(MIGRATION_0005.read_text(encoding="utf-8"))
+            await connection.execute(MIGRATION_0008.read_text(encoding="utf-8"))
         finally:
             await connection.close()
 
@@ -98,11 +101,13 @@ def test_save_get_roundtrip_preserves_jsonb(pipeline_test_database):
         assert isinstance(saved["updated_at"], float) and saved["updated_at"] > 0
 
         row = await get(database, "proj-1", "outline")
-        # Task 8 起 get() 带出 source_run_id（改稿脑回滚要按旧 provenance 原样写回）
+        # Task 8 起 get() 带出 source_run_id（改稿脑回滚要按旧 provenance 原样写回）；
+        # 0008 起 findings 缺省 []（save 不传 findings 的既有行为不变）
         assert row == {
             "content": SAMPLE_OUTLINE,
             "schema_version": "",
             "source_run_id": "",
+            "findings": [],
             "updated_at": saved["updated_at"],
         }
 
@@ -171,5 +176,55 @@ def test_source_run_id_defaults_to_empty(pipeline_test_database):
         await save(database, "proj-1", "art", {"source": "剧名"})
         row = (await list_all(database, "proj-1"))[0]
         assert row["source_run_id"] == ""
+
+    _run_scenario(scenario)
+
+
+# ---------------------------------------------------------------------------
+# 0008（gate severity tiers Task 3）：findings 列——None 保留 / [] 清空 / 值覆盖
+# ---------------------------------------------------------------------------
+
+ADVISORY_MARKERS = [
+    {"gate": "validate", "rule": "risk-flag", "severity": "advisory",
+     "detail": "第 2 集缺「雨戏」预警"},
+]
+
+
+def test_save_with_findings_roundtrips_via_get_and_list_all(pipeline_test_database):
+    async def scenario(database) -> None:
+        await save(database, "proj-marks", "outline", SAMPLE_OUTLINE,
+                   source_run_id="stage:outline", findings=ADVISORY_MARKERS)
+        row = await get(database, "proj-marks", "outline")
+        assert row["findings"] == ADVISORY_MARKERS  # JSONB 往返保形（含中文）
+        rows = await list_all(database, "proj-marks")
+        assert rows[0]["findings"] == ADVISORY_MARKERS
+        # 不传 findings 的新行：落列默认 []（与 0008 的 DEFAULT 一致）
+        await save(database, "proj-marks", "art", {"source": "另一产物"})
+        assert (await get(database, "proj-marks", "art"))["findings"] == []
+
+    _run_scenario(scenario)
+
+
+def test_save_findings_none_preserves_existing_markers(pipeline_test_database):
+    async def scenario(database) -> None:
+        await save(database, "proj-keep", "script",
+                   {"episodes": [{"ep": 1}]}, findings=ADVISORY_MARKERS)
+        # 既有调用点形态（导入/集级编辑/改稿 apply）：不传 findings —— 覆盖
+        # content/source_run_id 时绝不触碰标记列
+        await save(database, "proj-keep", "script",
+                   {"episodes": [{"ep": 1}, {"ep": 2}]}, source_run_id="stage:script")
+        row = await get(database, "proj-keep", "script")
+        assert row["findings"] == ADVISORY_MARKERS  # None = 保留
+        assert row["content"] == {"episodes": [{"ep": 1}, {"ep": 2}]}  # 其余列照常刷新
+
+    _run_scenario(scenario)
+
+
+def test_save_findings_empty_list_explicitly_clears(pipeline_test_database):
+    async def scenario(database) -> None:
+        await save(database, "proj-clear", "outline", SAMPLE_OUTLINE,
+                   findings=ADVISORY_MARKERS)
+        await save(database, "proj-clear", "outline", SAMPLE_OUTLINE, findings=[])
+        assert (await get(database, "proj-clear", "outline"))["findings"] == []
 
     _run_scenario(scenario)

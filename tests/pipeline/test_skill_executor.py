@@ -1027,9 +1027,11 @@ def test_run_stage_advisory_only_failure_passes_with_markers(pipeline_test_datab
         # findings 携带 advisory 标记（outline 无 save_merge → 没有 import findings）
         assert result.findings == [{"gate": "validate", "rule": "risk-flag",
                                     "severity": "advisory", "detail": "第 2 集缺「雨戏」预警"}]
-        # 产物已落库，内容与稿一致
+        # 产物已落库，内容与稿一致；advisory 标记随 save(findings=...) 落在产物行
+        # （0008 起 API 可读，Task 4 前端面板的数据源）
         saved = await pipeline_repository.get(database, "proj-advisory", "outline")
         assert saved["content"]["episodes"] == good_outline["episodes"]
+        assert saved["findings"] == result.findings
         # 事件流：门 ok=False 但带 advisory 计数；收尾 done ok=True
         assert [e for e in events if e["type"] == "gate"] == [
             {"type": "gate", "ok": False, "round": 4, "advisory": 1}]
