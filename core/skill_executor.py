@@ -210,6 +210,7 @@ class StageResult:
     iterations: int
     gate_log: list[str] = field(default_factory=list)
     findings: list[dict] = field(default_factory=list)   # [{"gate": ..., "detail": ...}]
+    draft: dict | None = None   # 失败时的最终草稿（A：给编辑器续跑用）；成功路径 None
 
 
 class LLMPort(Protocol):
@@ -549,6 +550,8 @@ async def run_stage(
     llm: LLMPort,
     max_iterations: int = 5,
     on_event=None,
+    initial_draft: dict | None = None,
+    user_instruction: str = "",
 ) -> StageResult:
     """跑一个创作阶段：有界 agent loop，门过才落库，超限绝不落库。
 
@@ -557,6 +560,10 @@ async def run_stage(
     chain_repair（填表型）的 finish 前置组装检查：缺键/空键直接打回、不置
     finished，被拒组装轮不消耗门预算（循环上界随 finish_rejections 动态抬高）；
     预算语义 = 权威门运行次数，锁 3 次。
+    失败恢复（failure-recovery）：initial_draft 是用户在编辑器改过的草稿——作为
+    起点预置进 state 并随种子 user 消息进对话（user_instruction 是点名的修改
+    意见）；种子只换起点，门/预算/组装检查一概不动。失败退出时 StageResult.draft
+    带回最终草稿，成功路径 draft=None（产物已落库，草稿无处安放）。
     """
     spec = STAGE_SPECS[stage]
     # chain_repair（填表型，规格 8.1）：单次产全文 + 至多两轮修复——预算按"权威门
@@ -583,6 +590,21 @@ async def run_stage(
         {"role": "system", "content": _compose_system(spec)},
         {"role": "user", "content": user_content},
     ]
+    # 失败恢复（failure-recovery Task 1）：种子注入——用户改过的草稿预置为起点
+    # （浅拷贝隔离，write_draft 的后续覆盖不回写调用方的 dict），点名的修改意见
+    # 与草稿 JSON 一起拼成种子 user 消息追加在对话末尾；不传新参时行为与旧版
+    # 完全一致（空草稿、无种子消息），runner/冒烟 CLI 零改动。
+    state["draft"] = dict(initial_draft) if initial_draft else {}
+    seed_parts = []
+    if initial_draft:
+        seed_parts.append("【用户修改后的当前草稿】\n"
+                          + json.dumps(initial_draft, ensure_ascii=False, indent=2))
+    if user_instruction.strip():
+        seed_parts.append("【用户意见】\n" + user_instruction.strip())
+    if seed_parts:
+        seed_parts.append("请基于这份草稿继续：只修复被点名的问题，"
+                          "没有点名且已写好的键不要重写。")
+        messages.append({"role": "user", "content": "\n\n".join(seed_parts)})
     findings: list[dict] = []
     # while 化（原 for range）：chain_repair 的上界 = min(max_iterations, 3) +
     # min(finish_rejections, 3)，拒绝发生在轮内，必须每轮重算；agent 型上界恒定。
@@ -655,7 +677,8 @@ async def run_stage(
                                            content,
                                            source_run_id=f"stage:{stage}")
             on_event and on_event({"type": "done", "ok": True})
-            return StageResult(True, spec["artifact"], rnd, gate_log, import_findings)
+            return StageResult(True, spec["artifact"], rnd, gate_log, import_findings,
+                               draft=None)   # 成功即落库：草稿不带回（契约见 StageResult.draft）
         findings = [{"gate": "validate", "detail": output[-FINDING_TAIL:]}]
         state["finished"] = False
         # 失败必须把报告喂回对话，模型才知道修哪里（gate_log 只留给调用方）；
@@ -681,7 +704,10 @@ async def run_stage(
                      "detail": last["output"][-FINDING_TAIL:] if last
                      else f"{rnd} 轮内未 finish，无质量门结果"}]
     on_event and on_event({"type": "done", "ok": False})
-    return StageResult(False, spec["artifact"], rnd, gate_log, findings)
+    # 迭代耗尽绝不落库，但模型写过的草稿要带回（failure-recovery Task 1）：
+    # StageResult.draft 是编辑器续跑的起点，别让烧掉的预算归零。
+    return StageResult(False, spec["artifact"], rnd, gate_log, findings,
+                       draft=state["draft"])
 
 
 # ---------------------------------------------------------------------------

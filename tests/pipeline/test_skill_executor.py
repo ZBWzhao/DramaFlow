@@ -860,3 +860,76 @@ def test_chain_repair_rejection_rounds_clamped_at_plus3(pipeline_test_database):
         assert await pipeline_repository.get(database, "proj-cast-clamp", "characters") is None
 
     _run_scenario(scenario, pipeline_test_database)
+
+
+# ---------------------------------------------------------------------------
+# failure-recovery Task 1：草稿种子（编辑器改稿续跑）+ StageResult.draft（失败带回）
+# ---------------------------------------------------------------------------
+
+def test_run_stage_seeds_initial_draft_and_instruction(pipeline_test_database):
+    """编辑器续跑入口：initial_draft 预置已写好的键 + user_instruction 点名意见——
+    种子作为最后一条 user 消息进 r1 对话（草稿 JSON 与意见原文都在）；
+    模型只补缺键即 finish，门照常过、产物照常落库，且模型没重写的键
+    保留种子值（种子只换起点，门/预算/组装检查一概不动）。"""
+
+    async def scenario(database) -> None:
+        good_outline = json.loads(FIXTURE_OUTLINE.read_text(encoding="utf-8"))
+        # 种子 = 元数据三件（fixture 同款，门必收）；模型脚本只补其余六节
+        seed = {"source": "最后一单", "lang": "zh", "params": good_outline["params"]}
+        model_part = {k: good_outline[k]
+                      for k in ("adaptation", "characters", "scenes", "props", "beats", "episodes")}
+        turns = (_write_rounds(model_part, [4, 2])
+                 + [[{"name": "run_quality_gate", "args": {}}], [{"name": "finish", "args": {}}]])
+        llm = ScriptedLLM(turns)
+        instruction = "第 4 集 warnings 加「雨戏」"
+        result = await run_stage(database, "proj-seed", "outline", {"novel_text": NOVEL_TEXT},
+                                 llm=llm, initial_draft=seed, user_instruction=instruction)
+        assert result.ok and result.iterations == 4
+        # r1 对话快照：种子消息是最后一条（system/task+原文 之后追加），带草稿 JSON 与意见原文
+        seed_msg = llm.calls[0][-1]
+        assert seed_msg["role"] == "user"
+        assert "【用户修改后的当前草稿】" in seed_msg["content"]
+        assert json.dumps(seed, ensure_ascii=False, indent=2) in seed_msg["content"]
+        assert "【用户意见】" in seed_msg["content"] and instruction in seed_msg["content"]
+        assert "只修复被点名的问题" in seed_msg["content"]
+        # 模型脚本里没有种子键（write_rounds 按 model_part 切轮）——落库产物的
+        # source/lang/params 只能来自种子：模型没重写的键保留种子值
+        saved = await pipeline_repository.get(database, "proj-seed", "outline")
+        assert saved["content"]["source"] == seed["source"]
+        assert saved["content"]["lang"] == seed["lang"]
+        assert saved["content"]["params"] == seed["params"]
+        # 模型补写的六节与 fixture 一致（种子不妨碍正常产出）
+        for key in model_part:
+            assert saved["content"][key] == good_outline[key]
+        # 成功路径契约：draft=None（失败才带草稿）
+        assert result.draft is None
+
+    _run_scenario(scenario, pipeline_test_database)
+
+
+def test_stage_result_carries_draft_on_failure(pipeline_test_database):
+    """门失败且预算耗尽：StageResult.draft 带回模型写过的最终草稿（Task 3 编辑器
+    续跑的起点）——非 None、非空，且写过的键原样保留；产物照旧绝不落库。"""
+    cast = _load("cast.json")
+
+    async def scenario(database) -> None:
+        def _turn():
+            return [{"name": "write_draft", "args": {"section": "source", "data": cast["source"]}},
+                    {"name": "write_draft", "args": {"section": "lang", "data": cast["lang"]}},
+                    {"name": "write_draft", "args": {"section": "summary", "data": cast["summary"]}},
+                    {"name": "write_draft", "args": {"section": "characters",
+                                                     "data": _gate_fail_characters(cast)}},  # 门必拦
+                    {"name": "finish", "args": {}}]
+
+        llm = ScriptedLLM([_turn() for _ in range(4)])    # 同 budget-lock：门拦满 3 次即到顶
+        result = await run_stage(database, "proj-fail-draft", "characters",
+                                 {"novel_text": NOVEL_TEXT, "outline": _load("outline.json")},
+                                 llm=llm, max_iterations=9)
+        assert result.ok is False
+        assert result.draft                               # 非 None、非空
+        assert result.draft["source"] == cast["source"]
+        assert result.draft["summary"] == cast["summary"]
+        assert result.draft["characters"] == _gate_fail_characters(cast)  # 模型写过的键原样带回
+        assert await pipeline_repository.get(database, "proj-fail-draft", "characters") is None
+
+    _run_scenario(scenario, pipeline_test_database)
