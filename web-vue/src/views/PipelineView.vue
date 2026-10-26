@@ -6,7 +6,8 @@
  * 列表为空 → 四类全是空态，页面本身不报错。上游产物是「尽力而为」的 JSON：
  * 各面板内部对所有字段防御取值（缺键渲染空）。
  * 注意：script 详情顶层另有响应视图 episodes[]，本页不消费 script，四类面板
- * 一律只从 detail.content 渲染。
+ * 一律只从 detail.content 渲染；详情顶层 findings（advisory 门标记，0008）另行
+ * 透传给面板底部的 GateMarkers（Task 4）。
  *
  * 面板状态化（阶段 2 Task 6）：本项目有活动 run 时，容器从 run.stages 派生当前
  * 阶段状态——idle（灰）/running（进度条 + 最近一条事件）/failed（红 + 重试，仅
@@ -41,6 +42,13 @@ const cur = computed(() => tabs.find((t) => t.key === tab.value) || tabs[0]);
 const content = computed(() => {
   const c = studio.pipeline?.detail?.[cur.value.type]?.content;
   return c && typeof c === "object" ? c : null;
+});
+
+/* advisory 质量门标记（Task 4）：详情顶层 findings 数组（0008 落库字段）；
+ * 空数组 / 缺键照常透传，GateMarkers 空时不渲染，面板零视觉差异 */
+const findings = computed(() => {
+  const f = studio.pipeline?.detail?.[cur.value.type]?.findings;
+  return Array.isArray(f) ? f : [];
 });
 
 /* 元信息一行：schema_version · 导入时间 · 来源批次；都缺就不显示 */
@@ -199,7 +207,7 @@ onMounted(async () => {
       </div>
 
       <!-- 面板：有 content 就渲染（running 时那是上一版，状态条会说明）；没有 → 状态化空态 -->
-      <component :is="cur.comp" v-if="content" :content="content" :state="stageState" />
+      <component :is="cur.comp" v-if="content" :content="content" :findings="findings" :state="stageState" />
       <div v-else-if="stageState === 'done'" class="pv-none">
         「{{ cur.label }}」产物已落库，详情加载中——请稍候，长时间为空请刷新页面。
       </div>

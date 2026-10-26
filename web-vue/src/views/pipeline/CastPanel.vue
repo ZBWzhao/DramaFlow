@@ -9,12 +9,16 @@
  */
 import { computed, ref } from "vue";
 import { ElMessage } from "element-plus";
+import GateMarkers from "./GateMarkers.vue";
 
 const props = defineProps({
   content: { type: Object, default: null },
   // 面板状态（Task 6，容器 PipelineView 传入）：idle/running/done/failed；
   // "" = 无活动 run 的纯只读现状。running 时内容是上一版，降透明度示意。
   state: { type: String, default: "" },
+  // advisory 质量门标记（Task 4，容器 PipelineView 传入）：详情顶层 findings；
+  // 空数组 / 缺键 → GateMarkers 不渲染，面板零视觉差异。
+  findings: { type: Array, default: () => [] },
 });
 
 const c = computed(() => (props.content && typeof props.content === "object" ? props.content : {}));
@@ -117,6 +121,9 @@ function voiceMeta(v) {
       </article>
     </div>
     <div v-else class="cp-none">—</div>
+
+    <!-- advisory 质量门标记（Task 4）：产物内容下方折叠展示；findings 为空不渲染 -->
+    <GateMarkers :findings="findings" />
   </div>
 </template>
 
