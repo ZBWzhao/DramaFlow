@@ -990,9 +990,13 @@ function main(argv) {
     if (problems.length) {
       console.error(`✗ ${problems.length} 处违规：\n`);
       for (const x of problems) console.error('  ' + x);
+      const gates = gateReport(doc, names);
+      console.log('<<GATE-RULES>>' + JSON.stringify(gates.map(g => ({ id: g.id, ok: g.ok, detail: g.detail }))));
       process.exit(1);
     }
     console.log(`✓ ${doc.scenes.length} 个场景${(doc.props ?? []).length ? ` + ${doc.props.length} 件道具` : ''}全部通过校验`);
+    const gates = gateReport(doc, names);
+    console.log('<<GATE-RULES>>' + JSON.stringify(gates.map(g => ({ id: g.id, ok: g.ok, detail: g.detail }))));
     return;
   }
 

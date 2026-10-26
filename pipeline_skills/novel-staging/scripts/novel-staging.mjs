@@ -1251,9 +1251,13 @@ function main(argv) {
     if (problems.length) {
       console.error(`✗ ${problems.length} 处违规：\n`);
       for (const x of problems) console.error('  ' + x);
+      const gates = gateReport(doc, opts);
+      console.log('<<GATE-RULES>>' + JSON.stringify(gates.map(g => ({ id: g.id, ok: g.ok, detail: g.detail }))));
       process.exit(1);
     }
     console.log(`✓ ${doc.locations.length} 个地点、${doc.scenes.length} 场站位全部通过校验`);
+    const gates = gateReport(doc, opts);
+    console.log('<<GATE-RULES>>' + JSON.stringify(gates.map(g => ({ id: g.id, ok: g.ok, detail: g.detail }))));
     return;
   }
 

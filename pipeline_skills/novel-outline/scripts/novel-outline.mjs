@@ -1614,9 +1614,13 @@ function main(argv) {
     if (problems.length) {
       console.error(`✗ ${problems.length} 处违规（stage=${stage}）：\n`);
       for (const x of problems) console.error('  ' + x);
+      const gates = gateReport(readJson(path));
+      console.log('<<GATE-RULES>>' + JSON.stringify(gates.map(g => ({ id: g.id, ok: g.ok, detail: g.detail }))));
       process.exit(1);
     }
     console.log(`✓ 通过校验（stage=${stage}）`);
+    const gates = gateReport(readJson(path));
+    console.log('<<GATE-RULES>>' + JSON.stringify(gates.map(g => ({ id: g.id, ok: g.ok, detail: g.detail }))));
     return;
   }
 

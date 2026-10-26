@@ -1039,10 +1039,14 @@ function main(argv) {
     if (problems.length) {
       console.error(`✗ ${problems.length} 处违规：\n`);
       for (const x of problems) console.error('  ' + x);
+      const gates = gateReport(doc, ctx);
+      console.log('<<GATE-RULES>>' + JSON.stringify(gates.map(g => ({ id: g.id, ok: g.ok, detail: g.detail }))));
       process.exit(1);
     }
     const st = computeStats(doc);
     console.log(`✓ ${st.totals.episodes} 集 / ${st.totals.scenes} 场 / ${st.totals.lines} 句台词全部通过校验（预估 ${st.totals.estSeconds}s / 目标 ${st.totals.targetSeconds}s）`);
+    const gates = gateReport(doc, ctx);
+    console.log('<<GATE-RULES>>' + JSON.stringify(gates.map(g => ({ id: g.id, ok: g.ok, detail: g.detail }))));
     return;
   }
 

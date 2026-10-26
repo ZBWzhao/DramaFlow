@@ -1989,10 +1989,14 @@ function main(argv) {
     if (problems.length) {
       console.error(`✗ ${problems.length} 处违规：\n`);
       for (const x of problems) console.error('  ' + x);
+      const gates = gateReport(board, ctx);
+      console.log('<<GATE-RULES>>' + JSON.stringify(gates.map(g => ({ id: g.id, ok: g.ok, detail: g.detail }))));
       process.exit(1);
     }
     const st = computeStats(board, ctx.script);
     console.log(`✓ ${st.episodes.length} 集 / ${st.totals.segments} 段 / ${st.totals.cuts} 个分镜全部通过校验（共 ${st.totals.seconds}s / 目标 ${st.totals.targetSeconds}s / ${st.batches.length} 个生成批次）`);
+    const gates = gateReport(board, ctx);
+    console.log('<<GATE-RULES>>' + JSON.stringify(gates.map(g => ({ id: g.id, ok: g.ok, detail: g.detail }))));
     return;
   }
 

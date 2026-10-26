@@ -1798,12 +1798,23 @@ function main(argv) {
           '用 `ui-template` 生成骨架后翻译填进去。',
       );
     }
+    // 哨兵用规则分桶：只在输出层把已判定的 problems 归档成规则条目，判定逻辑零改动——
+    // advisory 两条单列 id（引文逐字 / voice.prompt 长度），其余结构违规全进 cast-structure
+    const gateIdOf = (p) =>
+      p.includes('字符，超过 400') ? 'voice-prompt-length'
+        : p.includes('引文不是原文逐字片段') ? 'quote-verbatim' : 'cast-structure';
+    const gates = ['voice-prompt-length', 'quote-verbatim', 'cast-structure'].map((id) => {
+      const mine = problems.filter((p) => gateIdOf(p) === id);
+      return { id, ok: !mine.length, detail: mine.join('；') };
+    });
     if (problems.length) {
       console.error(`✗ ${problems.length} 处违规：\n`);
       for (const p of problems) console.error('  ' + p);
+      console.log('<<GATE-RULES>>' + JSON.stringify(gates.map(g => ({ id: g.id, ok: g.ok, detail: g.detail }))));
       process.exit(1);
     }
     console.log(`✓ ${characters.length} 个角色全部通过校验（lang=${lang}）`);
+    console.log('<<GATE-RULES>>' + JSON.stringify(gates.map(g => ({ id: g.id, ok: g.ok, detail: g.detail }))));
     return;
   }
 
