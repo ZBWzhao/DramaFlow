@@ -5,7 +5,8 @@
 - GET  /runs/{run_id}/events                 SSE 进度直播（text/event-stream）
 - POST /runs/{run_id}/approve                确认门放行（仅 gated，不可跳过 → 否则 409）
 - POST /runs/{run_id}/retry  {stage, draft?, instruction?}
-                                            重置失败阶段重跑（仅 failed → 否则 409；草稿/意见为 failure-recovery 的可选重试种子）
+                                            重置失败阶段重跑（仅 failed → 否则 409；草稿/意见为 failure-recovery 的可选重试种子，draft 须 JSON 对象且序列化 ≤ 256KB）
+- GET  /runs/{run_id}/drafts/{stage}        读重试种子（failure-recovery：{draft, instruction}；run 不存在 404，无种子空默认）
 - POST /runs/{run_id}/feedback {text}        追加人工意见（确认前「记录意见」，随运行留档，供后续改稿参考）
 - GET  /projects/{canvas}/runs               按项目列最近 runs（fastfollow Task 2：F5 重挂载恢复运行卡）
 
@@ -47,6 +48,10 @@ _runner: PipelineRunner | None = None
 _broker: EventBroker | None = None
 
 NO_DB_MESSAGE = "pipeline runs 需要 Postgres（compose.postgres.yml）"
+
+# retry draft 的序列化字节数上限（failure-recovery Task 3）：编辑器改稿不至于
+# 天大，但单值 jsonb 也得有界——防一条重试把 pipeline_runs 行拖成超大行。
+DRAFT_MAX_BYTES = 256 * 1024
 
 
 def configure(*, store: RunStore, runner: PipelineRunner, broker: EventBroker) -> None:
@@ -224,9 +229,18 @@ async def approve_run(run_id: str) -> dict:
 @router.post("/runs/{run_id}/retry")
 async def retry_run(run_id: str, body: RetryBody) -> dict:
     store, runner, _broker = await _deps()
-    if body.draft is not None and not isinstance(body.draft, dict):
+    if body.draft is not None:
         # draft 必须是 JSON 对象；类型字段用 Any 收下再手检，才能回 400 而非 422
-        raise HTTPException(status_code=400, detail="draft 必须是 JSON 对象")
+        if not isinstance(body.draft, dict):
+            raise HTTPException(status_code=400, detail="draft 必须是 JSON 对象")
+        # 大小上限按落库口径量（store.set_retry_seed 同款 ensure_ascii=False
+        # 序列化）：超过 256KB 的草稿是客户端契约错误 → 400，不触达重试链路
+        if len(json.dumps(body.draft, ensure_ascii=False,
+                          default=str).encode("utf-8")) > DRAFT_MAX_BYTES:
+            raise HTTPException(
+                status_code=400,
+                detail=f"draft 序列化后超过 {DRAFT_MAX_BYTES // 1024}KB 上限",
+            )
     if await store.get(run_id) is None:
         raise HTTPException(status_code=404, detail=f"运行不存在：{run_id}")
     try:
@@ -238,6 +252,18 @@ async def retry_run(run_id: str, body: RetryBody) -> dict:
     except RuntimeError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     return {"ok": True, "run_id": run_id, "stage": body.stage, "status": "running"}
+
+
+@router.get("/runs/{run_id}/drafts/{stage}")
+async def read_stage_draft(run_id: str, stage: str) -> dict:
+    """读重试种子（failure-recovery Task 3）：失败阶段草稿 + 意见，前端失败卡
+    「查看/编辑草稿」的数据源。run 不存在 404；无种子回 get_retry_seed 的
+    零值 {"draft": {}, "instruction": ""}（空草稿交给前端当空白起点）。"""
+    store, _runner, _broker = await _deps()
+    if await store.get(run_id) is None:
+        raise HTTPException(status_code=404, detail=f"运行不存在：{run_id}")
+    seed = await store.get_retry_seed(run_id, stage)
+    return {"draft": seed["draft"], "instruction": seed["instruction"]}
 
 
 @router.post("/runs/{run_id}/feedback")

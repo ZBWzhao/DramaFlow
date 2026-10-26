@@ -41,16 +41,20 @@ class FakeExecutor:
 
     def __init__(self):
         self.calls: list[str] = []
+        self.kwargs: list[dict] = []  # 每次 executor 调用的 **kw（种子注入断言用）
         self.fail_outcome = False
+        self.fail_draft: dict | None = None  # 失败时随 StageResult 带回的草稿
         self.delay = 0.0
 
     async def __call__(self, db, project, stage, inputs, **kw):
         self.calls.append(stage)
+        self.kwargs.append(dict(kw))
         if self.delay:
             await asyncio.sleep(self.delay)
         if stage == "outline" and self.fail_outcome:
             self.fail_outcome = False
-            return StageResult(False, stage, 5, ["gate: fail"], [{"gate": "x", "detail": "d"}])
+            return StageResult(False, stage, 5, ["gate: fail"], [{"gate": "x", "detail": "d"}],
+                               draft=self.fail_draft)
         return StageResult(True, stage, 1, ["ok"], [])
 
 
@@ -200,6 +204,71 @@ def test_retry_resets_failed_stage_and_reruns(runs_api):
     assert row["findings"] == []  # 重试清掉上一轮失败 findings
     # done 后再 retry：409
     assert client.post(f"/api/pipeline/runs/{run_id}/retry", json={"stage": "outline"}).status_code == 409
+
+
+# ---------------------------------------------------------------------------
+# failure-recovery Task 3：草稿 GET 端点三态 + retry 种子透传与 256KB 上限
+# ---------------------------------------------------------------------------
+
+def test_get_stage_draft_three_states(runs_api):
+    """GET /runs/{id}/drafts/{stage}：run 不存在 404、无种子空默认、有种子返回
+    真失败路径落账的草稿与意见（前端失败卡「查看/编辑草稿」的数据源）。"""
+    client = runs_api.client
+
+    # run 不存在 → 404
+    assert client.get("/api/pipeline/runs/missing/drafts/outline").status_code == 404
+
+    # 无种子：新 run 停在 gated（成功路径已清种子）→ get_retry_seed 零值
+    run_id = _create_run(client, project="proj-drafts")
+    _poll_run(client, run_id, {"gated"})
+    assert client.get(f"/api/pipeline/runs/{run_id}/drafts/outline").json() == {
+        "draft": {}, "instruction": "",
+    }
+
+    # 有种子：失败落账的 StageResult.draft 可从端点取到（种子先写、状态后翻）
+    runs_api.executor.fail_draft = {"episodes": ["第1集：改开头"]}
+    runs_api.executor.fail_outcome = True
+    failed_id = _create_run(client, project="proj-drafts-fail")
+    _poll_run(client, failed_id, {"failed"})
+    assert client.get(f"/api/pipeline/runs/{failed_id}/drafts/outline").json() == {
+        "draft": {"episodes": ["第1集：改开头"]}, "instruction": "",
+    }
+
+    # 意见列（retry_instruction 单值）随种子一并返回
+    client.portal.call(functools.partial(
+        runs_api.store.set_retry_seed, failed_id, "outline",
+        {"episodes": ["第1集：再改"]}, "开头节奏太慢",
+    ))
+    assert client.get(f"/api/pipeline/runs/{failed_id}/drafts/outline").json() == {
+        "draft": {"episodes": ["第1集：再改"]}, "instruction": "开头节奏太慢",
+    }
+
+
+def test_retry_seed_forwarding_and_size_cap(runs_api):
+    """retry：draft 序列化 > 256KB → 400 且不触发重跑；合尺寸的 draft+instruction
+    透传成种子并注入执行器（initial_draft / user_instruction）。"""
+    client = runs_api.client
+    runs_api.executor.fail_outcome = True
+    run_id = _create_run(client, project="proj-retry-cap")
+    _poll_run(client, run_id, {"failed"})
+
+    oversized = {"k": "x" * (256 * 1024)}  # 序列化 262153 字节 > 256KB
+    response = client.post(f"/api/pipeline/runs/{run_id}/retry",
+                           json={"stage": "outline", "draft": oversized})
+    assert response.status_code == 400, response.text
+    # 400 的请求不触达重试链路：状态仍 failed，执行器没有被再次调用
+    assert client.get(f"/api/pipeline/runs/{run_id}").json()["status"] == "failed"
+    assert runs_api.executor.calls == ["outline"]
+
+    draft = {"k": "x" * (256 * 1024 - 16)}  # 序列化 262137 字节 ≤ 256KB：贴线可过
+    response = client.post(f"/api/pipeline/runs/{run_id}/retry",
+                           json={"stage": "outline", "draft": draft,
+                                 "instruction": "只补 warnings"})
+    assert response.status_code == 200, response.text
+    _poll_run(client, run_id, {"gated"})  # outline 重跑过门照旧停车（门不可跳过）
+    assert runs_api.executor.calls == ["outline", "outline"]
+    assert runs_api.executor.kwargs[-1]["initial_draft"] == draft
+    assert runs_api.executor.kwargs[-1]["user_instruction"] == "只补 warnings"
 
 
 def test_feedback_appends_lines(runs_api):
