@@ -16,7 +16,7 @@
 
 判据不变：「下游会不会机械做不下去」。v1 保守挂 blocking 的叙事质量类按此降 advisory。
 
-### outline（14 条 → advisory 10 / blocking 4）
+### outline（14 条 → advisory 11 / blocking 3）
 
 | 规则 id | v1 | v2 | 理由 |
 |---|---|---|---|
