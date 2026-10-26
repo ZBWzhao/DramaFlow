@@ -808,10 +808,16 @@ export async function approveRun() {
   _openRunStream(); // resume 可能在新流 hello 之前就跑完——终态由快照兜底
 }
 
-/** 重置失败阶段重跑（仅 failed；其余状态服务端 409）。注意重试确认门阶段
- * 过门后会再次停在 gated——确认卡的可见性完全跟随 status，门后依旧等人工。 */
-export async function retryRun(stage) {
-  await postJSON(`/api/pipeline/runs/${studio.run.id}/retry`, { stage });
+/** 重置失败阶段重跑（仅 failed；其余状态服务端 409）。可选携带失败恢复种子
+ * （failure-recovery Task 4）：draft = 用户在失败卡编辑器改过的阶段草稿（须为
+ * JSON 对象且序列化 ≤256KB，否则服务端 400），instruction = 点名修改意见；
+ * 两者都不传 = 原样盲重试（后端空参清旧种子，意见不跨轮残留）。注意重试确认门
+ * 阶段过门后会再次停在 gated——确认卡的可见性完全跟随 status，门后依旧等人工。 */
+export async function retryRun(stage, { draft, instruction } = {}) {
+  const body = { stage };
+  if (draft !== undefined) body.draft = draft;
+  if (instruction) body.instruction = instruction;
+  await postJSON(`/api/pipeline/runs/${studio.run.id}/retry`, body);
   studio.run.status = "running";
   _openRunStream();
 }
