@@ -14,6 +14,7 @@ STAGE_SPECS 真规格六阶段齐备（Task 5 outline+script、Task 6 制片四�
 from __future__ import annotations
 
 import asyncio
+from pathlib import Path
 
 import asyncpg
 import pytest
@@ -23,6 +24,9 @@ from core.pipeline_run import EventBroker, GATE_STAGE, PipelineRunner, RunStore,
 from core.postgres import PostgresDatabase
 from core.skill_executor import StageResult
 from test_pipeline_repository import TEST_DSN, pipeline_test_database  # noqa: F401  session 级库装配
+
+ROOT_DIR = Path(__file__).resolve().parents[2]
+MIGRATION_0007 = ROOT_DIR / "migrations" / "0007_failure_recovery.sql"
 
 
 class FakeExecutor:
@@ -56,6 +60,25 @@ class FakeExecutor:
 ALL_STAGE_SPECS_STUB = {stage: {"artifact": stage, "gate_needs": []} for stage in STAGE_ORDER}
 
 
+class SeedRecordingExecutor:
+    """failure-recovery Task 2 替身：记录每次收到的种子 kwargs；首轮失败带回
+    StageResult.draft，重试轮按「门过才落库」的 run_stage 约定写产物并成功。"""
+
+    def __init__(self) -> None:
+        self.seen: list[dict] = []
+        self.fail_first = True
+
+    async def __call__(self, db, project, stage, inputs, **kw):
+        self.seen.append({"initial_draft": kw.get("initial_draft"),
+                          "user_instruction": kw.get("user_instruction")})
+        if self.fail_first:
+            self.fail_first = False
+            return StageResult(False, stage, 5, ["gate: fail"],
+                               [{"gate": "x", "detail": "d"}], draft={"source": "x"})
+        await pipeline_repository.save(db, project, stage, {"source": "y"})
+        return StageResult(True, stage, 1, ["ok"], [], draft=None)
+
+
 def _run_scenario(scenario) -> None:
     """在同一个 asyncio.run 里装配 pool + TRUNCATE + 跑用例 + 关 pool。"""
 
@@ -67,6 +90,10 @@ def _run_scenario(scenario) -> None:
         try:
             await database.pool.execute("TRUNCATE pipeline_runs")
             await database.pool.execute("TRUNCATE pipeline_artifacts")
+            # 0007 列（failure-recovery）在本文件每个场景前幂等补齐：session 级
+            # bootstrap（test_pipeline_repository）只手工跑 0005/0006，新迁移
+            # 落地沿用同一约定——ADD COLUMN IF NOT EXISTS 重复执行无害。
+            await database.pool.execute(MIGRATION_0007.read_text(encoding="utf-8"))
             await scenario(database)
         finally:
             await database.pool.close()
@@ -326,6 +353,122 @@ def test_retry_guards(pipeline_test_database):
             await runner.retry(run["run_id"], "outline")
 
     _run_scenario(scenario)
+
+
+# ---------------------------------------------------------------------------
+# failure-recovery Task 2：重试种子管道（stage_drafts 列 + 种子注入 + 端点透传）
+# ---------------------------------------------------------------------------
+
+def test_retry_seed_roundtrip_and_clear(pipeline_test_database):
+    """种子的存/取/清：draft 按 stage 位隔离（jsonb 顶层合并/删位），instruction
+    单值；clear 同时归零两位，但只清本阶段的 draft 位（其他阶段原样保留）。"""
+    async def scenario(database) -> None:
+        store = RunStore(database)
+        rid = (await store.create("p-seed", "小说正文……"))["run_id"]
+        # 无种子：零值默认（draft={} / instruction=""，消费方无需判 None）
+        assert await store.get_retry_seed(rid, "outline") == {"draft": {}, "instruction": ""}
+
+        await store.save_stage_draft(rid, "outline", {"episodes": []})
+        assert await store.get_retry_seed(rid, "outline") == {
+            "draft": {"episodes": []}, "instruction": "",
+        }
+        # set_retry_seed 一次 UPDATE 写两位（runner.retry 的落位方式）
+        await store.set_retry_seed(rid, "outline", {"episodes": [], "source": "改过的"},
+                                   "只补 warnings")
+        assert await store.get_retry_seed(rid, "outline") == {
+            "draft": {"episodes": [], "source": "改过的"}, "instruction": "只补 warnings",
+        }
+        # 不同阶段的草稿位互不覆盖；_row 两个新键带出
+        await store.save_stage_draft(rid, "script", {"eps": [1]})
+        row = await store.get(rid)
+        assert row["stage_drafts"] == {"outline": {"episodes": [], "source": "改过的"},
+                                       "script": {"eps": [1]}}
+        assert row["retry_instruction"] == "只补 warnings"
+
+        await store.clear_retry_seed(rid, "outline")
+        assert await store.get_retry_seed(rid, "outline") == {"draft": {}, "instruction": ""}
+        row = await store.get(rid)
+        assert row["stage_drafts"] == {"script": {"eps": [1]}}  # 只清 outline 位
+        assert row["retry_instruction"] == ""                    # 意见随之归零
+
+    _run_scenario(scenario)
+
+
+def test_runner_failure_persists_draft_and_success_clears(pipeline_test_database, monkeypatch):
+    monkeypatch.setattr(skill_executor, "STAGE_SPECS", dict(ALL_STAGE_SPECS_STUB))
+
+    async def scenario(database) -> None:
+        store, broker = RunStore(database), EventBroker()
+        executor = SeedRecordingExecutor()
+        runner = PipelineRunner(store, database, executor=executor, broker=broker)
+        run = await store.create("p-seed-runner", "小说正文……")
+
+        # 首轮失败：无种子时注入零值；最终草稿落进 stage_drafts（编辑器始终拿到最新一版）
+        await runner.start(run["run_id"])
+        await runner.wait_idle()
+        state = await store.get(run["run_id"])
+        assert state["status"] == "failed" and state["stage"] == "outline"
+        assert executor.seen == [{"initial_draft": {}, "user_instruction": ""}]
+        assert state["stage_drafts"] == {"outline": {"source": "x"}}
+
+        # 带草稿+意见重试：runner 把种子原样喂给 executor；成功即两位清零
+        await runner.retry(run["run_id"], "outline",
+                           draft={"source": "y"}, instruction="只补 warnings")
+        await runner.wait_idle()
+        state = await store.get(run["run_id"])
+        assert executor.seen[1] == {"initial_draft": {"source": "y"},
+                                    "user_instruction": "只补 warnings"}
+        assert state["stage_drafts"] == {} and state["retry_instruction"] == ""
+        assert state["status"] == "gated"  # outline 过确认门照旧停车（红线不变）
+        saved = await pipeline_repository.get(database, "p-seed-runner", "outline")
+        assert saved["content"] == {"source": "y"}  # 产物落库（替身按门过约定写入）
+
+    _run_scenario(scenario)
+
+
+def test_retry_endpoint_accepts_draft_and_instruction(monkeypatch):
+    """retry 请求体扩展 draft/instruction：端点原样透传给 runner（假 runner 捕获
+    参数）；draft 非对象是客户端契约错误 → 400，且不触达 runner。"""
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+
+    from server import pipeline_runs as runs_module
+
+    class CapturingRunner:
+        def __init__(self) -> None:
+            self.calls: list[dict] = []
+
+        async def retry(self, run_id, stage, draft=None, instruction=""):
+            self.calls.append({"run_id": run_id, "stage": stage,
+                               "draft": draft, "instruction": instruction})
+
+    class FakeStore:
+        async def get(self, run_id):
+            return {"run_id": run_id, "status": "failed", "stage": "outline"}
+
+    runner = CapturingRunner()
+    monkeypatch.setattr(runs_module, "_store", FakeStore())
+    monkeypatch.setattr(runs_module, "_runner", runner)
+    monkeypatch.setattr(runs_module, "_broker", EventBroker())
+
+    # 只挂 runs 路由的最小 app：本测试不碰 DB，也没有全局 lifespan 依赖。
+    app = FastAPI()
+    app.include_router(runs_module.router)
+    with TestClient(app) as client:
+        response = client.post("/api/pipeline/runs/run-seed/retry", json={
+            "stage": "outline", "draft": {"source": "y"}, "instruction": "只补 warnings",
+        })
+        assert response.status_code == 200, response.text
+        assert runner.calls == [{"run_id": "run-seed", "stage": "outline",
+                                 "draft": {"source": "y"},
+                                 "instruction": "只补 warnings"}]
+
+        for bad_draft in (["not", "an", "object"], "手滑发了字符串", 42):
+            response = client.post("/api/pipeline/runs/run-seed/retry", json={
+                "stage": "outline", "draft": bad_draft,
+            })
+            assert response.status_code == 400, (bad_draft, response.status_code)
+        assert len(runner.calls) == 1  # 400 的请求不触达 runner
 
 
 def test_store_crud_approve_guard_and_feedback(pipeline_test_database):

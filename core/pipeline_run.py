@@ -63,6 +63,8 @@ class RunStore:
             "status": str(row["status"]),
             "stage": str(row["stage"]),
             "stage_status": _decode_jsonb(row["stage_status"]) or {},
+            "stage_drafts": _decode_jsonb(row["stage_drafts"]) or {},
+            "retry_instruction": str(row["retry_instruction"] or ""),
             "feedback": str(row["feedback"] or ""),
             "findings": _decode_jsonb(row["findings"]),
             "created_at": float(row["created_at"]),
@@ -176,6 +178,67 @@ class RunStore:
         return [{**stage_status[stage], "stage": stage}
                 for stage in STAGE_ORDER if stage in stage_status]
 
+    # -- 重试种子（failure-recovery Task 2，migrations/0007）-----------------
+    #
+    # stage_drafts[stage] 是失败阶段的可编辑草稿位：失败落账时 runner 写入
+    # StageResult.draft（编辑器取最新一版），retry 时被用户改过的版本覆盖；
+    # retry_instruction 是单值意见列——重试唯一失败阶段 ⇒ 同一时刻只有一个
+    # 意见，不随 stage 键控。种子只在「失败落账 / retry 落位 / 成功清除」三点
+    # 被写，SQL 侧 jsonb 合并/删位，不做读改写。
+
+    async def set_retry_seed(self, run_id: str, stage: str,
+                             draft: dict, instruction: str = "") -> None:
+        """重试种子整体落位：stage_drafts[stage] 位与 retry_instruction 一次
+        UPDATE 写完（retry 入口用，避免多次往返）。每次 retry 全量刷新——
+        draft={} / instruction="" 即清位，上一轮的意见不跨轮残留。"""
+        await self._client().execute(
+            "UPDATE pipeline_runs SET"
+            " stage_drafts = COALESCE(stage_drafts, '{}'::jsonb)"
+            "   || jsonb_build_object($2::text, $3::jsonb),"
+            " retry_instruction = $4,"
+            " updated_at = extract(epoch from now())"
+            " WHERE run_id = $1",
+            run_id, stage, json.dumps(draft, ensure_ascii=False, default=str), instruction,
+        )
+
+    async def save_stage_draft(self, run_id: str, stage: str, draft: dict) -> None:
+        """合并一个阶段的草稿进 stage_drafts（失败落账路径：StageResult.draft 或
+        {}）。jsonb || 顶层合并：同名阶段位整条替换，其他阶段位原样保留。"""
+        await self._client().execute(
+            "UPDATE pipeline_runs SET"
+            " stage_drafts = COALESCE(stage_drafts, '{}'::jsonb)"
+            "   || jsonb_build_object($2::text, $3::jsonb),"
+            " updated_at = extract(epoch from now())"
+            " WHERE run_id = $1",
+            run_id, stage, json.dumps(draft, ensure_ascii=False, default=str),
+        )
+
+    async def get_retry_seed(self, run_id: str, stage: str) -> dict:
+        """读重试种子：{"draft": 该阶段草稿（无则 {}）, "instruction": 意见（无则 ""）}。
+        _drive_inner 在 executor 调用前取用；行不存在（理论不可达，调用方已先
+        get 过）返回零值，不炸推进任务。"""
+        row = await self._client().fetchrow(
+            "SELECT stage_drafts -> $2::text AS draft, retry_instruction"
+            " FROM pipeline_runs WHERE run_id = $1",
+            run_id, stage,
+        )
+        if row is None:
+            return {"draft": {}, "instruction": ""}
+        return {"draft": _decode_jsonb(row["draft"]) or {},
+                "instruction": str(row["retry_instruction"] or "")}
+
+    async def clear_retry_seed(self, run_id: str, stage: str) -> None:
+        """清除重试种子（阶段成功路径）：stage_drafts - stage 删本阶段位（其他
+        阶段位不动），retry_instruction 归零——成功即清，种子不留到下一阶段。"""
+        await self._client().execute(
+            "UPDATE pipeline_runs SET"
+            " stage_drafts = COALESCE(stage_drafts, '{}'::jsonb) - $2::text,"
+            " retry_instruction = '',"
+            " updated_at = extract(epoch from now())"
+            " WHERE run_id = $1",
+            run_id, stage,
+        )
+
 
 # ---------------------------------------------------------------------------
 # EventBroker：进程内 run 级扇播
@@ -268,8 +331,16 @@ class PipelineRunner:
         await self._await_previous(run_id)
         await self.start(run_id)
 
-    async def retry(self, run_id: str, stage: str) -> None:
-        """重置失败阶段并重跑：置 pending/attempts=0、清 run 级 findings 后 start。"""
+    async def retry(self, run_id: str, stage: str,
+                    draft: dict | None = None, instruction: str = "") -> None:
+        """重置失败阶段并重跑：置 pending/attempts=0、清 run 级 findings 后 start。
+
+        失败恢复（Task 2）：draft（用户在编辑器改过的失败草稿）与 instruction
+        （点名的修改意见）先落成重试种子——set_retry_seed 一次 UPDATE 同时写
+        stage_drafts[stage] 位与 retry_instruction；每次 retry 全量刷新，空参即
+        清旧种子（意见不跨轮残留）。_drive_inner 随后的 executor 调用经
+        get_retry_seed 取走注入 run_stage；阶段成功后 clear_retry_seed 清位。
+        """
         run = await self.store.get(run_id)
         if run is None:
             raise KeyError(f"运行不存在：{run_id}")
@@ -280,6 +351,7 @@ class PipelineRunner:
         if stage != run["stage"]:
             raise RuntimeError(f"只能重试失败阶段 {run['stage']}")
         await self._await_previous(run_id)  # 上一轮已 failed 但可能还在收尾广播
+        await self.store.set_retry_seed(run_id, stage, draft or {}, instruction or "")
         await self.store.update_stage(
             run_id, stage, {"status": "pending", "attempts": 0, "gate_runs": 0, "findings": []}
         )
@@ -380,9 +452,14 @@ class PipelineRunner:
                 self.broker.publish(run_id, self._relay_event(_stage, event))
 
             try:
+                # 重试种子（failure-recovery Task 2）：上一轮失败草稿 + 用户意见
+                # 在 executor 调用前取走注入 run_stage；无种子时是零值（与不传
+                # 新参的旧行为等价）。读种子放 try 内：store 级意外按基建失败落账。
+                seed = await self.store.get_retry_seed(run_id, stage)
                 result = await self.executor(
                     self.db, run["project_id"], stage, inputs,
                     llm=self.llm, max_iterations=self.max_iterations, on_event=_on_event,
+                    initial_draft=seed["draft"], user_instruction=seed["instruction"],
                 )
             except Exception as exc:  # noqa: BLE001
                 # 基建异常（llm.complete / 门 spawn 等）不是 StageResult：落 failed +
@@ -401,6 +478,11 @@ class PipelineRunner:
                 "findings": list(result.findings),
             })
             if not result.ok:
+                # 失败恢复（Task 2）：最终草稿落进 stage_drafts——编辑器始终拿到
+                # 最新一版（draft 为 None 时落 {}，等价清出空白起点）。种子先写、
+                # 状态后翻：前端看到 failed 时 GET 草稿不会扑空。retry_instruction
+                # 保留（GET 端点展示上一轮意见；下一轮 retry 空参即清）。
+                await self.store.save_stage_draft(run_id, stage, result.draft or {})
                 await self.store.set_status(
                     run_id, "failed", stage=stage, findings=list(result.findings)
                 )
@@ -408,6 +490,7 @@ class PipelineRunner:
                     run_id, {"type": "failed", "stage": stage, "findings": list(result.findings)}
                 )
                 return
+            await self.store.clear_retry_seed(run_id, stage)  # 成功即清种子
             if stage == GATE_STAGE:
                 await self.store.set_status(run_id, "gated", stage=stage)
                 self.broker.publish(run_id, {"type": "gate", "stage": stage})

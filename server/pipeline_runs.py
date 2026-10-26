@@ -4,7 +4,8 @@
 - GET  /runs/{run_id}                        运行快照（含 stage_history 派生）
 - GET  /runs/{run_id}/events                 SSE 进度直播（text/event-stream）
 - POST /runs/{run_id}/approve                确认门放行（仅 gated，不可跳过 → 否则 409）
-- POST /runs/{run_id}/retry  {stage}         重置失败阶段重跑（仅 failed → 否则 409）
+- POST /runs/{run_id}/retry  {stage, draft?, instruction?}
+                                            重置失败阶段重跑（仅 failed → 否则 409；草稿/意见为 failure-recovery 的可选重试种子）
 - POST /runs/{run_id}/feedback {text}        追加人工意见（确认前「记录意见」，随运行留档，供后续改稿参考）
 - GET  /projects/{canvas}/runs               按项目列最近 runs（fastfollow Task 2：F5 重挂载恢复运行卡）
 
@@ -116,6 +117,8 @@ class CreateRunBody(BaseModel):
 
 class RetryBody(BaseModel):
     stage: str
+    draft: Any = None          # failure-recovery：可选的失败草稿（必须是 JSON 对象）
+    instruction: str = ""      # failure-recovery：可选的点名修改意见
 
 
 class FeedbackBody(BaseModel):
@@ -221,10 +224,13 @@ async def approve_run(run_id: str) -> dict:
 @router.post("/runs/{run_id}/retry")
 async def retry_run(run_id: str, body: RetryBody) -> dict:
     store, runner, _broker = await _deps()
+    if body.draft is not None and not isinstance(body.draft, dict):
+        # draft 必须是 JSON 对象；类型字段用 Any 收下再手检，才能回 400 而非 422
+        raise HTTPException(status_code=400, detail="draft 必须是 JSON 对象")
     if await store.get(run_id) is None:
         raise HTTPException(status_code=404, detail=f"运行不存在：{run_id}")
     try:
-        await runner.retry(run_id, body.stage)
+        await runner.retry(run_id, body.stage, draft=body.draft, instruction=body.instruction)
     except KeyError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except ValueError as exc:
