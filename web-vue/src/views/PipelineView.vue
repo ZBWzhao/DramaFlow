@@ -100,7 +100,12 @@ const latestText = computed(() => {
   if (!ev) return "";
   if (ev.type === "tool") return `${ev.name || "工具"} · ${String(ev.args_summary || "").slice(0, 90)}`;
   if (ev.type === "tool_result") return `${ev.name || "工具"} 回执 · ${String(ev.preview || "").slice(0, 90)}`;
-  if (ev.type === "stage_gate") return `第 ${ev.round ?? "?"} 轮质量门：${ev.ok ? "通过" : "未过"}`;
+  if (ev.type === "stage_gate") {
+    if (!ev.ok) return `第 ${ev.round ?? "?"} 轮质量门：未过`;
+    // 分级门：advisory 过门（不进修复环、带标记落库）与干净通过分开说
+    const n = Number(ev.advisory) || 0;
+    return `第 ${ev.round ?? "?"} 轮质量门：${n ? `通过 · ${n} 条内容标记` : "通过"}`;
+  }
   if (ev.type === "stage_done") return ev.ok ? "产物已落库" : "未通过";
   if (ev.type === "stage") return "开始推进";
   if (ev.type === "retry") return "重试中";

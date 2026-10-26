@@ -195,7 +195,7 @@ async def read_artifact(canvas: str, artifact_type: str):
     db = await _db_or_none()
     if db is None:
         return _no_db()
-    # source_run_id 只在 list_all 里有（get 的三键返回形状是 Task 2 已锁定的契约）。
+    # source_run_id 只在 list_all 里有（get 返回形状随任务演进加键，加法契约——0008 起 findings 也在）。
     row = _find_row(await pipeline_repository.list_all(db, canvas), artifact_type)
     if row is None:
         return _missing(artifact_type)

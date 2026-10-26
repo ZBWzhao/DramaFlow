@@ -753,6 +753,8 @@ function _openRunStream() {
       const s = studio.run.stages[msg.stage] || (studio.run.stages[msg.stage] = {});
       s.gate_ok = Boolean(msg.ok);
       s.round = msg.round;
+      // 分级门（0008）：advisory 过门的标记数随事件透传（0 = 干净过门）
+      s.advisory = Number(msg.advisory) || 0;
     }
     if (msg.type === "stage_done") {
       const s = studio.run.stages[msg.stage] || (studio.run.stages[msg.stage] = {});

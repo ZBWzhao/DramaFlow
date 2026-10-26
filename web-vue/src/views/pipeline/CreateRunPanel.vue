@@ -81,7 +81,12 @@ function describe(ev) {
   if (t === "stage") return `开始推进「${stageLabel(ev.stage)}」`;
   if (t === "tool") return `${ev.name || "未知工具"} · ${String(ev.args_summary || "").slice(0, 110)}`;
   if (t === "tool_result") return `${ev.name || "工具"} 回执 · ${String(ev.preview || "").slice(0, 130)}`;
-  if (t === "stage_gate") return `第 ${ev?.round ?? "?"} 轮质量门：${ev?.ok ? "通过" : "未过"}`;
+  if (t === "stage_gate") {
+    if (!ev?.ok) return `第 ${ev?.round ?? "?"} 轮质量门：未过`;
+    // 分级门：advisory 过门（不进修复环、带标记落库）与干净通过分开说
+    const n = Number(ev?.advisory) || 0;
+    return `第 ${ev?.round ?? "?"} 轮质量门：${n ? `通过 · ${n} 条内容标记` : "通过"}`;
+  }
   if (t === "stage_done") return `阶段结束：${ev?.ok ? "产物已落库" : "未通过"}`;
   if (t === "gate") return `「${stageLabel(ev.stage)}」已过质量门，等待人工确认`;
   if (t === "retry") return `重试「${stageLabel(ev.stage)}」`;
