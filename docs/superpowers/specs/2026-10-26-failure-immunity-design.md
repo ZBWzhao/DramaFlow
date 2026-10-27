@@ -58,7 +58,7 @@ characters 已分级（cast-structure blocking + 两条 advisory）。art/stagin
 ## 3. A3：LLM 传输层退避重试（`core/llm.py`）
 
 - 现状：单发 `timeout=180`，任何瞬断/5xx 直接判阶段失败。
-- 新增：聊天补全请求包重试循环——**瞬态错误重试，共 3 次尝试，退避 2s/4s/8s ± 抖动**。
+- 新增：聊天补全请求包重试循环——**瞬态错误重试，共 3 次尝试（2 次退避：2s / 4s ± 抖动）**。
 - 瞬态 = 连接错误、读超时、HTTP 429、5xx。
 - **不重试** = 401/403（凭据）、400/404（参数/模型名）——这些是环境/配置错误，立即抛出（环境性失败，运行照旧失败）。
 - 范围仅 `core/llm.py` 调用点；agent 政策循环、修复轮语义零改动。
@@ -93,7 +93,7 @@ LLM 异常（含 A3 重试后仍失败）、执行器异常：照旧 run failed�
 
 ## 5. 测试策略
 
-- 分级：advisory-only / mixed 既有测试模式套 v2 白名单；id lock 集合更新（outline 10 advisory、script 7 advisory）。
+- 分级：advisory-only / mixed 既有测试模式套 v2 白名单；id lock 集合更新（outline 11 advisory、script 7 advisory）。
 - 早停：ScriptedLLM 构造连续同集合 blocking 失败 → 断言第 3 轮后停止、走兜底、LLM 调用次数上界。
 - 兜底：轮耗尽 → StageResult(ok=True, degraded=True)、产物落库、findings 含 blocking 标记、stage_done 事件带 degraded/blocking；下游阶段照常推进。
 - 门不可用：monkeypatch _run_gate 返回 (False, 输出, None) 耗尽 → 兜底 + gate-unavailable 标记。
