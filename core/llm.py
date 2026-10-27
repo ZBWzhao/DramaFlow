@@ -11,13 +11,21 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
+import random
 from dataclasses import dataclass, field
 from typing import Any, AsyncIterator, Callable
 
-from openai import AsyncOpenAI
+from openai import APIConnectionError, AsyncOpenAI, InternalServerError, RateLimitError
 
 from .config import Settings
+
+# A3 失败免疫：网络抖动 / 限流 / 5xx 属瞬态错误，整次请求（create + 消费）至多 3 次尝试；
+# 退避 = 2.0 * 2**(attempt-1) + 随机抖动。已经向外吐过任何增量则不再重试（重复输出）。
+TRANSIENT_ERRORS = (APIConnectionError, RateLimitError, InternalServerError)
+_RETRY_ATTEMPTS = 3
+_RETRY_BASE_DELAY = 2.0
 
 
 @dataclass
@@ -127,58 +135,77 @@ class LLM:
             kwargs["tools"] = tools
             kwargs["tool_choice"] = "auto"
 
+        # 瞬态错误退避重试：语义 = 整次请求（create + 消费）至多 _RETRY_ATTEMPTS 次尝试。
         # 用 AsyncOpenAI：取消（asyncio.Task.cancel）能直接传播到底层 HTTP 连接，
         # 对应 Toonflow 里 AbortSignal 一路传到模型请求的做法。
-        stream: AsyncIterator[Any] = await self.client.chat.completions.create(**kwargs)
+        last_exc: Exception | None = None
+        for attempt in range(_RETRY_ATTEMPTS):
+            if attempt:
+                await asyncio.sleep(_RETRY_BASE_DELAY * 2 ** (attempt - 1) + random.uniform(0, 0.5))
+            text_parts: list[str] = []
+            reasoning_parts: list[str] = []
+            calls: dict[int, dict[str, str]] = {}
+            usage = Usage()
+            finish_reason: str | None = None
+            emitted = False
+            try:
+                stream: AsyncIterator[Any] = await self.client.chat.completions.create(**kwargs)
 
-        text_parts: list[str] = []
-        reasoning_parts: list[str] = []
-        calls: dict[int, dict[str, str]] = {}
-        usage = Usage()
-        finish_reason: str | None = None
+                async for chunk in stream:
+                    if getattr(chunk, "usage", None):
+                        u = chunk.usage
+                        usage.input_tokens = getattr(u, "prompt_tokens", 0) or 0
+                        usage.output_tokens = getattr(u, "completion_tokens", 0) or 0
+                        cached = getattr(getattr(u, "prompt_tokens_details", None), "cached_tokens", 0)
+                        usage.cached_tokens = cached or 0
+                    if not chunk.choices:
+                        continue
+                    choice = chunk.choices[0]
+                    if choice.finish_reason:
+                        finish_reason = choice.finish_reason
+                    delta = choice.delta
+                    if getattr(delta, "content", None):
+                        text_parts.append(delta.content)
+                        emitted = True
+                        if on_text:
+                            on_text(delta.content)
+                    reasoning = getattr(delta, "reasoning_content", None)
+                    if reasoning:
+                        reasoning_parts.append(reasoning)
+                        emitted = True
+                        if on_reasoning:
+                            # 推理内容也要能流出去 —— 之前只攒在内存里，前端拿不到"思考过程"，
+                            # 于是界面上只剩下一堆"什么时候都没有文字"的空档。
+                            on_reasoning(reasoning)
+                    pieces = getattr(delta, "tool_calls", None)
+                    if pieces:
+                        emitted = True
+                    for piece in pieces or []:
+                        slot = calls.setdefault(piece.index, {"id": "", "name": "", "args": ""})
+                        if piece.id:
+                            slot["id"] += piece.id
+                        fn = getattr(piece, "function", None)
+                        if fn:
+                            if getattr(fn, "name", None):
+                                slot["name"] += fn.name
+                            if getattr(fn, "arguments", None):
+                                slot["args"] += fn.arguments
 
-        async for chunk in stream:
-            if getattr(chunk, "usage", None):
-                u = chunk.usage
-                usage.input_tokens = getattr(u, "prompt_tokens", 0) or 0
-                usage.output_tokens = getattr(u, "completion_tokens", 0) or 0
-                cached = getattr(getattr(u, "prompt_tokens_details", None), "cached_tokens", 0)
-                usage.cached_tokens = cached or 0
-            if not chunk.choices:
-                continue
-            choice = chunk.choices[0]
-            if choice.finish_reason:
-                finish_reason = choice.finish_reason
-            delta = choice.delta
-            if getattr(delta, "content", None):
-                text_parts.append(delta.content)
-                if on_text:
-                    on_text(delta.content)
-            reasoning = getattr(delta, "reasoning_content", None)
-            if reasoning:
-                reasoning_parts.append(reasoning)
-                if on_reasoning:
-                    # 推理内容也要能流出去 —— 之前只攒在内存里，前端拿不到"思考过程"，
-                    # 于是界面上只剩下一堆"什么时候都没有文字"的空档。
-                    on_reasoning(reasoning)
-            for piece in getattr(delta, "tool_calls", None) or []:
-                slot = calls.setdefault(piece.index, {"id": "", "name": "", "args": ""})
-                if piece.id:
-                    slot["id"] += piece.id
-                fn = getattr(piece, "function", None)
-                if fn:
-                    if getattr(fn, "name", None):
-                        slot["name"] += fn.name
-                    if getattr(fn, "arguments", None):
-                        slot["args"] += fn.arguments
-
-        return AssistantMessage(
-            content="".join(text_parts),
-            reasoning="".join(reasoning_parts),
-            tool_calls=[ToolCall(id=v["id"], name=v["name"], arguments=v["args"]) for _, v in sorted(calls.items())],
-            usage=usage,
-            finish_reason=finish_reason,
-        )
+                return AssistantMessage(
+                    content="".join(text_parts),
+                    reasoning="".join(reasoning_parts),
+                    tool_calls=[
+                        ToolCall(id=v["id"], name=v["name"], arguments=v["args"])
+                        for _, v in sorted(calls.items())
+                    ],
+                    usage=usage,
+                    finish_reason=finish_reason,
+                )
+            except TRANSIENT_ERRORS as exc:
+                if emitted:
+                    raise          # 半途断流不重试：用户已看到一半，重试会重复输出
+                last_exc = exc     # 尚无任何对外输出：整次重来
+        raise last_exc  # type: ignore[misc]
 
     async def simple(self, messages: list[dict[str, Any]]) -> str:
         """只要文本结果（给上下文压缩用）。"""
