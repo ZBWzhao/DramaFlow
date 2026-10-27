@@ -13,7 +13,14 @@ import FailCard from "./FailCard.vue";
 import DoneCard from "./DoneCard.vue";
 
 const run = computed(() => studio.run);
-const feed = computed(() => buildFeed(run.value.events, run.value.novel));
+const feed = computed(() => {
+  const items = buildFeed(run.value.events, run.value.novel);
+  // F5 恢复不回放历史帧（events 只剩 reconnect 的 hello），门卡从 run 态合成；确认门不可跳过
+  if (run.value.status === "gated" && !items.some((it) => it.kind === "gate-card")) {
+    items.push({ kind: "gate-card", stage: run.value.stage });
+  }
+  return items;
+});
 
 /* 活的信号：200ms tick 只在 running 时走；12s 无新事件提示（照 ChatPanel 口径） */
 const nowTick = ref(Date.now());
