@@ -16,6 +16,11 @@ const props = defineProps({
 
 const items = computed(() => (Array.isArray(props.findings) ? props.findings : []));
 
+/* ⛔ blocking 变体（失败免疫）：findings 里有 severity=blocking 的条目 → 头部换
+ * ⛔ 文案 + 根元素加 .blocking（fold-head / rule 标签转 --danger），提示人工复核；
+ * 无 blocking → 维持原 ⚠️ advisory 文案，零视觉差异。 */
+const blockingCount = computed(() => items.value.filter((f) => f?.severity === "blocking").length);
+
 const str = (v) => String(v ?? "");
 
 /* 开关表：key = "head"（折叠区本体）/ 序号（单条 detail 全文展开），照抄面板折叠块模式 */
@@ -31,9 +36,9 @@ const shownDetail = (f, i) => {
 </script>
 
 <template>
-  <section v-if="items.length" class="gm">
+  <section v-if="items.length" class="gm" :class="{ blocking: blockingCount > 0 }">
     <button class="fold-head" type="button" @click="openMap.head = !openMap.head">
-      <span class="tri" :class="{ on: openMap.head }">▸</span>⚠️ {{ items.length }} 条内容标记（不阻塞 · 可人工修改或重跑本阶段）
+      <span class="tri" :class="{ on: openMap.head }">▸</span><template v-if="blockingCount">⛔ {{ items.length }} 条内容标记（{{ blockingCount }} 条阻断 · 请人工复核或重跑本阶段）</template><template v-else>⚠️ {{ items.length }} 条内容标记（不阻塞 · 可人工修改或重跑本阶段）</template>
     </button>
     <div v-if="openMap.head" class="fold-body">
       <p v-for="(f, i) in items" :key="i" class="gm-item">
@@ -66,4 +71,7 @@ const shownDetail = (f, i) => {
 .gm-detail { white-space: pre-wrap; word-break: break-word; }
 .gm-detail.expandable { cursor: pointer; }
 .gm-detail.expandable:hover { color: var(--text); }
+/* ⛔ blocking 变体：整行头部与条目 rule 标签转危险色 */
+.gm.blocking .fold-head { color: var(--danger); }
+.gm.blocking .gm-rule { color: var(--danger); }
 </style>

@@ -50,7 +50,7 @@ export const studio = reactive({
   // 管线运行（阶段 2 Task 4）：id 为空 = 没有活动运行。状态机与 SSE 消费见文件尾「管线运行」节。
   // project_id 随 startRun 落账：面板按 run.project_id === canvas 判归属，防止 A 项目的
   // 运行卡（尤其确认门）渲染在 B 项目页面上、对着 B 的大纲缓存点确认（review 修复）。
-  run: { id: "", project_id: "", status: "", stage: "", stages: {}, events: [], link: "" },
+  run: { id: "", project_id: "", status: "", stage: "", novel: "", stages: {}, events: [], link: "" },
 });
 
 const qs = () => {
@@ -695,6 +695,7 @@ async function _reattachRun() {
       project_id: canvas,
       status: live.status,
       stage: live.stage || "",
+      novel: "",
       stages: {},
       events: [],
       link: "restored",
@@ -712,6 +713,7 @@ export async function startRun(projectId, novel) {
     project_id: projectId,
     status: data.status || "running",
     stage: data.stage || "",
+    novel: novel,
     stages: {},
     events: [],
     link: "connecting",
@@ -764,6 +766,8 @@ function _openRunStream() {
         // 下游面板/确认卡也要读到最新缓存（与 run 级 gate/done 的重拉同一机制）。
         void loadPipeline(true);
       }
+      // 失败免疫：兜底通过的阶段带 degraded/blocking（可选键，缺省不影响既有路径）
+      if (msg.degraded) { s.degraded = true; s.blocking = Number(msg.blocking) || 0; }
     }
     if (msg.type === "gate") {
       // run 级确认门（红线）：停在 gated 等人工；大纲产物落库了，强制重拉供确认对话框展示
@@ -865,3 +869,6 @@ export async function rejectEditorProposal(editId) {
     { edit_id: editId },
   );
 }
+
+/* DEV 调试暴露（CDP 验收与未来排障用；生产构建 tree-shake 剔除） */
+if (import.meta.env.DEV) window.__studio = studio;
