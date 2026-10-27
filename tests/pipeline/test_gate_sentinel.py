@@ -53,6 +53,25 @@ SCRIPT_IDS = frozenset({
 })
 CHARACTERS_IDS = CHARACTERS_ADVISORY_IDS | {"cast-structure"}
 
+# advisory 白名单 v2（failure immunity A1）：outline 11 条 / script 7 条叙事
+# 质量/数量体量类不拦落库，机械结构类照旧 blocking（余集见下方子集测试）。
+OUTLINE_ADVISORY_IDS = frozenset({
+    "risk-flag", "lead-cap", "support-cap", "functional-cap", "prop-cap",
+    "scene-cap", "beat-gap", "ep1-hook", "major-early", "crowd-plan", "no-dialogue",
+})
+SCRIPT_ADVISORY_IDS = frozenset({
+    "line-length", "speaker", "beats-claimed",
+    "hook-cliff", "hook-open", "has-action", "action-prose",
+})
+
+
+def test_advisory_whitelist_v2_subsets():
+    """v2 白名单必须是全量 id 集合的子集（防拼写漂移），余集 = 机械结构类。"""
+    assert OUTLINE_ADVISORY_IDS <= OUTLINE_IDS
+    assert SCRIPT_ADVISORY_IDS <= SCRIPT_IDS
+    assert OUTLINE_IDS - OUTLINE_ADVISORY_IDS == {"ep-fields", "once-scene", "refs"}
+    assert SCRIPT_IDS - SCRIPT_ADVISORY_IDS == {"duration", "refs-characters", "refs-scenes"}
+
 
 def _run_gate(skill: str, script: str, args: list[str], files: dict[str, str]) -> subprocess.CompletedProcess:
     """在临时工作目录落 fixture 后跑门（与执行器 _run_gate 同一条 node 子进程方式）。"""

@@ -24,7 +24,7 @@ from core import pipeline_repository, skill_executor
 from core.pipeline_run import EventBroker, PipelineRunner, RunStore
 from core.postgres import PostgresDatabase
 from core.skill_executor import STAGE_SPECS, run_stage
-from test_gate_sentinel import CHARACTERS_ADVISORY_IDS
+from test_gate_sentinel import CHARACTERS_ADVISORY_IDS, OUTLINE_ADVISORY_IDS, SCRIPT_ADVISORY_IDS
 from test_pipeline_repository import pipeline_test_database  # noqa: F401  session 级库装配
 
 ROOT_DIR = Path(__file__).resolve().parents[2]
@@ -945,13 +945,15 @@ def test_stage_result_carries_draft_on_failure(pipeline_test_database):
 #   真门哨兵链路由 test_gate_sentinel 的 subprocess 测试覆盖。）
 # ---------------------------------------------------------------------------
 
-def test_stage_specs_advisory_whitelist_v1():
-    """advisory 白名单 v1（spec §4）：outline 1 条 / script 3 条 / characters 2 条；
-    art/staging/storyboard 不设键 = 缺省全 blocking。characters 侧三元锁：
-    spec 表 == skill_executor 硬编码常量 == test_gate_sentinel.CHARACTERS_ADVISORY_IDS
-    （生产侧硬编码后没有动态单一事实源，漂移只能靠这条链拦——任何一侧单改必红）。"""
-    assert STAGE_SPECS["outline"]["advisory_rules"] == frozenset({"risk-flag"})
-    assert STAGE_SPECS["script"]["advisory_rules"] == frozenset({"line-length", "speaker", "beats-claimed"})
+def test_stage_specs_advisory_whitelist_v2():
+    """advisory 白名单 v2（failure immunity A1）：outline 11 条 / script 7 条
+    叙事质量/数量体量类不拦落库（耗尽由 B 兜底）；characters 2 条不变；
+    art/staging/storyboard 不设键 = 缺省全 blocking。outline/script 双方锁：
+    STAGE_SPECS == test_gate_sentinel 常量（生产侧硬编码后没有动态单一事实源，
+    漂移只能靠这条链拦——任何一侧单改必红）；子集关系由 gate_sentinel 的
+    test_advisory_whitelist_v2_subsets 对全量 id 集合另锁。"""
+    assert STAGE_SPECS["outline"]["advisory_rules"] == OUTLINE_ADVISORY_IDS
+    assert STAGE_SPECS["script"]["advisory_rules"] == SCRIPT_ADVISORY_IDS
     assert STAGE_SPECS["characters"]["advisory_rules"] == skill_executor.CHARACTERS_ADVISORY_IDS
     assert skill_executor.CHARACTERS_ADVISORY_IDS == CHARACTERS_ADVISORY_IDS
     for stage in ("art", "staging", "storyboard"):

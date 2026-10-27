@@ -71,9 +71,12 @@ STAGE_SPECS: dict[str, dict] = {
         "meta_sections": ["source", "lang", "params"],
         "gate": ["scripts/novel-outline.mjs", "validate", "outline.json", "--stage", "full"],
         "gate_needs": [],   # 无上游文件
-        # advisory 白名单 v1（spec §4）：仅体量预警不拦落库，其余违规照旧 blocking。
+        # advisory 白名单 v2（failure immunity A1）：叙事质量/数量体量类不拦落库，
+        # 机械结构类（ep-fields/once-scene/refs）照旧 blocking，耗尽由 B 兜底。
         # 执行器按哨兵 rule id 分级，见 _grade_gate。
-        "advisory_rules": frozenset({"risk-flag"}),
+        "advisory_rules": frozenset({"risk-flag", "lead-cap", "support-cap", "functional-cap",
+                                     "prop-cap", "scene-cap", "beat-gap", "ep1-hook",
+                                     "major-early", "crowd-plan", "no-dialogue"}),
         "task": "按 playbook 把用户小说改编为短剧大纲五件套，写全六节后跑质量门，全过才 finish。",
         # 阶段专属口径（_compose_system 原样带进执行器纪律，不进通用模板——
         # outline 自己定集数，script 等下游阶段的集数以上游产物为事实）。
@@ -106,9 +109,10 @@ STAGE_SPECS: dict[str, dict] = {
         "save_merge": True,
         "gate": ["scripts/novel-script.mjs", "validate", "script.json", "--outline", "outline.json"],
         "gate_needs": ["outline"],
-        # advisory 白名单 v1（spec §4）：文案类三条不拦落库；时长/钩子/对账等
-        # 硬门照旧 blocking。
-        "advisory_rules": frozenset({"line-length", "speaker", "beats-claimed"}),
+        # advisory 白名单 v2（failure immunity A1）：叙事质量类不拦落库，机械结构类
+        # （duration/refs-characters/refs-scenes）照旧 blocking，耗尽由 B 兜底。
+        "advisory_rules": frozenset({"line-length", "speaker", "beats-claimed", "hook-cliff",
+                                     "hook-open", "has-action", "action-prose"}),
         "task": "按 playbook 把大纲落成分集剧本（结构化节拍流），逐集写 episodes 后跑质量门，全过才 finish。",
         # 集数/时长/钩子/爽点全部是上游大纲的既有事实（seed 的确定性搬运口径；
         # 执行器没有 seed 命令，由模型逐集搬运，门逐项对账）。
