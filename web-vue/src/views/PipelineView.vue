@@ -25,6 +25,7 @@ import ArtPanel from "./pipeline/ArtPanel.vue";
 import StagingPanel from "./pipeline/StagingPanel.vue";
 import StoryboardPanel from "./pipeline/StoryboardPanel.vue";
 import CreateRunPanel from "./pipeline/CreateRunPanel.vue";
+import RunChat from "./pipeline/chat/RunChat.vue";
 
 const route = useRoute();
 
@@ -177,8 +178,9 @@ onMounted(async () => {
         </button>
       </div>
 
-      <!-- 创作入口：无产物常驻（从小说开始），有产物只跟随本项目的活动 run -->
-      <CreateRunPanel v-if="!hasArtifacts || runActiveHere" />
+      <!-- 创作现场：本项目有活动 run → 对话流（RunChat）；否则无产物时给常驻入口卡 -->
+      <RunChat v-if="runActiveHere" />
+      <CreateRunPanel v-else-if="!hasArtifacts" />
 
       <div class="pv-tabs">
         <button

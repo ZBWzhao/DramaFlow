@@ -20,6 +20,13 @@ const run = computed(() => studio.run);
 /* 归属判定（CreateRunPanel 同口径）：别项目活动 run 的失败卡绝不发重试/拉草稿 */
 const runHere = computed(() => Boolean(run.value.id) && run.value.project_id === studio.canvas);
 
+/* 动作区只在「本卡阶段 == 实时失败阶段」时出现：feed 正序保留更早轮次的失败卡，
+ * 而重试/草稿编辑作用于 run.stage（后端只接受重试失败阶段本身）——历史失败卡
+ * 退化为纯展示（findings 照看），避免对着已恢复的阶段误发重试。 */
+const live = computed(
+  () => runHere.value && run.value.status === "failed" && run.value.stage === props.stage,
+);
+
 const retryError = ref("");
 const retrying = ref(false);
 
@@ -120,8 +127,11 @@ async function retryWithEdits() {
       </div>
     </div>
     <div v-else class="tip">没有返回具体原因，可查看下方事件流。</div>
-    <div v-if="retryError" class="err">{{ retryError }}</div>
-    <div v-if="draftLoadError" class="err">草稿读取失败：{{ draftLoadError }}</div>
+
+    <!-- 动作区（错误提示 + 草稿编辑 + 重试）：仅实时失败阶段可操作，历史卡纯展示 -->
+    <template v-if="live">
+      <div v-if="retryError" class="err">{{ retryError }}</div>
+      <div v-if="draftLoadError" class="err">草稿读取失败：{{ draftLoadError }}</div>
 
     <!-- 折叠草稿编辑：默认收起；展开改稿后才能「带着修改重试」，不动则盲重试按原样重跑 -->
     <div class="draftbox">
@@ -162,6 +172,7 @@ async function retryWithEdits() {
         {{ retrying ? "重试中…" : "重试本阶段" }}
       </button>
     </div>
+    </template>
   </div>
 </template>
 
