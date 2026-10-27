@@ -4,9 +4,10 @@
 1. test_full_run_novel_to_storyboard —— 粘贴小说 → outline 过真门 → gated 停确认门
    （红线：不可跳过）→ approve → 六阶段全链 → done，六份产物全落库；
    /runs/{id}/stats 与 StageResult 权威账本同源（iterations/gate_passes/stages）。
-2. test_stage_exhaustion_degrades_through_run_continues —— staging 五轮门全挂 →
-   耗尽不判死（failure immunity B）：兜底门对当前草稿再裁决仍挂 → ⛔ degraded
-   落库、运行继续走完 storyboard；空草稿才保留 failed 路径（skill_executor 守卫测试锁）。
+2. test_stage_exhaustion_degrades_through_run_continues —— staging 门连挂且失败
+   集合无缩小 → A2 早停（failure immunity A2/B 共用兜底）：兜底门对当前草稿再
+   裁决仍挂 → ⛔ degraded 落库、运行继续走完 storyboard；空草稿才保留 failed 路径
+   （skill_executor 守卫测试锁）。
 3. test_editor_proposal_apply_healthcheck_round —— 改稿脑三拍：提案（agent 只进
    pending，产物不动）→ 审批（HTTP apply 端点落稿）→ 自动体检（真门重查；通过）；
    再来一轮坏提案：门不过 → 回滚 → 产物保持审批前版本。
@@ -167,8 +168,9 @@ def test_full_run_novel_to_storyboard(pipeline_test_database, monkeypatch):
 
 
 # ---------------------------------------------------------------------------
-# 2. 兜底放行（failure immunity B）：staging 五轮门全挂 → 耗尽 → 兜底门再裁决
-#    仍挂 → ⛔ degraded 落库，运行继续走完 storyboard（空草稿才 failed，不落库）
+# 2. 兜底放行（failure immunity B + A2 早停）：staging 门连挂同一集合 → 第 3 轮
+#    stall 达 STALL_LIMIT 早停 break → 兜底门再裁决仍挂 → ⛔ degraded 落库，
+#    运行继续走完 storyboard（空草稿才 failed，不落库）
 # ---------------------------------------------------------------------------
 
 def test_stage_exhaustion_degrades_through_run_continues(pipeline_test_database, monkeypatch):
@@ -176,7 +178,8 @@ def test_stage_exhaustion_degrades_through_run_continues(pipeline_test_database,
         _six_stage_turns()
 
     # staging 病灶：出场人物表混进剧本没有的 C99 —— cast-complete 门必拦；
-    # 五轮都带同样的病灶 + finish（agent 型预算 5 轮，耗尽后兜底门对当前草稿再裁决）。
+    # 五份同样的病灶轮入队（agent 型预算 5 轮）：A2 早停在第 3 轮 break，后两份
+    # 原样留在剧本里没被消耗——恰好证明循环是自己停的，不是剧本耗尽。
     broken = {**STAGING,
               "scenes": [{**STAGING["scenes"][0],
                           "cast": [*STAGING["scenes"][0]["cast"], {"id": "C99", "name": "幽灵角色"}]},
@@ -202,9 +205,10 @@ def test_stage_exhaustion_degrades_through_run_continues(pipeline_test_database,
         ledger = state["stage_status"]
         for stage in ("outline", "script", "characters", "art", "storyboard"):
             assert ledger[stage]["status"] == "done" and "degraded" not in ledger[stage]
-        # staging 账本：⛔ blocking 标记留痕；gate_runs = 5 轮内门 + 1 兜底门
+        # staging 账本：⛔ blocking 标记留痕；A2 早停——gate_runs = 3 轮内门
+        # （第 3 轮 stall 达 STALL_LIMIT=2 break）+ 1 兜底门，预算 5 轮只烧 3 轮
         assert ledger["staging"]["status"] == "done" and ledger["staging"]["degraded"] is True
-        assert ledger["staging"]["attempts"] == 5 and ledger["staging"]["gate_runs"] == 6
+        assert ledger["staging"]["attempts"] == 3 and ledger["staging"]["gate_runs"] == 4
         marker = ledger["staging"]["findings"][0]
         assert marker["gate"] == "validate" and marker["rule"] == "cast-complete"
         assert marker["severity"] == "blocking" and "C99" in marker["detail"]
@@ -223,7 +227,7 @@ def test_stage_exhaustion_degrades_through_run_continues(pipeline_test_database,
         monkeypatch.setattr(runs_module, "_broker", EventBroker())
         stats = await runs_module.run_stats(run["run_id"])
         assert stats["status"] == "done" and stats["gate_passes"] == 6
-        assert stats["stages"]["staging"] == {"attempts": 5, "gate_runs": 6, "ok": True,
+        assert stats["stages"]["staging"] == {"attempts": 3, "gate_runs": 4, "ok": True,
                                               "degraded": True}
 
     _run_scenario(scenario)

@@ -1163,3 +1163,31 @@ def test_gate_unavailable_falls_back_with_marker(pipeline_test_database, monkeyp
         assert result.findings[0]["severity"] == "blocking" and result.findings[0]["detail"]
 
     _run_scenario(scenario, pipeline_test_database)
+
+
+# ---------------------------------------------------------------------------
+# failure immunity A2（Task 4）：blocking 失败集合连续无缩小 → 早停转兜底
+# ---------------------------------------------------------------------------
+
+def test_stall_early_stop_routes_to_fallback(pipeline_test_database, monkeypatch):
+    good_outline = json.loads(FIXTURE_OUTLINE.read_text(encoding="utf-8"))
+    rules = [{"id": "refs", "ok": False, "detail": "引用了不存在的场景"}]
+    stub, calls = _gate_stub([(False, "✗ 1 项未过", rules)])
+    monkeypatch.setattr(skill_executor, "_run_gate", stub)
+
+    async def scenario(database) -> None:
+        # r1 写全量草稿（草稿非空是兜底前置）；r2/r3/r4 finish → 门挂，同一集合
+        # 连续 3 轮无缩小（stall 达 STALL_LIMIT=2）→ 早停，5 轮预算只烧 4 轮；
+        # 兜底门 = 第 4 次门调用，裁决仍挂 → degraded 落库。
+        llm = ScriptedLLM(_write_rounds(good_outline, [9])
+                          + [[{"name": "finish", "args": {}}]] * 4)
+        events: list[dict] = []
+        result = await run_stage(database, "proj-stall", "outline", {"novel_text": NOVEL_TEXT},
+                                 llm=llm, on_event=events.append)
+        assert len(llm.calls) == 4                       # 第 5 轮没跑
+        assert calls["n"] == 4                           # 3 次轮内门 + 1 次兜底门
+        assert result.ok and result.degraded
+        gate_events = [e for e in events if e["type"] == "gate"]
+        assert len(gate_events) == 4 and gate_events[-1]["fallback"] is True
+
+    _run_scenario(scenario, pipeline_test_database)

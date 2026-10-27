@@ -52,6 +52,9 @@ CHARACTERS_ADVISORY_IDS = frozenset({"quote-verbatim", "voice-prompt-length"})
 MAX_GATE_TIMEOUT = 120        # 门超时（秒）：node 子进程的唯一预算
 GATE_TAIL = 2000              # run_quality_gate 回给模型的输出尾部
 FINDING_TAIL = 800            # findings 里带的病灶尾部（进 pipeline_runs.findings）
+# 早停（failure immunity A2）：blocking 失败集合连续无缩小的转移次数上限——
+# 达限即 break 进循环尾兜底门，剩余修复轮预算不再烧。
+STALL_LIMIT = 2
 
 # 阶段规格表：新增创作阶段 = 加一份 spec，loop 与工具环不动。
 # gate 列表首元素是技能目录内的脚本相对路径，其余是参数；cwd = 阶段工作目录。
@@ -724,6 +727,10 @@ async def run_stage(
                           "没有点名且已写好的键不要重写。")
         messages.append({"role": "user", "content": "\n\n".join(seed_parts)})
     findings: list[dict] = []
+    # 早停状态（failure immunity A2）：prev_blocking = 上一轮 blocking 失败 id 集；
+    # stall = 连续无缩小的转移计数（语义见失败分支内的早停块）。
+    prev_blocking: frozenset[str] | None = None
+    stall = 0
     # while 化（原 for range）：chain_repair 的上界 = min(max_iterations, 3) +
     # min(finish_rejections, 3)，拒绝发生在轮内，必须每轮重算；agent 型上界恒定。
     # rejection 买的轮数至多 +3——write_draft 不校验 section 名，模型持续写错名
@@ -780,6 +787,16 @@ async def run_stage(
         on_event and on_event({"type": "gate", "ok": ok, "round": rnd,
                                "advisory": len(advisory_failed) if not ok else 0})
         if not ok and (blocking_failed or not advisory_failed):
+            # 早停（failure immunity A2）：blocking 失败 id 集合 ids >= prev_blocking
+            # （超集或相等 = 无缩小）连续 STALL_LIMIT 次转移 → break 落进循环尾兜底，
+            # 剩余修复轮不再烧；集合缩小或不可比 → 计数清零；rules=None（退化失败、
+            # blocking_failed 为空）不计入也不清零（计数冻结）。
+            if blocking_failed:
+                ids = frozenset(r["id"] for r in blocking_failed)
+                stall = stall + 1 if (prev_blocking is not None and ids >= prev_blocking) else 0
+                prev_blocking = ids
+                if stall >= STALL_LIMIT:
+                    break   # 早停（failure immunity A2）：连续无缩小，剩余预算交给兜底门
             findings = [{"gate": "validate", "detail": output[-FINDING_TAIL:]}]
             state["finished"] = False
             # 失败必须把报告喂回对话，模型才知道修哪里（gate_log 只留给调用方）；
