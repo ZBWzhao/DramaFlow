@@ -116,7 +116,7 @@ watch(() => [feed.value.length, run.value.events.length], () => {
 /* 未知事件灰气泡：Agent 气泡灰调 + --mono + 防撑爆（spec §2 末行） */
 .rc-bubble.unknown {
   max-width: 68%; padding: 9px 13px;
-  border: 1px solid var(--line); border-radius: 10px 10px 10px 4px;
+  border: 1px solid var(--line); border-radius: 4px 10px 10px 10px;
   background: var(--card); color: var(--text-3);
   font-family: var(--mono); font-size: var(--fs-12); line-height: 1.7;
   word-break: break-all;

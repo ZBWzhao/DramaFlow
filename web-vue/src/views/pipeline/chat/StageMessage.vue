@@ -59,7 +59,7 @@ const timerText = computed(() => {
   max-width: 68%;
   padding: 9px 13px;
   border: 1px solid var(--line);
-  border-radius: 10px 10px 10px 4px; /* 左上小角贴「管线」头像 */
+  border-radius: 4px 10px 10px 10px; /* 左上小角贴「管线」头像 */
   background: var(--card);
 }
 .st-head {

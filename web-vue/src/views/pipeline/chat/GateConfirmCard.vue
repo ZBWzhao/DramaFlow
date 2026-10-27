@@ -5,16 +5,27 @@
  * 大纲草案不再是悬浮卡，而是卡内嵌 ArtifactCard type="outline"（默认展开，滚动目标）。
  * 脚本逻辑（confirmApprove/recordFeedback/scrollToOutline）逐字迁自
  * CreateRunPanel :124-152、:241-243；run 归属判定由流容器负责，这里不重复。 */
-import { ref } from "vue";
+import { computed, ref } from "vue";
 import { ElMessage } from "element-plus";
 import { errorText } from "../../../api.js";
-import { approveRun, sendRunFeedback } from "../../../studio/studioStore.js";
+import { approveRun, sendRunFeedback, studio } from "../../../studio/studioStore.js";
 import { STAGE_LABELS } from "./useRunFeed.js";
 import ArtifactCard from "./ArtifactCard.vue";
 
 const props = defineProps({ stage: { type: String, default: "" } });
 
 const stageLabel = (s) => STAGE_LABELS[s] || s || "";
+
+const run = computed(() => studio.run);
+/* 归属判定（FailCard 同口径）：别项目活动 run 的门卡绝不可操作 */
+const runHere = computed(() => Boolean(run.value.id) && run.value.project_id === studio.canvas);
+
+/* 动作区只在「本卡阶段 == 实时确认门阶段」时出现：approve 后 run 转 running，
+ * feed 正序保留更早轮次的门卡——历史门卡退化为纯展示（标题 + tip + 大纲照看），
+ * 避免对着非 gated run 点按钮报错。 */
+const live = computed(
+  () => runHere.value && run.value.status === "gated" && run.value.stage === props.stage,
+);
 
 const approving = ref(false);
 const gateError = ref("");
@@ -62,25 +73,28 @@ function scrollToOutline() {
     <div class="gcc-cap">「{{ stageLabel(stage) }}」已通过质量门，等你确认</div>
     <p class="tip">确认后才会继续写剧本；确认门不可跳过，也不会自动放行。对大纲有意见可以先记录意见——意见随本次运行留档、供后续改稿参考，不会触发自动重写。</p>
     <div v-if="gateError" class="err">{{ gateError }}</div>
-    <div class="acts">
-      <button class="btn" type="button" @click="scrollToOutline">查看大纲并确认</button>
-      <button class="btn primary" type="button" :disabled="approving" @click="confirmApprove">
-        {{ approving ? "正在放行…" : "确认，开写剧本" }}
-      </button>
-    </div>
-    <div class="fb">
-      <input
-        v-model="feedback"
-        class="fb-in"
-        type="text"
-        placeholder="对大纲的意见，如：第一集节奏太慢、主角出场再提前……"
-        :disabled="sendingFeedback"
-        @keyup.enter="recordFeedback"
-      />
-      <button class="btn" type="button" :disabled="!feedback.trim() || sendingFeedback" @click="recordFeedback">
-        {{ sendingFeedback ? "记录中…" : "记录意见" }}
-      </button>
-    </div>
+    <!-- 动作区（按钮 + 意见输入）：仅实时确认门阶段可操作，历史卡纯展示 -->
+    <template v-if="live">
+      <div class="acts">
+        <button class="btn" type="button" @click="scrollToOutline">查看大纲并确认</button>
+        <button class="btn primary" type="button" :disabled="approving" @click="confirmApprove">
+          {{ approving ? "正在放行…" : "确认，开写剧本" }}
+        </button>
+      </div>
+      <div class="fb">
+        <input
+          v-model="feedback"
+          class="fb-in"
+          type="text"
+          placeholder="对大纲的意见，如：第一集节奏太慢、主角出场再提前……"
+          :disabled="sendingFeedback"
+          @keyup.enter="recordFeedback"
+        />
+        <button class="btn" type="button" :disabled="!feedback.trim() || sendingFeedback" @click="recordFeedback">
+          {{ sendingFeedback ? "记录中…" : "记录意见" }}
+        </button>
+      </div>
+    </template>
 
     <!-- 卡内产物区：大纲草案（滚动目标 + 确认对象）；store 在 gate 事件时已 loadPipeline(true) -->
     <ArtifactCard ref="outlineEl" class="gcc-artifact" type="outline" :open="true" />
