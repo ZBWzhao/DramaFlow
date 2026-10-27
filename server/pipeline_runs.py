@@ -300,6 +300,8 @@ def aggregate_run_stats(run: dict) -> dict:
             "attempts": int(entry.get("attempts") or 0),
             "gate_runs": int(entry.get("gate_runs") or 0),
             "ok": entry.get("status") == "done",
+            # failure immunity B：兜底放行的阶段带 degraded 标记（⛔ 前端口径）
+            "degraded": bool(entry.get("degraded")),
         }
     return {
         "run_id": run["run_id"],

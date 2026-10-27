@@ -339,7 +339,9 @@ def test_script_save_merge_contract_warning_lands_in_findings(pipeline_test_data
 
 def test_script_gate_audits_seeded_outline(pipeline_test_database):
     """gate_needs 落盘是真门输入：剧本引用大纲没有的角色，refs-characters 门必须
-    点名——outline.json 没被写进工作目录时，这条对账只会 ENOENT 崩溃或整体跳过。"""
+    点名——outline.json 没被写进工作目录时，这条对账只会 ENOENT 崩溃或整体跳过。
+    （failure immunity B）唯一一轮门挂 → 耗尽 → 兜底门再裁决仍挂 → degraded 落库，
+    C99 进 blocking 标记的 detail。"""
     outline = _trim_outline(_load("outline.json"), [1, 2])
     script = _trim_script(_load("script.json"), [1, 2])
     first = script["episodes"][0]
@@ -355,9 +357,12 @@ def test_script_gate_audits_seeded_outline(pipeline_test_database):
         result = await run_stage(database, "proj-audit", "script",
                                  {"novel_text": NOVEL_TEXT, "outline": outline},
                                  llm=ScriptedLLM(turns), max_iterations=3)
-        assert not result.ok
-        assert "C99" in result.findings[0]["detail"]  # 对账真的发生在大纲上
-        assert await pipeline_repository.get(database, "proj-audit", "script") is None
+        assert result.ok and result.degraded
+        marker = [f for f in result.findings if f.get("rule") == "refs-characters"][0]
+        assert marker["severity"] == "blocking" and "C99" in marker["detail"]
+        saved = await pipeline_repository.get(database, "proj-audit", "script")
+        assert saved is not None   # degraded 也落库（病灶烂在明处）
+        assert bogus_ep1["scenes"][0]["characters"] == saved["content"]["episodes"][0]["scenes"][0]["characters"]
 
     _run_scenario(scenario, pipeline_test_database)
 
@@ -520,10 +525,11 @@ def test_characters_chain_repair_gate_fail_repairs_exactly_once(pipeline_test_da
 
 def test_characters_chain_repair_budget_locked_at_three_gates(pipeline_test_database):
     """chain_repair 的预算锁（fastfollow-2 语义；2026-10-25 修正预算 2→3）：调用方
-    给 max_iterations=9 也不放宽——不变量是「总权威门运行次数 ≤ 3」，不再表述为
+    给 max_iterations=9 也不放宽——不变量是「循环内权威门 ≤ 3」，不再表述为
     「总轮数 ≤ 3」（被拒的组装轮不消耗门预算、也不计入门数）。门级失败 fixture
     必须是组装完整的稿：空 characters 数组现在会被 finish 组装检查拦在门之前，
-    进不了门。"""
+    进不了门。（failure immunity B）3 次门全挂耗尽后兜底门再裁决 1 次（gate_log=4），
+    仍挂 → degraded 落库，第 4 轮依旧不存在。"""
     cast = _load("cast.json")
 
     async def scenario(database) -> None:
@@ -539,11 +545,15 @@ def test_characters_chain_repair_budget_locked_at_three_gates(pipeline_test_data
         result = await run_stage(database, "proj-cast-cap", "characters",
                                  {"novel_text": NOVEL_TEXT, "outline": _load("outline.json")},
                                  llm=llm, max_iterations=9)
-        assert not result.ok and result.findings
-        assert result.iterations == 3                     # 无拒绝时轮数 = 门数 = 3
-        assert len(result.gate_log) == 3                  # 总权威门 ≤ 3（新不变量）
+        assert result.ok and result.degraded              # 耗尽不判死：degraded 落库
+        assert result.iterations == 3                     # 无拒绝时轮数 = 循环内门数 = 3
+        assert len(result.gate_log) == 4                  # 循环内 3 + 兜底门 1（循环内仍 ≤ 3）
         assert len(llm.calls) == 3                        # 第 4 轮不存在
-        assert await pipeline_repository.get(database, "proj-cast-cap", "characters") is None
+        saved = await pipeline_repository.get(database, "proj-cast-cap", "characters")
+        assert saved is not None
+        assert saved["content"]["characters"] == _gate_fail_characters(cast)
+        assert [f["rule"] for f in saved["findings"] if f["severity"] == "blocking"] \
+            == ["cast-structure"]
 
     _run_scenario(scenario, pipeline_test_database)
 
@@ -802,7 +812,9 @@ def test_chain_repair_budget_counts_gates_not_rounds(pipeline_test_database):
 
 def test_chain_repair_rejections_buy_no_extra_gates(pipeline_test_database):
     """对照组：反复被拒也买不来越过 3 的门——finish_rejections 只抬轮数上界，
-    权威门总数仍锁 3；脚本多备的轮次永远轮不到。"""
+    循环内权威门总数仍锁 3；脚本多备的轮次永远轮不到。（failure immunity B）
+    耗尽后兜底门再裁决 1 次（gate_log=4），仍挂 → degraded 落库——拒绝同样
+    买不来第 4 次修复轮。"""
     cast = _load("cast.json")
 
     async def scenario(database) -> None:
@@ -820,11 +832,13 @@ def test_chain_repair_rejections_buy_no_extra_gates(pipeline_test_database):
         result = await run_stage(database, "proj-cast-cap2", "characters",
                                  {"novel_text": NOVEL_TEXT, "outline": _load("outline.json")},
                                  llm=llm, max_iterations=9)
-        assert not result.ok and result.findings
+        assert result.ok and result.degraded                 # 耗尽不判死（B）
         assert result.iterations == 4                        # 1 被拒 + 3 次门轮，到此为止
-        assert len(result.gate_log) == 3                     # 总门数 ≤ 3：拒绝买不来第 4 次门
+        assert len(result.gate_log) == 4                     # 循环内 3 + 兜底 1：拒绝仍买不来循环内第 4 次门
         assert len(llm.calls) == 4                           # 第 5 轮不存在
-        assert await pipeline_repository.get(database, "proj-cast-cap2", "characters") is None
+        saved = await pipeline_repository.get(database, "proj-cast-cap2", "characters")
+        assert saved is not None
+        assert saved["content"]["characters"] == _gate_fail_characters(cast)
 
     _run_scenario(scenario, pipeline_test_database)
 
@@ -911,9 +925,11 @@ def test_run_stage_seeds_initial_draft_and_instruction(pipeline_test_database):
     _run_scenario(scenario, pipeline_test_database)
 
 
-def test_stage_result_carries_draft_on_failure(pipeline_test_database):
-    """门失败且预算耗尽：StageResult.draft 带回模型写过的最终草稿（Task 3 编辑器
-    续跑的起点）——非 None、非空，且写过的键原样保留；产物照旧绝不落库。"""
+def test_stage_result_saves_degraded_when_gates_exhausted(pipeline_test_database):
+    """门失败且预算耗尽（failure immunity B）：非空草稿不判死——兜底门再裁决仍挂 →
+    模型写过的键原样落库、⛔ blocking 标记随行（烂在明处，编辑器拿库内产物续跑）；
+    StageResult.draft=None（产物已落库，草稿无处安放）。空草稿仍走 failed 路径
+    （守卫测试锁）。"""
     cast = _load("cast.json")
 
     async def scenario(database) -> None:
@@ -929,12 +945,13 @@ def test_stage_result_carries_draft_on_failure(pipeline_test_database):
         result = await run_stage(database, "proj-fail-draft", "characters",
                                  {"novel_text": NOVEL_TEXT, "outline": _load("outline.json")},
                                  llm=llm, max_iterations=9)
-        assert result.ok is False
-        assert result.draft                               # 非 None、非空
-        assert result.draft["source"] == cast["source"]
-        assert result.draft["summary"] == cast["summary"]
-        assert result.draft["characters"] == _gate_fail_characters(cast)  # 模型写过的键原样带回
-        assert await pipeline_repository.get(database, "proj-fail-draft", "characters") is None
+        assert result.ok and result.degraded and result.draft is None
+        saved = await pipeline_repository.get(database, "proj-fail-draft", "characters")
+        assert saved["content"]["source"] == cast["source"]
+        assert saved["content"]["summary"] == cast["summary"]
+        assert saved["content"]["characters"] == _gate_fail_characters(cast)  # 模型写过的键原样入库
+        assert {f["rule"] for f in saved["findings"] if f["severity"] == "blocking"} \
+            == {"cast-structure"}
 
     _run_scenario(scenario, pipeline_test_database)
 
@@ -1046,9 +1063,10 @@ def test_run_stage_advisory_only_failure_passes_with_markers(pipeline_test_datab
     _run_scenario(scenario, pipeline_test_database)
 
 
-def test_run_stage_mixed_failure_still_fails(pipeline_test_database, monkeypatch):
-    """advisory + blocking 同挂 → 既有失败路径原样：ok=False、findings 带全部输出
-    （含 advisory 行，喂回修复）、产物未落库、draft 带回。"""
+def test_run_stage_mixed_failure_degrades_on_exhaustion(pipeline_test_database, monkeypatch):
+    """advisory + blocking 同挂 → 修复轮耗尽后兜底门再裁决仍挂 → degraded 落库
+    （failure immunity B）：兜底门对失败规则不分桶，全部以 blocking 标记入账
+    （修复预算已烧完，advisory 白名单不再有第三次宽免）；draft=None。"""
     output = "✗ 2 处违规：\n  params.episodes=5 与集数 3 不一致\n  第 2 集缺「雨戏」预警"
     rules = [{"id": "ep-fields", "ok": False, "detail": "params.episodes=5 与集数 3 不一致"},
              {"id": "risk-flag", "ok": False, "detail": "第 2 集缺「雨戏」预警"}]
@@ -1063,15 +1081,85 @@ def test_run_stage_mixed_failure_still_fails(pipeline_test_database, monkeypatch
         result = await run_stage(database, "proj-mixed", "outline",
                                  {"novel_text": NOVEL_TEXT}, llm=llm, on_event=events.append,
                                  max_iterations=2)
-        assert result.ok is False and result.iterations == 2
-        assert result.findings[0]["gate"] == "validate"
-        # findings 文本含全部输出（含 advisory 行）——喂回修复的口径不变
-        assert "params.episodes=5" in result.findings[0]["detail"]
-        assert "雨戏" in result.findings[0]["detail"]
-        assert await pipeline_repository.get(database, "proj-mixed", "outline") is None
-        # advisory 计数照报（=1），但门事件仍是失败
+        assert result.ok is True and result.degraded and result.draft is None
+        assert result.iterations == 2
+        # 兜底标记：失败规则全 blocking（不分 advisory 桶），detail 逐条点名
+        assert [f["rule"] for f in result.findings] == ["ep-fields", "risk-flag"]
+        assert all(f["severity"] == "blocking" and f["detail"] for f in result.findings)
+        saved = await pipeline_repository.get(database, "proj-mixed", "outline")
+        assert saved is not None
+        assert saved["content"]["episodes"] == good_outline["episodes"]
+        # 事件流：轮内门事件原样（advisory 计数=1）+ additive 的兜底门事件；收尾 degraded done
         assert [e for e in events if e["type"] == "gate"] == [
-            {"type": "gate", "ok": False, "round": 2, "advisory": 1}]
-        assert result.draft is not None   # 失败带回草稿（既有契约）
+            {"type": "gate", "ok": False, "round": 2, "advisory": 1},
+            {"type": "gate", "ok": False, "round": 2, "advisory": 1, "fallback": True}]
+        assert events[-1] == {"type": "done", "ok": True, "degraded": True, "blocking": 2}
+
+    _run_scenario(scenario, pipeline_test_database)
+
+
+# ---------------------------------------------------------------------------
+# failure immunity B（Task 3）：blocking 门修复轮耗尽后不判死——最终权威门对
+# 当前草稿再裁决：过 = 正常通过；不过 = degraded 落库（⛔ blocking 标记），运行继续。
+# （耗尽结局用确定性 monkeypatch 锁定，不依赖真门挂法；空草稿不兜底的守卫由
+#   既有 test_gate_failure_exhausts_iterations_without_saving /
+#   test_exhaustion_without_finish_still_reports_findings 回归证明。）
+# ---------------------------------------------------------------------------
+
+def _gate_stub(sequence):
+    """monkeypatch core.skill_executor._run_gate：按调用次序弹出 (ok, output, rules)，
+    弹尽后停在最后一项（兜底门与轮内门共用同一桩）。"""
+    calls = {"n": 0}
+    async def _fake(spec, workdir):
+        item = sequence[min(calls["n"], len(sequence) - 1)]
+        calls["n"] += 1
+        return item
+    return _fake, calls
+
+
+def test_blocking_exhaustion_saves_degraded(pipeline_test_database, monkeypatch):
+    good_outline = json.loads(FIXTURE_OUTLINE.read_text(encoding="utf-8"))
+    rules = [{"id": "refs", "ok": False, "detail": "引用了不存在的场景"},
+             {"id": "ep-fields", "ok": False, "detail": "第 2 集缺 goal"}]
+    stub, calls = _gate_stub([(False, "✗ 2 项未过", rules)])
+    monkeypatch.setattr(skill_executor, "_run_gate", stub)
+
+    async def scenario(database) -> None:
+        # 写一轮全量草稿后每轮 finish → 权威门每轮挂 → 耗尽（或后续任务的早停）→
+        # 兜底门对当前草稿再裁一次仍挂 → degraded 落库。不锁轮数/门数：
+        # 本测试钉的是「耗尽结局 = degraded 落库」，轮数预算由 Task 4 的测试专管。
+        turns = [item for _ in range(6) for item in (_write_rounds(good_outline, [9])[0],
+                                                     [{"name": "finish", "args": {}}])]
+        llm = ScriptedLLM(turns)
+        events: list[dict] = []
+        result = await run_stage(database, "proj-deg", "outline", {"novel_text": NOVEL_TEXT},
+                                 llm=llm, on_event=events.append)
+        assert result.ok and result.degraded and result.draft is None
+        assert [f["rule"] for f in result.findings if f.get("severity") == "blocking"] \
+            == ["refs", "ep-fields"]
+        done = [e for e in events if e["type"] == "done"][-1]
+        assert done == {"type": "done", "ok": True, "degraded": True, "blocking": 2}
+        saved = await pipeline_repository.get(database, "proj-deg", "outline")
+        assert saved["content"]["episodes"] == good_outline["episodes"]
+        assert {f["rule"] for f in saved["findings"] if f["severity"] == "blocking"} \
+            == {"refs", "ep-fields"}
+        assert saved["source_run_id"] == "stage:outline"
+
+    _run_scenario(scenario, pipeline_test_database)
+
+
+def test_gate_unavailable_falls_back_with_marker(pipeline_test_database, monkeypatch):
+    good_outline = json.loads(FIXTURE_OUTLINE.read_text(encoding="utf-8"))
+    stub, _ = _gate_stub([(False, "质量门超时（>120s），进程已终止", None)])
+    monkeypatch.setattr(skill_executor, "_run_gate", stub)
+
+    async def scenario(database) -> None:
+        turns = [item for _ in range(6) for item in (_write_rounds(good_outline, [9])[0],
+                                                     [{"name": "finish", "args": {}}])]
+        llm = ScriptedLLM(turns)
+        result = await run_stage(database, "proj-gu", "outline", {"novel_text": NOVEL_TEXT}, llm=llm)
+        assert result.ok and result.degraded
+        assert result.findings[0]["rule"] == "gate-unavailable"
+        assert result.findings[0]["severity"] == "blocking" and result.findings[0]["detail"]
 
     _run_scenario(scenario, pipeline_test_database)

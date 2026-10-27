@@ -5,11 +5,13 @@
   全文（vendored 文件即口径，零手抄漂移），LLM 只能调四个工具
   （write_draft / run_quality_gate / read_gate_report / finish）；
   finish 触发权威质量门（node 子进程），门过才经 pipeline_repository.save
-  落库（source_run_id="stage:<stage>"），迭代耗尽带 findings 退出、绝不落半成品。
+  落库（source_run_id="stage:<stage>"）。
 
 红线约束落点：
 - 门只经 node 子进程（唯一可执行文件），timeout 120s，每阶段一次 tempfile.mkdtemp；
-- 迭代上限默认 5，超限 = StageResult(ok=False, findings=...)，无脏数据；
+- 迭代上限默认 5；超限走失败免疫 B 兜底（2026-10-26 红线修订）：最终权威门对
+  当前草稿再裁决——过 = 正常通过；不过 = 带 ⛔ blocking 标记落库、StageResult
+  degraded=True 放行（运行继续）；空草稿无可兜才 StageResult(ok=False) 不落库；
   填表型（policy="chain_repair"：characters/art）按权威门运行次数锁 3 次——产全文
   + 至多两轮修复，被拒的组装轮不消耗门预算（finish 组装检查，fastfollow-2）；
 - 产物写入只有 pipeline_repository.save 一个口；
@@ -237,6 +239,7 @@ class StageResult:
     gate_log: list[str] = field(default_factory=list)
     findings: list[dict] = field(default_factory=list)   # [{"gate": ..., "detail": ...}]
     draft: dict | None = None   # 失败时的最终草稿（A：给编辑器续跑用）；成功路径 None
+    degraded: bool = False   # 兜底通过（B：耗尽后兜底门仍挂，带 ⛔ 标记落库放行）
 
 
 class LLMPort(Protocol):
@@ -443,6 +446,34 @@ def _finalize_draft(spec: dict, state: dict) -> dict:
     return content
 
 
+async def _pass_and_save(spec, state, db, project_id, stage, gate_findings):
+    """组装 + save_merge 整形 + 落库。返回 (content, 全量 findings)。
+    循环内干净通过 / advisory 过门与循环尾兜底共用；事件与 StageResult 由调用方发。"""
+    content = _finalize_draft(spec, state)
+    import_findings: list[dict] = []
+    if spec.get("save_merge"):
+        # data-contract「script 分批合并」：按集号并入已落库产物，批次外的
+        # 集保留——重跑/重试不吞既有集（outline 无 save_merge，latest-wins
+        # 整行替换）。合并整形唯一出口 pipeline_import.prepare，不另起灶。
+        existing = await pipeline_repository.get(db, project_id, spec["artifact"])
+        content, warnings = pipeline_import.prepare(
+            pipeline_artifacts.get(spec["artifact"]),
+            content, existing["content"] if existing else None,
+        )
+        # 合并告警入账（fastfollow-2，恢复 Task 5 被 `content, _` 丢掉的
+        # 第二返回值）：库内 existing 形状异常时的契约告警（整行替换等）
+        # 不再静默，落进 StageResult.findings 留档。ok=True 的 findings
+        # 也可以非空——runner 落 JSONB 已兼容。
+        import_findings = [{"gate": "import", "detail": w} for w in warnings]
+    # Task 3（gate severity tiers）：标记随产物落库（migrations/0008 findings 列）
+    # ——advisory 标记 + import 告警一起写入，latest-wins 刷新（新跑无标记即
+    # 清空，语义正确：标记属于最新产物）；导入/集级编辑走 save 缺省不触碰。
+    await pipeline_repository.save(db, project_id, spec["artifact"], content,
+                                   source_run_id=f"stage:{stage}",
+                                   findings=gate_findings + import_findings)
+    return content, gate_findings + import_findings
+
+
 # ---------------------------------------------------------------------------
 # 质量门
 # ---------------------------------------------------------------------------
@@ -638,7 +669,9 @@ async def run_stage(
     initial_draft: dict | None = None,
     user_instruction: str = "",
 ) -> StageResult:
-    """跑一个创作阶段：有界 agent loop，门过才落库，超限绝不落库。
+    """跑一个创作阶段：有界 agent loop，门过才落库；耗尽不判死（failure immunity
+    B）——兜底门对当前草稿再裁决，过 = 正常通过，不过 = 带 blocking 标记落库、
+    degraded 放行；空草稿无可兜才 ok=False 退出。
 
     一轮 = 一次 llm.complete() + 顺序执行该轮全部工具调用；finish 触发权威门
     （自检门只是预演），失败则 findings 留档、重置 finished 让模型继续修。
@@ -773,46 +806,50 @@ async def run_stage(
             # 这里只把结构化标记给调用方；Task 3 起随运行记录落库）。
             gate_findings = [{"gate": "validate", "rule": r["id"], "severity": "advisory",
                               "detail": r["detail"]} for r in advisory_failed]
-        content = _finalize_draft(spec, state)
-        import_findings: list[dict] = []
-        if spec.get("save_merge"):
-            # data-contract「script 分批合并」：按集号并入已落库产物，批次外的
-            # 集保留——重跑/重试不吞既有集（outline 无 save_merge，latest-wins
-            # 整行替换）。合并整形唯一出口 pipeline_import.prepare，不另起灶。
-            existing = await pipeline_repository.get(db, project_id, spec["artifact"])
-            content, warnings = pipeline_import.prepare(
-                pipeline_artifacts.get(spec["artifact"]),
-                content, existing["content"] if existing else None,
-            )
-            # 合并告警入账（fastfollow-2，恢复 Task 5 被 `content, _` 丢掉的
-            # 第二返回值）：库内 existing 形状异常时的契约告警（整行替换等）
-            # 不再静默，落进 StageResult.findings 留档。ok=True 的 findings
-            # 也可以非空——runner 落 JSONB 已兼容。
-            import_findings = [{"gate": "import", "detail": w} for w in warnings]
-        # Task 3（gate severity tiers）：标记随产物落库（migrations/0008 findings 列）
-        # ——advisory 标记 + import 告警一起写入，latest-wins 刷新（新跑无标记即
-        # 清空，语义正确：标记属于最新产物）；导入/集级编辑走 save 缺省不触碰。
-        await pipeline_repository.save(db, project_id, spec["artifact"],
-                                       content,
-                                       source_run_id=f"stage:{stage}",
-                                       findings=gate_findings + import_findings)
+        _content, all_findings = await _pass_and_save(spec, state, db, project_id,
+                                                      stage, gate_findings)
         on_event and on_event({"type": "done", "ok": True})
         # findings = advisory 标记 + import 告警；门全绿 = 空表（行为零变化）。
         # 成功即落库：草稿不带回（契约见 StageResult.draft）
         return StageResult(True, spec["artifact"], rnd, gate_log,
-                           gate_findings + import_findings, draft=None)
+                           all_findings, draft=None)
 
-    # 迭代耗尽：带失败报告退出，绝不落产物（iterations = 实际轮数，含被拒组装轮）
-    if not findings:
-        last = state["last_gate"]
-        findings = [{"gate": "validate",
-                     "detail": last["output"][-FINDING_TAIL:] if last
-                     else f"{rnd} 轮内未 finish，无质量门结果"}]
-    on_event and on_event({"type": "done", "ok": False})
-    # 迭代耗尽绝不落库，但模型写过的草稿要带回（failure-recovery Task 1）：
-    # StageResult.draft 是编辑器续跑的起点，别让烧掉的预算归零。
-    return StageResult(False, spec["artifact"], rnd, gate_log, findings,
-                       draft=state["draft"])
+    # 兜底（failure immunity B）：轮耗尽不判死——最终权威门对**当前草稿**再裁决。
+    if not state["draft"]:
+        # 既有失败路径逐字保留：无内容可兜，落空产物 = 脏数据
+        if not findings:
+            last = state["last_gate"]
+            findings = [{"gate": "validate",
+                         "detail": last["output"][-FINDING_TAIL:] if last
+                         else f"{rnd} 轮内未 finish，无质量门结果"}]
+        on_event and on_event({"type": "done", "ok": False})
+        # 迭代耗尽绝不落库，但模型写过的草稿要带回（failure-recovery Task 1）：
+        # StageResult.draft 是编辑器续跑的起点，别让烧掉的预算归零。
+        return StageResult(False, spec["artifact"], rnd, gate_log, findings,
+                           draft=state["draft"])
+    ok_f, output_f, rules_f = await box.run_gate()
+    gate_log.append(output_f[-GATE_TAIL:])
+    blocking_f, advisory_f = _grade_gate(rules_f, spec)
+    on_event and on_event({"type": "gate", "ok": ok_f, "round": rnd,
+                           "advisory": 0 if ok_f else len(advisory_f), "fallback": True})
+    if ok_f:
+        # 兜底门放行 = 正常通过：零标记、零 degraded（与干净通过同一条落库路）
+        _content, all_findings = await _pass_and_save(spec, state, db, project_id, stage, [])
+        on_event and on_event({"type": "done", "ok": True})
+        return StageResult(True, spec["artifact"], rnd, gate_log, all_findings, draft=None)
+    if rules_f:
+        gate_findings = [{"gate": "validate", "rule": r["id"], "severity": "blocking",
+                          "detail": r["detail"]} for r in rules_f if not r["ok"]]
+        blocking_n = len(gate_findings)
+    else:
+        gate_findings = [{"gate": "validate", "rule": "gate-unavailable", "severity": "blocking",
+                          "detail": output_f[-FINDING_TAIL:]}]
+        blocking_n = 1
+    # 兜底门仍挂：⛔ blocking 标记随产物落库，degraded 通过放行（运行继续）
+    _content, all_findings = await _pass_and_save(spec, state, db, project_id, stage, gate_findings)
+    on_event and on_event({"type": "done", "ok": True, "degraded": True, "blocking": blocking_n})
+    return StageResult(True, spec["artifact"], rnd, gate_log, all_findings,
+                       draft=None, degraded=True)
 
 
 # ---------------------------------------------------------------------------

@@ -4,8 +4,9 @@
 1. test_full_run_novel_to_storyboard —— 粘贴小说 → outline 过真门 → gated 停确认门
    （红线：不可跳过）→ approve → 六阶段全链 → done，六份产物全落库；
    /runs/{id}/stats 与 StageResult 权威账本同源（iterations/gate_passes/stages）。
-2. test_stage_failure_leaves_no_dirty_data —— staging 五轮门全挂 → failed@staging，
-   staging 无产物，上游 outline/script/characters/art 原样完好。
+2. test_stage_exhaustion_degrades_through_run_continues —— staging 五轮门全挂 →
+   耗尽不判死（failure immunity B）：兜底门对当前草稿再裁决仍挂 → ⛔ degraded
+   落库、运行继续走完 storyboard；空草稿才保留 failed 路径（skill_executor 守卫测试锁）。
 3. test_editor_proposal_apply_healthcheck_round —— 改稿脑三拍：提案（agent 只进
    pending，产物不动）→ 审批（HTTP apply 端点落稿）→ 自动体检（真门重查；通过）；
    再来一轮坏提案：门不过 → 回滚 → 产物保持审批前版本。
@@ -166,15 +167,16 @@ def test_full_run_novel_to_storyboard(pipeline_test_database, monkeypatch):
 
 
 # ---------------------------------------------------------------------------
-# 2. 失败阶段无脏数据：staging 五轮门全挂 → failed，staging 无产物、上游完好
+# 2. 兜底放行（failure immunity B）：staging 五轮门全挂 → 耗尽 → 兜底门再裁决
+#    仍挂 → ⛔ degraded 落库，运行继续走完 storyboard（空草稿才 failed，不落库）
 # ---------------------------------------------------------------------------
 
-def test_stage_failure_leaves_no_dirty_data(pipeline_test_database, monkeypatch):
+def test_stage_exhaustion_degrades_through_run_continues(pipeline_test_database, monkeypatch):
     outline_turns, script_turns, characters_turns, art_turns, staging_turns, storyboard_turns = \
         _six_stage_turns()
 
     # staging 病灶：出场人物表混进剧本没有的 C99 —— cast-complete 门必拦；
-    # 五轮都带同样的病灶 + finish（agent 型预算 5 轮，耗尽带 findings 退出）。
+    # 五轮都带同样的病灶 + finish（agent 型预算 5 轮，耗尽后兜底门对当前草稿再裁决）。
     broken = {**STAGING,
               "scenes": [{**STAGING["scenes"][0],
                           "cast": [*STAGING["scenes"][0]["cast"], {"id": "C99", "name": "幽灵角色"}]},
@@ -183,7 +185,7 @@ def test_stage_failure_leaves_no_dirty_data(pipeline_test_database, monkeypatch)
                            ("locations", broken["locations"]),
                            ("scenes", broken["scenes"])]) + [{"name": "finish", "args": {}}]
     llm = ScriptedLLM(outline_turns + script_turns + characters_turns + art_turns
-                      + [broken_round] * 5)
+                      + [broken_round] * 5 + storyboard_turns)
 
     async def scenario(database) -> None:
         store, runner = _make_runner(database, llm)
@@ -195,26 +197,34 @@ def test_stage_failure_leaves_no_dirty_data(pipeline_test_database, monkeypatch)
         await runner.wait_idle()
 
         state = await store.get(run["run_id"])
-        assert state["status"] == "failed" and state["stage"] == "staging"
-        assert state["findings"] and "C99" in state["findings"][0]["detail"]
-        # 失败阶段无产物；上游四份完好
-        assert await pipeline_repository.get(database, PROJECT, "staging") is None
-        for artifact_type in ("outline", "script", "characters", "art"):
-            row = await pipeline_repository.get(database, PROJECT, artifact_type)
-            assert row is not None and row["content"], f"{artifact_type} 上游产物不该被失败波及"
-        # 阶段账本：staging attempts=5（五轮全挂），前四阶段 done
+        # 耗尽不判死：staging degraded 放行，运行继续走到 storyboard 收尾
+        assert state["status"] == "done" and state["stage"] == "storyboard"
         ledger = state["stage_status"]
-        assert ledger["staging"]["attempts"] == 5 and ledger["staging"]["status"] == "failed"
-        for stage in ("outline", "script", "characters", "art"):
-            assert ledger[stage]["status"] == "done"
+        for stage in ("outline", "script", "characters", "art", "storyboard"):
+            assert ledger[stage]["status"] == "done" and "degraded" not in ledger[stage]
+        # staging 账本：⛔ blocking 标记留痕；gate_runs = 5 轮内门 + 1 兜底门
+        assert ledger["staging"]["status"] == "done" and ledger["staging"]["degraded"] is True
+        assert ledger["staging"]["attempts"] == 5 and ledger["staging"]["gate_runs"] == 6
+        marker = ledger["staging"]["findings"][0]
+        assert marker["gate"] == "validate" and marker["rule"] == "cast-complete"
+        assert marker["severity"] == "blocking" and "C99" in marker["detail"]
+        # 病灶产物带标记落库（degraded 语义：能跑，但烂在明处）；其余五份完好
+        saved = await pipeline_repository.get(database, PROJECT, "staging")
+        assert saved is not None
+        assert saved["content"]["scenes"][0]["cast"] == broken["scenes"][0]["cast"]
+        assert saved["findings"][0]["rule"] == "cast-complete"
+        for artifact_type in ("outline", "script", "characters", "art", "storyboard"):
+            row = await pipeline_repository.get(database, PROJECT, artifact_type)
+            assert row is not None and row["content"], f"{artifact_type} 产物缺失"
 
-        # failed 运行的 stats：gate_passes 只数过门阶段（4），失败阶段 ok=False
+        # done 运行的 stats：staging ok=True + degraded=True；gate_passes 含 degraded 阶段（6）
         monkeypatch.setattr(runs_module, "_store", store)
         monkeypatch.setattr(runs_module, "_runner", runner)
         monkeypatch.setattr(runs_module, "_broker", EventBroker())
         stats = await runs_module.run_stats(run["run_id"])
-        assert stats["status"] == "failed" and stats["gate_passes"] == 4
-        assert stats["stages"]["staging"] == {"attempts": 5, "gate_runs": 5, "ok": False}
+        assert stats["status"] == "done" and stats["gate_passes"] == 6
+        assert stats["stages"]["staging"] == {"attempts": 5, "gate_runs": 6, "ok": True,
+                                              "degraded": True}
 
     _run_scenario(scenario)
 

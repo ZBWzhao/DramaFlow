@@ -471,12 +471,16 @@ class PipelineRunner:
                     run_id, {"type": "failed", "stage": stage, "findings": findings}
                 )
                 return
-            await self.store.update_stage(run_id, stage, {
+            stage_patch = {
                 "status": "done" if result.ok else "failed",
                 "attempts": result.iterations,
-                "gate_runs": len(result.gate_log),   # 门执行次数（含自检/重跑），非通过数
+                "gate_runs": len(result.gate_log),   # 门执行次数（含自检/兜底/重跑），非通过数
                 "findings": list(result.findings),
-            })
+            }
+            # failure immunity B：degraded 放行（兜底门仍挂但落库）随阶段账本留痕
+            if getattr(result, "degraded", False):
+                stage_patch["degraded"] = True
+            await self.store.update_stage(run_id, stage, stage_patch)
             if not result.ok:
                 # 失败恢复（Task 2）：最终草稿落进 stage_drafts——编辑器始终拿到
                 # 最新一版（draft 为 None 时落 {}，等价清出空白起点）。种子先写、
